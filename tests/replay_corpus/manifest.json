@@ -1,0 +1,31 @@
+{
+  "schema_version": "llamapreview.replay/v1",
+  "current": [
+    "tests.unit.test_presentation_contract.PresentationRepresentationTests.test_blocking_finding_with_invalid_anchor_retains_decision",
+    "tests.unit.test_presentation_contract.PresentationRepresentationTests.test_unique_changed_region_anchor_is_restored",
+    "tests.unit.test_presentation_contract.PresentationRepresentationTests.test_literal_control_character_is_escaped_locally",
+    "tests.unit.test_presentation_contract.PresentationCompilationTests.test_required_ci_can_pair_with_supporting_exact_code_capability",
+    "tests.unit.test_presentation_contract.PresentationCompilationTests.test_clear_terminal_recompile_localizes_generation_ci_taint",
+    "tests.unit.test_presentation_contract.PresentationCompilationTests.test_bad_optional_diagram_and_nonlocal_inline_degrade_locally",
+    "tests.unit.test_presentation_contract.PresentationCompilationTests.test_valid_diagram_is_purpose_gated_and_rendered_once",
+    "tests.unit.test_presentation_contract.PresentationCompilationTests.test_exact_ci_diagnostic_retains_non_source_blocker",
+    "tests.unit.test_review_support_capabilities.ReviewSupportCapabilityTests.test_mermaid_renderer_closes_one_unambiguous_eof_block",
+    "tests.unit.test_v3_renderer_presentation.V3RendererPresentationTests.test_overlong_first_screen_never_ends_as_a_fragment",
+    "tests.unit.test_review_generation_v1.ReviewGenerationV1Tests.test_ordinary_path_is_one_free_deep_and_one_json_final",
+    "tests.unit.test_review_generation_v1.ReviewGenerationV1Tests.test_representation_failure_never_spends_a_third_model_call",
+    "tests.unit.test_review_generation_v1.ReviewGenerationV1Tests.test_incomplete_final_fails_closed_without_a_third_call",
+    "tests.unit.test_provider_dispatch_fence.TestProviderDispatchFence.test_fence_binds_exact_event_attempt_run_and_head_before_http",
+    "tests.unit.test_provider_dispatch_fence.TestProviderDispatchFence.test_double_persistence_failure_leaves_fence_and_blocks_redelivery",
+    "tests.unit.test_publication_recovery.PublicationTransactionTests.test_prepared_recovery_rechecks_then_dispatches_exactly_once",
+    "tests.unit.test_publication_recovery.PublicationTransactionTests.test_takeover_after_dispatch_fences_old_receipt_then_adopts_once",
+    "tests.unit.test_pipeline_lambda_dispatch.TestPipelineLambdaDispatch.test_live_phase_record_without_event_id_fails_closed"
+  ],
+  "sealed": [
+    "tests.unit.test_semantic_replays.SemanticReplayTests.test_causal_finding_survives_and_gets_one_inline",
+    "tests.unit.test_semantic_replays.SemanticReplayTests.test_open_producer_contract_cannot_compile_clear",
+    "tests.unit.test_semantic_replays.SemanticReplayTests.test_authority_finding_survives_inline",
+    "tests.unit.test_semantic_replays.SemanticReplayTests.test_clear_control_does_not_force_a_finding_or_inline",
+    "tests.unit.test_semantic_replays.SemanticReplayTests.test_second_clear_control_remains_concise_and_unforced",
+    "tests.unit.test_semantic_replays.SemanticReplayTests.test_contradicted_rename_hypothesis_stays_dropped"
+  ]
+}

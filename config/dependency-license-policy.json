@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "packages": {
+    "certifi": {
+      "version": "2026.6.17",
+      "evidence_contains": "MPL-2.0",
+      "sbom_expression": "MPL-2.0",
+      "required_license_basenames": ["LICENSE"],
+      "review": "file-level copyleft; exact wheel license retained"
+    },
+    "cffi": {
+      "version": "2.1.0",
+      "evidence_contains": "MIT-0",
+      "sbom_expression": "MIT-0"
+    },
+    "charset-normalizer": {
+      "version": "3.4.9",
+      "evidence_contains": "MIT",
+      "sbom_expression": "MIT"
+    },
+    "cryptography": {
+      "version": "50.0.0",
+      "evidence_contains": "Apache-2.0 OR BSD-3-Clause",
+      "sbom_expression": "Apache-2.0 OR BSD-3-Clause"
+    },
+    "idna": {
+      "version": "3.18",
+      "evidence_contains": "BSD-3-Clause",
+      "sbom_expression": "BSD-3-Clause"
+    },
+    "llama-github": {
+      "version": "0.4.5",
+      "evidence_contains": "Apache-2.0",
+      "sbom_expression": "Apache-2.0"
+    },
+    "pycparser": {
+      "version": "3.0",
+      "evidence_contains": "BSD-3-Clause",
+      "sbom_expression": "BSD-3-Clause"
+    },
+    "pygithub": {
+      "version": "2.9.1",
+      "evidence_contains": "GNU Library or Lesser General Public License (LGPL)",
+      "sbom_expression": "LGPL-3.0-or-later",
+      "required_license_basenames": ["COPYING", "COPYING.LESSER"],
+      "review": "copyleft dependency; version confirmed by wheel source headers and exact license files retained"
+    },
+    "pyjwt": {
+      "version": "2.13.0",
+      "evidence_contains": "MIT",
+      "sbom_expression": "MIT"
+    },
+    "pynacl": {
+      "version": "1.6.2",
+      "evidence_contains": "Apache-2.0",
+      "sbom_expression": "Apache-2.0",
+      "required_license_basenames": ["LICENSE", "LICENSE.libsodium.txt"],
+      "review": "bundled libsodium license file retained"
+    },
+    "python-dateutil": {
+      "version": "2.9.0.post0",
+      "evidence_contains": "Dual License",
+      "sbom_expression": "Apache-2.0 OR BSD-3-Clause"
+    },
+    "requests": {
+      "version": "2.33.0",
+      "evidence_contains": "Apache-2.0",
+      "sbom_expression": "Apache-2.0",
+      "required_license_basenames": ["LICENSE", "NOTICE"]
+    },
+    "six": {
+      "version": "1.17.0",
+      "evidence_contains": "MIT",
+      "sbom_expression": "MIT"
+    },
+    "typing-extensions": {
+      "version": "4.16.0",
+      "evidence_contains": "PSF-2.0",
+      "sbom_expression": "PSF-2.0"
+    },
+    "urllib3": {
+      "version": "2.7.0",
+      "evidence_contains": "MIT",
+      "sbom_expression": "MIT"
+    }
+  }
+}

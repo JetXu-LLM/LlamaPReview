@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a reproducible defect in a supported LlamaPReview release.
+title: "[Bug]: "
+labels: ["bug", "needs reproduction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve LlamaPReview. Use only public, synthetic, or safely redacted evidence.
+
+        Do not paste secrets, private source, provider payloads, installation IDs, private logs, or production state. Report vulnerabilities through private vulnerability reporting instead.
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Deployment mode
+      options:
+        - Official hosted service
+        - AWS self-hosted
+        - Local tests or tooling
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Release or commit
+      description: Give the exact tag, release, or commit when known.
+      placeholder: v0.1.0 or a full commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observable defect and why it matters.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Use a public repository/PR URL or a synthetic or redacted fixture.
+      placeholder: |
+        1. Configure ...
+        2. Send or run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Public or redacted diagnostics
+      description: Include only the smallest safe output needed to reproduce the problem.
+      render: text
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I used only public, synthetic, or safely redacted evidence.
+          required: true
+        - label: I did not include secrets, private source, raw provider payloads, installation IDs, private logs, or production state.
+          required: true

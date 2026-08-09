@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Build, release, and local reports
+build/
+dist/
+artifacts/
+*.zip
+*.whl
+*.egg-info/
+coverage.xml
+junit.xml
+
+# Terraform/operator material must stay outside the public repository
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.auto.tfvars
+crash.log
+.aws_sync/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*~

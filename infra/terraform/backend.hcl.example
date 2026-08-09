@@ -1,0 +1,7 @@
+# Create this bucket outside this stack with versioning, encryption, public
+# access blocking, and access restricted to your operators. Replace every value.
+bucket       = "replace-with-private-state-bucket"
+key          = "llamapreview/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true

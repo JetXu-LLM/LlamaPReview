@@ -1,0 +1,23 @@
+# Declarative label inventory. Maintainers apply it through the GitHub API;
+# no workflow mutates repository labels automatically.
+- name: bug
+  color: "d73a4a"
+  description: Reproducible incorrect behavior.
+- name: enhancement
+  color: "a2eeef"
+  description: Focused improvement to an existing product capability.
+- name: documentation
+  color: "0075ca"
+  description: Public documentation or examples.
+- name: review-quality
+  color: "5319e7"
+  description: Review judgment, evidence, severity, placement, or presentation quality.
+- name: good first issue
+  color: "7057ff"
+  description: Small, well-scoped contribution with clear acceptance evidence.
+- name: help wanted
+  color: "008672"
+  description: Maintainers welcome focused community help.
+- name: needs reproduction
+  color: "fbca04"
+  description: More public, synthetic, or redacted evidence is needed.

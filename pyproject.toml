@@ -1,0 +1,15 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+# The extracted v56 source intentionally contains compatibility re-exports and
+# test bootstrap imports. Keep the launch gate on correctness-class diagnostics
+# without forcing cosmetic runtime churn during source convergence.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

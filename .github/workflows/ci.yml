@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - name: Install exact CI tools
+        run: python -m pip install --disable-pip-version-check --no-input -r requirements-ci.txt
+      - name: Compile and lint
+        run: make compile lint
+      - name: Run unit and replay suites
+        run: make test replay
+
+  public-contract:
+    name: Public and workflow boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out complete public history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - name: Install exact CI tools
+        run: python -m pip install --disable-pip-version-check --no-input -r requirements-ci.txt
+      - name: Check formatting and public boundaries
+        run: make format-check manifest public-contract scan-source
+      - name: Audit the locked Layer dependencies
+        run: make audit-dependencies
+
+  release-artifacts:
+    name: Deterministic release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Lambda Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - name: Install exact CI tools
+        run: python -m pip install --disable-pip-version-check --no-input -r requirements-ci.txt
+      - name: Download the hash-bound public SDK wheel
+        shell: bash
+        run: |
+          sdk_dir="$(mktemp -d)"
+          sdk_version="$(python scripts/lambda_manifest.py get sdk version)"
+          sdk_filename="$(python scripts/lambda_manifest.py get sdk wheel_filename)"
+          python -m pip download --disable-pip-version-check --no-input --no-deps \
+            --only-binary=:all: "llama-github==${sdk_version}" --dest "${sdk_dir}"
+          test -f "${sdk_dir}/${sdk_filename}"
+          printf 'SDK_WHEEL=%s\n' "${sdk_dir}/${sdk_filename}" >> "${GITHUB_ENV}"
+      - name: Build twice from the exact commit
+        shell: bash
+        run: |
+          python scripts/build_release_artifacts.py --output-dir dist/build-a \
+            --sdk-wheel "${SDK_WHEEL}" --repository "${GITHUB_REPOSITORY}" --commit "${GITHUB_SHA}"
+          python scripts/build_release_artifacts.py --output-dir dist/build-b \
+            --sdk-wheel "${SDK_WHEEL}" --repository "${GITHUB_REPOSITORY}" --commit "${GITHUB_SHA}"
+      - name: Verify hashes, contents, licenses, SBOM, and reproducibility
+        run: >-
+          python scripts/verify_release_artifacts.py dist/build-a
+          --compare dist/build-b
+          --expected-repository "${GITHUB_REPOSITORY}"
+          --expected-commit "${GITHUB_SHA}"
+      - name: Scan generated artifacts without printing matched values
+        run: python scripts/scan_secrets.py --artifacts dist/build-a --artifacts dist/build-b
+      - name: Verify Layer imports on Lambda-compatible Linux
+        run: python scripts/verify_pipeline_layer_runtime.py dist/build-a/LlamaPReviewPipelineDependencies.zip
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          license-check: true
+          deny-licenses: AGPL-1.0-only, AGPL-1.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later

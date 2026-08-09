@@ -1,0 +1,15 @@
+* text=auto eol=lf
+
+*.md text eol=lf
+*.py text eol=lf
+*.svg text eol=lf
+*.tf text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+*.zip binary
+*.whl binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary

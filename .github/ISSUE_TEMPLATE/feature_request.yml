@@ -1,0 +1,50 @@
+name: Focused feature request
+description: Propose the smallest useful improvement for a concrete user problem.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use Discussions for open-ended ideas. This form is for a focused change with a concrete current use case. Do not include private source, secrets, provider payloads, installation IDs, or private logs.
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What cannot a user or maintainer do today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Smallest useful outcome
+      description: Describe observable success without prescribing unnecessary architecture.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Owning area
+      options:
+        - Webhook and admission
+        - Retrieval and evidence
+        - Engineering judgment
+        - Final presentation and projection
+        - Provider transport and accounting
+        - Persistence and publication
+        - AWS self-hosting
+        - Development, documentation, or community
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Public use case or evidence
+      description: Link public evidence or describe a synthetic/redacted example.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Existing alternatives
+      description: What workaround or existing capability did you try?

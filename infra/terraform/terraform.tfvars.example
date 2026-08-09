@@ -1,0 +1,39 @@
+aws_region  = "us-east-1"
+name_prefix = "llamapreview"
+
+# Download an official release's three artifacts and verify its manifest before
+# replacing these paths and hashes. Terraform independently checks both forms.
+release_artifacts = {
+  webhook = {
+    path          = "/absolute/path/to/LlamaPReviewWebhookHandler.zip"
+    sha256_hex    = "0000000000000000000000000000000000000000000000000000000000000000"
+    sha256_base64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  }
+  pipeline = {
+    path          = "/absolute/path/to/LlamaPReviewPipeline.zip"
+    sha256_hex    = "0000000000000000000000000000000000000000000000000000000000000000"
+    sha256_base64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  }
+  layer = {
+    path          = "/absolute/path/to/LlamaPReviewPipelineDependencies.zip"
+    sha256_hex    = "0000000000000000000000000000000000000000000000000000000000000000"
+    sha256_base64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  }
+}
+
+github_app_id         = "123456"
+github_private_key    = "replace-with-the-complete-PEM-value"
+github_webhook_secret = "replace-with-a-long-random-webhook-secret"
+deepseek_api_key      = "replace-with-your-provider-key"
+
+# Safe first apply: no stream consumption and no GitHub product writes.
+pipeline_stream_enabled = false
+pipeline_dry_run        = true
+provider_trace_mode     = "summary"
+
+# Optional: connect alarms to one or more SNS topics you operate.
+alarm_actions = []
+
+tags = {
+  Environment = "self-hosted"
+}

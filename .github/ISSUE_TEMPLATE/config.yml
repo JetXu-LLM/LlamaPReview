@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Protect private data
+    url: https://github.com/JetXu-LLM/LlamaPReview/blob/main/SECURITY.md
+    about: Never post secrets, private source, provider payloads, installation IDs, or private logs.
+  - name: Questions and help
+    url: https://github.com/JetXu-LLM/LlamaPReview/discussions/categories/q-a
+    about: Ask setup, configuration, and self-hosting questions in Discussions.
+  - name: Open-ended ideas
+    url: https://github.com/JetXu-LLM/LlamaPReview/discussions/categories/ideas
+    about: Explore ideas that are not yet focused feature requests.
+  - name: Security vulnerability
+    url: https://github.com/JetXu-LLM/LlamaPReview/security/advisories/new
+    about: Report vulnerabilities privately. Do not disclose sensitive details in an issue.

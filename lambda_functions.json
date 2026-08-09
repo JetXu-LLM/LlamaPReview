@@ -1,0 +1,73 @@
+{
+  "schema_version": "llamapreview-public-build-v1",
+  "functions": {
+    "LlamaPReviewWebhookHandler": {
+      "artifact_name": "LlamaPReviewWebhookHandler.zip",
+      "source_dir": "lambdas/LlamaPReviewWebhookHandler",
+      "include_globs": [
+        "*.py",
+        "**/*.py"
+      ],
+      "handler": "lambda_function.lambda_handler",
+      "runtime": "python3.12",
+      "architecture": "x86_64",
+      "timeout": 180,
+      "memory_size": 128,
+      "package_layout": "flat"
+    },
+    "LlamaPReviewPipeline": {
+      "artifact_name": "LlamaPReviewPipeline.zip",
+      "source_dir": "lambdas/LlamaPReviewPipeline",
+      "include_globs": [
+        "*.py",
+        "**/*.py"
+      ],
+      "handler": "LlamaPReviewPipeline.lambda_function.lambda_handler",
+      "runtime": "python3.12",
+      "architecture": "x86_64",
+      "timeout": 900,
+      "memory_size": 600,
+      "package_layout": "package_dir"
+    }
+  },
+  "layers": {
+    "LlamaPReviewPipelineDependencies": {
+      "artifact_name": "LlamaPReviewPipelineDependencies.zip",
+      "runtime": "python3.12",
+      "architecture": "x86_64",
+      "platform": "manylinux2014_x86_64",
+      "implementation": "cp",
+      "abi": "cp312",
+      "requirements_lock": "lambdas/LlamaPReviewPipeline/requirements-layer.lock",
+      "requirements_lock_sha256": "b446f0b4ba19c1a6971592f1bc246c9c3a829d9e2041dfb530791c060b51e798",
+      "wheel_project": "llama-github",
+      "wheel_version": "0.4.5",
+      "wheel_filename": "llama_github-0.4.5-py3-none-any.whl",
+      "wheel_sha256": "20eec18cdad00689ee0ce07eb7645a6893c3de279c7beaaccf24ce4ea9c03092",
+      "max_unzipped_bytes": 52428800,
+      "functions": [
+        "LlamaPReviewPipeline"
+      ],
+      "forbidden_distributions": [
+        "aiohttp",
+        "ipython",
+        "langchain",
+        "langchain-core",
+        "langchain-mistralai",
+        "langchain-openai",
+        "langchain-text-splitters",
+        "numpy",
+        "pydantic",
+        "tokenizers",
+        "torch",
+        "transformers"
+      ]
+    }
+  },
+  "sdk_release": {
+    "project": "llama-github",
+    "version": "0.4.5",
+    "wheel_filename": "llama_github-0.4.5-py3-none-any.whl",
+    "wheel_sha256": "20eec18cdad00689ee0ce07eb7645a6893c3de279c7beaaccf24ce4ea9c03092"
+  }
+}

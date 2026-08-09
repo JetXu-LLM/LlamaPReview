@@ -1,0 +1,65 @@
+name: Review-quality report
+description: Report a missed issue, false positive, severity, placement, Markdown, or Mermaid problem.
+title: "[Review quality]: "
+labels: ["review-quality", "needs reproduction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Review-quality reports need inspectable evidence. Link a public pull request or provide a synthetic or carefully redacted fixture. Never paste private source, raw provider payloads, installation IDs, or private logs.
+  - type: dropdown
+    id: quality_area
+    attributes:
+      label: What kind of problem is this?
+      options:
+        - Missed material issue
+        - False positive
+        - Severity or merge-posture mismatch
+        - Inline placement or degradation
+        - Markdown or Mermaid output
+        - Duplicate, missing, or wrong-head publication
+        - Other review-quality problem
+    validations:
+      required: true
+  - type: input
+    id: evidence
+    attributes:
+      label: Public PR or fixture
+      description: Link the public evidence or identify the synthetic/redacted fixture.
+    validations:
+      required: true
+  - type: input
+    id: exact_head
+    attributes:
+      label: Exact head commit
+      description: Provide the full head SHA when the report concerns a pull request.
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed review
+      description: Quote or summarize only the smallest public or redacted output needed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should the review have done?
+      description: Explain the desired judgment, evidence, placement, or presentation.
+    validations:
+      required: true
+  - type: textarea
+    id: materiality
+    attributes:
+      label: Why is the difference material?
+      description: Describe the maintainer decision or trust impact, not just wording preference.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: This report contains only public, synthetic, or safely redacted evidence.
+          required: true
+        - label: This report contains no secrets, private source, raw provider payloads, installation IDs, or private logs.
+          required: true

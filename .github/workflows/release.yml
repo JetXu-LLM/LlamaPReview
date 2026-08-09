@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: github.repository == 'JetXu-LLM/LlamaPReview'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out exact tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Lambda Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - name: Install exact CI tools
+        run: python -m pip install --disable-pip-version-check --no-input -r requirements-ci.txt
+      - name: Require a semantic tag on main
+        shell: bash
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
+          python -c 'import re,sys; sys.exit(not re.fullmatch(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?", sys.argv[1]))' "${GITHUB_REF_NAME}"
+      - name: Verify source before packaging
+        run: make verify audit-dependencies
+      - name: Download the hash-bound public SDK wheel
+        shell: bash
+        run: |
+          sdk_dir="$(mktemp -d)"
+          sdk_version="$(python scripts/lambda_manifest.py get sdk version)"
+          sdk_filename="$(python scripts/lambda_manifest.py get sdk wheel_filename)"
+          python -m pip download --disable-pip-version-check --no-input --no-deps \
+            --only-binary=:all: "llama-github==${sdk_version}" --dest "${sdk_dir}"
+          test -f "${sdk_dir}/${sdk_filename}"
+          printf 'SDK_WHEEL=%s\n' "${sdk_dir}/${sdk_filename}" >> "${GITHUB_ENV}"
+      - name: Build the tagged release twice
+        shell: bash
+        run: |
+          python scripts/build_release_artifacts.py --output-dir dist/release \
+            --sdk-wheel "${SDK_WHEEL}" --repository "${GITHUB_REPOSITORY}" \
+            --commit "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+          python scripts/build_release_artifacts.py --output-dir dist/release-check \
+            --sdk-wheel "${SDK_WHEEL}" --repository "${GITHUB_REPOSITORY}" \
+            --commit "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+      - name: Verify release identity and deterministic hashes
+        run: >-
+          python scripts/verify_release_artifacts.py dist/release
+          --compare dist/release-check
+          --expected-repository "${GITHUB_REPOSITORY}"
+          --expected-commit "${GITHUB_SHA}"
+          --expected-tag "${GITHUB_REF_NAME}"
+      - name: Scan release artifacts
+        run: python scripts/scan_secrets.py --current --history --artifacts dist/release
+      - name: Verify Layer imports on Lambda-compatible Linux
+        run: python scripts/verify_pipeline_layer_runtime.py dist/release/LlamaPReviewPipelineDependencies.zip
+      - name: Attest every release asset
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: dist/release/*
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: >-
+          gh release create "${GITHUB_REF_NAME}" dist/release/*
+          --verify-tag --generate-notes --title "LlamaPReview ${GITHUB_REF_NAME}"
