@@ -15,11 +15,13 @@ Choose an exact semantic tag and obtain its commit before trusting any asset:
 ```bash
 tag=v0.1.0
 repo=JetXu-LLM/LlamaPReview
-commit="$(gh api "repos/${repo}/git/ref/tags/${tag}" --jq .object.sha)"
+commit="$(gh api "repos/${repo}/commits/${tag}" --jq .sha)"
 test "${#commit}" -eq 40
 ```
 
-The initial releases use lightweight tags. If a later tag is annotated, resolve its referenced commit rather than treating the tag-object SHA as the source commit.
+This works for both annotated and lightweight tags. Do not treat an annotated
+tag-object SHA as the source commit; `v0.1.0` is annotated and resolves to its
+referenced commit through the command above.
 
 Download the exact release into a new directory:
 
