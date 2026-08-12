@@ -51,7 +51,6 @@ ALLOWED_ACTIONS = {
     "actions/setup-python",
     "github/codeql-action/analyze",
     "github/codeql-action/init",
-    "hashicorp/setup-terraform",
 }
 
 
