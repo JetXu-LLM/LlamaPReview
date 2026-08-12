@@ -66,18 +66,18 @@ run "safe_reference_topology" {
     release_artifacts = {
       webhook = {
         path          = "tests/fixtures/mock-artifact.txt"
-        sha256_hex    = "4f2bb102766ce78912ffb8242506723583375c24b919ea6eb28b33138e24bfc2"
-        sha256_base64 = "TyuxAnZs54kS/7gkJQZyNYM3XCS5GepusoszE44kv8I="
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
       }
       pipeline = {
         path          = "tests/fixtures/mock-artifact.txt"
-        sha256_hex    = "4f2bb102766ce78912ffb8242506723583375c24b919ea6eb28b33138e24bfc2"
-        sha256_base64 = "TyuxAnZs54kS/7gkJQZyNYM3XCS5GepusoszE44kv8I="
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
       }
       layer = {
         path          = "tests/fixtures/mock-artifact.txt"
-        sha256_hex    = "4f2bb102766ce78912ffb8242506723583375c24b919ea6eb28b33138e24bfc2"
-        sha256_base64 = "TyuxAnZs54kS/7gkJQZyNYM3XCS5GepusoszE44kv8I="
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
       }
     }
 
@@ -146,18 +146,18 @@ run "explicit_activation" {
     release_artifacts = {
       webhook = {
         path          = "tests/fixtures/mock-artifact.txt"
-        sha256_hex    = "4f2bb102766ce78912ffb8242506723583375c24b919ea6eb28b33138e24bfc2"
-        sha256_base64 = "TyuxAnZs54kS/7gkJQZyNYM3XCS5GepusoszE44kv8I="
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
       }
       pipeline = {
         path          = "tests/fixtures/mock-artifact.txt"
-        sha256_hex    = "4f2bb102766ce78912ffb8242506723583375c24b919ea6eb28b33138e24bfc2"
-        sha256_base64 = "TyuxAnZs54kS/7gkJQZyNYM3XCS5GepusoszE44kv8I="
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
       }
       layer = {
         path          = "tests/fixtures/mock-artifact.txt"
-        sha256_hex    = "4f2bb102766ce78912ffb8242506723583375c24b919ea6eb28b33138e24bfc2"
-        sha256_base64 = "TyuxAnZs54kS/7gkJQZyNYM3XCS5GepusoszE44kv8I="
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
       }
     }
 

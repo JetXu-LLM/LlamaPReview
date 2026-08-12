@@ -56,8 +56,31 @@ jobs:
           cache-dependency-path: requirements-ci.txt
       - name: Install exact CI tools
         run: python -m pip install --disable-pip-version-check --no-input -r requirements-ci.txt
+      - name: Install checksum-verified Terraform
+        shell: bash
+        run: |
+          terraform_dir="$(mktemp -d)"
+          curl --fail --silent --show-error --location \
+            --output "${terraform_dir}/terraform.zip" \
+            https://releases.hashicorp.com/terraform/1.10.5/terraform_1.10.5_linux_amd64.zip
+          curl --fail --silent --show-error --location \
+            --output "${terraform_dir}/SHA256SUMS" \
+            https://releases.hashicorp.com/terraform/1.10.5/terraform_1.10.5_SHA256SUMS
+          expected="$(awk '$2 == "terraform_1.10.5_linux_amd64.zip" { print $1 }' "${terraform_dir}/SHA256SUMS")"
+          actual="$(sha256sum "${terraform_dir}/terraform.zip" | awk '{ print $1 }')"
+          test -n "${expected}"
+          test "${actual}" = "${expected}"
+          unzip -q "${terraform_dir}/terraform.zip" -d "${terraform_dir}"
+          printf '%s\n' "${terraform_dir}" >> "${GITHUB_PATH}"
       - name: Check formatting and public boundaries
         run: make format-check manifest public-contract scan-source
+      - name: Validate the generic AWS reference
+        working-directory: infra/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate -no-color
+          terraform test -no-color
       - name: Audit the locked Layer dependencies
         run: make audit-dependencies
 
