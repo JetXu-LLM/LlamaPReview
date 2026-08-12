@@ -2,7 +2,7 @@
 
 ## Official hosted service
 
-The official GitHub App reviews supported pull request events from public repositories. It runs the source and immutable release artifacts published from this repository.
+The official GitHub App reviews supported pull request events from public repositories. Its running Webhook, Pipeline, and dependency bytes are independently verified against the exact public `v0.1.0` release from this repository.
 
 - Installation: [GitHub App](https://github.com/apps/llamapreview)
 - Product site: [jetxu-llm.github.io/LlamaPReview-site](https://jetxu-llm.github.io/LlamaPReview-site/)

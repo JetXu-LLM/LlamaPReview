@@ -1,6 +1,6 @@
 # Privacy and data retention
 
-This document distinguishes the official hosted service from a self-hosted deployment. It describes observed production configuration as of **August 10, 2026**; a later release may change it and should update this page.
+This document distinguishes the official hosted service from a self-hosted deployment. It describes observed production configuration as of **August 12, 2026**; a later release may change it and should update this page.
 
 ## Hosted repository boundary
 
