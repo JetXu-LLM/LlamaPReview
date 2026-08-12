@@ -75,8 +75,8 @@ def verify(layer_zip: Path) -> dict:
                 for dist in metadata.distributions(path=[str(layer_path)])
                 if dist.metadata.get("Name")
             }
-            if distributions.get("llama-github") != "0.4.5":
-                raise ValueError("Layer does not contain llama-github==0.4.5")
+            if distributions.get("llama-github") != "0.4.6":
+                raise ValueError("Layer does not contain llama-github==0.4.6")
             return {
                 "python": platform.python_version(),
                 "platform": platform.platform(),

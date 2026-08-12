@@ -29,7 +29,7 @@
       "sbom_expression": "BSD-3-Clause"
     },
     "llama-github": {
-      "version": "0.4.5",
+      "version": "0.4.6",
       "evidence_contains": "Apache-2.0",
       "sbom_expression": "Apache-2.0"
     },

@@ -78,6 +78,7 @@ def review(
     unknowns=None,
     scope=None,
     diagram=None,
+    ci_state=None,
 ):
     return {
         "visible_verdict": verdict,
@@ -90,6 +91,9 @@ def review(
         "material_unknowns": unknowns or [],
         "evidence_scope": scope or [],
         "diagram": diagram,
+        "rendering_plan": (
+            {"ci_public_state": ci_state} if ci_state is not None else {}
+        ),
     }
 
 
@@ -316,7 +320,7 @@ class V3RendererPresentationTests(unittest.TestCase):
         self.assertIn(scope[0]["description"], fallback)
         self.assertNotIn(oversized, fallback)
 
-    def test_clear_green_ci_phrases_are_never_first_screen_proof(self):
+    def test_structured_red_ci_overrides_model_authored_green_prose(self):
         phrases = (
             "All checks passed",
             "CI checks pass",
@@ -326,10 +330,16 @@ class V3RendererPresentationTests(unittest.TestCase):
             "The build is green",
         )
         scope = [{"description": "Reviewed the changed producer and caller."}]
+        ci_state = {
+            "posture": "unresolved",
+            "retrieval_outcome": "success",
+            "counts": {"failure": 1},
+        }
         for phrase in phrases:
             base = review(
                 public_sentence=f"No review blocker found. {phrase}.",
                 scope=scope,
+                ci_state=ci_state,
             )
             rendered = render_v3_markdown(base)
             with self.subTest(phrase=phrase, case="no_failed_ci_finding"):
@@ -341,6 +351,7 @@ class V3RendererPresentationTests(unittest.TestCase):
             backed = review(
                 public_sentence=f"No review blocker found. {phrase}.",
                 findings=[retained],
+                ci_state=ci_state,
             )
             backed["ci_failed_evidence_refs"] = ["ci:check_run:42"]
             rendered = render_v3_markdown(backed)
@@ -355,13 +366,14 @@ class V3RendererPresentationTests(unittest.TestCase):
                 public_sentence=f"No review blocker found. {phrase}.",
                 findings=[retained],
                 scope=scope,
+                ci_state=ci_state,
             )
             unrelated["ci_failed_evidence_refs"] = ["ci:check_run:99"]
             rendered = render_v3_markdown(unrelated)
             with self.subTest(phrase=phrase, case="different_failed_check"):
                 self.assertNotIn(phrase, rendered.split("<details>", 1)[0])
 
-    def test_clear_trailing_green_ci_clause_preserves_causal_proof(self):
+    def test_resolved_ci_does_not_trigger_prose_classification(self):
         scope = [{"description": "Read the complete PR-head package file."}]
         rendered = render_v3_markdown(
             review(
@@ -375,15 +387,11 @@ class V3RendererPresentationTests(unittest.TestCase):
         )
         first_screen = rendered.split("<details>", 1)[0]
 
-        self.assertIn(
-            "Lockfile-only minor bump to tailwind-merge 3.6.0; "
-            "manifest-compatible, no API changes.",
-            first_screen,
-        )
-        self.assertNotIn("CI checks pass", first_screen)
+        self.assertIn("Lockfile-only minor bump", first_screen)
+        self.assertIn("CI checks pass", first_screen)
         self.assertNotIn(scope[0]["description"], first_screen)
 
-    def test_clear_embedded_green_ci_clause_preserves_independent_causal_proof(self):
+    def test_resolved_ci_preserves_bounded_model_proof_without_regex_rewrite(self):
         cases = (
             (
                 "Routine dev-only dependency bump fixes a security advisory, "
@@ -418,10 +426,6 @@ class V3RendererPresentationTests(unittest.TestCase):
                 ).split("<details>", 1)[0]
                 for phrase in retained:
                     self.assertIn(phrase, first_screen)
-                self.assertNotRegex(
-                    first_screen.casefold(),
-                    r"\b(?:ci|checks?)\b.*\b(?:pass|green)",
-                )
                 self.assertNotIn(scope[0]["description"], first_screen)
 
     def test_template_artifact_fixtures_fall_back_without_touching_clean_copy(self):

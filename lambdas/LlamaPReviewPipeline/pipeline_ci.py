@@ -254,6 +254,21 @@ def with_current_ci_snapshot(
         .replace(_CURRENT_CI_END, "")
         .rstrip()
     )
+    # ``format_pr_details`` historically rendered the same CI observation as
+    # human Markdown. Once the typed exact-head snapshot exists, keep one
+    # model-facing truth surface so a stale/trimmed legacy section cannot
+    # contradict the structured state.
+    retained_lines: list[str] = []
+    skipping_legacy_ci = False
+    for line in base.splitlines():
+        if line.strip() == "## CI/CD Results":
+            skipping_legacy_ci = True
+            continue
+        if skipping_legacy_ci and line.startswith("## "):
+            skipping_legacy_ci = False
+        if not skipping_legacy_ci:
+            retained_lines.append(line)
+    base = "\n".join(retained_lines).rstrip()
     return (
         f"{base}\n\n{_CURRENT_CI_START}\n"
         f"{payload}\n{_CURRENT_CI_END}"

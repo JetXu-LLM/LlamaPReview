@@ -77,6 +77,46 @@ def _catalog_ref_has_same_path_coverage(
     )
 
 
+def _catalog_ref_has_exact_representation(
+    refs: Iterable[str],
+    *,
+    file_path: str,
+    requirement: str,
+    catalog: Dict[str, Dict[str, Any]],
+) -> bool:
+    """Require typed source provenance for representation-sensitive claims.
+
+    The model owns whether a finding depends on literal representation.  This
+    capability only checks the declared requirement against exact-head source
+    provenance; it never guesses from filenames, languages, or prose.
+    """
+
+    target = normalize_repo_path(file_path)
+    for ref in refs:
+        entry = catalog.get(ref) or {}
+        if not entry_supports_claim(entry) or target not in entry_paths(entry):
+            continue
+        coverage = text(entry.get("coverage_type"))
+        source_type = text(entry.get("source_type"))
+        observed_state = text(entry.get("observed_state"))
+        if requirement == "exact_postimage":
+            if source_type == "diff" and coverage == "changed_region":
+                return True
+            if (
+                source_type == "pfr"
+                and coverage in {"file_slice", "full_file"}
+                and observed_state == "content_observed"
+            ):
+                return True
+        elif requirement == "exact_full_file" and (
+            source_type == "pfr"
+            and coverage == "full_file"
+            and observed_state == "content_observed"
+        ):
+            return True
+    return False
+
+
 def finding_evidence_capability(
     finding: Dict[str, Any],
     *,
@@ -290,6 +330,28 @@ def finding_evidence_capability(
     else:
         scope_supported = False
 
+    representation_requirement = text(
+        finding.get("representation_requirement") or "semantic"
+    )
+    if representation_requirement == "semantic":
+        representation_supported = True
+    elif representation_requirement in {
+        "exact_postimage",
+        "exact_full_file",
+    }:
+        representation_supported = bool(
+            snippet_is_post_change
+            and pr_details
+            and _catalog_ref_has_exact_representation(
+                required_refs,
+                file_path=file_path,
+                requirement=representation_requirement,
+                catalog=catalog,
+            )
+        )
+    else:
+        representation_supported = False
+
     return {
         "usable_refs": usable_refs,
         "rejected_refs": rejected_refs,
@@ -305,8 +367,11 @@ def finding_evidence_capability(
         "non_source_ci_diagnostic_supported": (
             non_source_ci_diagnostic_supported
         ),
+        "representation_requirement": representation_requirement,
+        "representation_supported": representation_supported,
         "critical_supported": bool(
             scope_supported
+            and representation_supported
             and (
                 deleted_region_refs
                 if snippet_is_deleted_region
@@ -361,6 +426,7 @@ def validate_findings(state: V3ValidationState) -> None:
     allowed_finding = required_finding | {
         "required_evidence_refs",
         "supporting_evidence_refs",
+        "representation_requirement",
         "suggested_code",
         "suggestion_type",
     }
@@ -444,6 +510,18 @@ def validate_findings(state: V3ValidationState) -> None:
                     "enum_invalid",
                     f"{location}.evidence_status",
                     f"{location}.evidence_status has an invalid enum value",
+                )
+            )
+        if finding.get("representation_requirement", "semantic") not in {
+            "semantic",
+            "exact_postimage",
+            "exact_full_file",
+        }:
+            violations.append(
+                violation(
+                    "enum_invalid",
+                    f"{location}.representation_requirement",
+                    f"{location}.representation_requirement has an invalid enum value",
                 )
             )
         claim_scope = finding.get("claim_scope")

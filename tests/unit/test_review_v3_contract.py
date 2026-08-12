@@ -616,7 +616,7 @@ class ReviewV3ContractTests(unittest.TestCase):
                         pr_details=details,
                     )
 
-    def test_changed_snippet_may_omit_only_common_enclosing_indentation(self):
+    def test_changed_snippet_preserves_common_enclosing_indentation(self):
         path = "src/allocator.js"
         details = (
             "# Pull Request #7\n\n"
@@ -655,14 +655,14 @@ class ReviewV3ContractTests(unittest.TestCase):
         )
         raw["evidence_scope"] = [f"path:{path}"]
 
-        validate_raw_v3_review(raw, context_meta=meta, pr_details=details)
-
-        raw["findings"][0]["code_snippet"] = (
-            "const normalized = values.map(Number);\n"
-            "  if (normalized.length === 0) return [];"
-        )
         with self.assertRaisesRegex(ValueError, "changed region"):
             validate_raw_v3_review(raw, context_meta=meta, pr_details=details)
+
+        raw["findings"][0]["code_snippet"] = (
+            "  const normalized = values.map(Number);\n"
+            "  if (normalized.length === 0) return [];"
+        )
+        validate_raw_v3_review(raw, context_meta=meta, pr_details=details)
 
     def test_verified_search_evidence_requires_every_hit_at_same_head(self):
         raw = raw_v3()

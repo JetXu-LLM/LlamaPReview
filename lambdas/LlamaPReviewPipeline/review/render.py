@@ -201,140 +201,60 @@ def _template_artifact_lint(text: str) -> bool:
     return False
 
 
-_CLEAR_CI_PHRASES = (
-    re.compile(r"(?i)\ball\b[^.!?]{0,40}\bchecks?\b[^.!?]{0,20}\bpass(?:ed|es|ing)?\b"),
-    re.compile(
-        r"(?i)\bci\b[^.!?]{0,30}\b(?:checks?|pipelines?|runs?)\b"
-        r"[^.!?]{0,20}\bpass(?:ed|es|ing)?\b"
-    ),
-    re.compile(r"(?i)\bpass(?:ed|es|ing)?\b[^.!?]{0,60}\b(?:builds?|checks?|test jobs?)\b"),
-    re.compile(r"(?i)\bchecks?\b[^.!?]{0,30}\bpass(?:ed|es|ing)?\b"),
-    re.compile(
-        r"(?i)\b(?:all\s+)?test\s+(?:jobs?|matrices)\b"
-        r"[^.!?]{0,20}\bpass(?:ed|es|ing)?\b"
-    ),
-    re.compile(r"(?i)\b(?:ci|checks?|builds?)\b[^.!?]{0,20}\bgreen\b"),
-)
+def _is_mechanical_pass_fragment(value: str) -> bool:
+    """Recognize only Final's observed ``Check: Passes.`` fragment shape."""
 
-
-def _clear_sentence_mentions_ci(text: str) -> bool:
-    """Bounded phrase test backing the clear-prose CI scrub (G3).
-
-    This is representation selection among already-validated proof sources,
-    not prose rewriting: on a hit the renderer selects the next proof source
-    instead of publishing this sentence.
-    """
-
-    return bool(text) and any(
-        pattern.search(text) for pattern in _CLEAR_CI_PHRASES
+    head, separator, result = _text(value).rpartition(":")
+    return bool(
+        separator
+        and head.strip()
+        and result.strip().rstrip(".!?").casefold()
+        in {"pass", "passes", "passed"}
     )
 
 
-def _finish_clear_ci_contraction(value: str) -> str:
-    """Accept only a substantive, CI-free remainder of model-owned prose."""
-
-    candidate = value.strip().rstrip(" ,;—")
-    if (
-        len(candidate.split()) < 4
-        or _clear_sentence_mentions_ci(candidate)
-        or _template_artifact_lint(candidate)
-    ):
-        return ""
-    if not candidate.endswith((".", "!", "?", "…")):
-        candidate += "."
-    return candidate
+def _ci_public_state(review: Dict[str, Any]) -> Dict[str, Any]:
+    plan = review.get("rendering_plan") or {}
+    state = plan.get("ci_public_state") if isinstance(plan, dict) else None
+    return state if isinstance(state, dict) else {}
 
 
-def _contract_clear_ci_clause(text: str) -> str:
-    """Remove one punctuation-proven confidence-only CI clause.
-
-    The model often coordinates a passing-CI observation with independent
-    causal proof.  Preserve only existing words when commas, semicolons, an em
-    dash, or a nearby coordinating conjunction uniquely bounds that CI unit.
-    Ambiguous prose still falls back to another validated proof source.
-    """
-
-    value = _text(text)
-    matches = [
-        match
-        for pattern in _CLEAR_CI_PHRASES
-        for match in pattern.finditer(value)
-    ]
-    if not matches:
-        return value
-    match = min(matches, key=lambda item: (item.start(), -item.end()))
-    left = max(
-        value.rfind(mark, 0, match.start()) for mark in (",", ";", "—")
+def _ci_fact_sentence(state: Dict[str, Any]) -> str:
+    counts = state.get("counts") or {}
+    parts: list[str] = []
+    labels = (
+        ("failure", "failed"),
+        ("action_required", "action required"),
+        ("pending", "pending"),
+        ("incomplete", "incomplete"),
     )
-    right_candidates = [
-        position
-        for mark in (",", ";", "—")
-        if (position := value.find(mark, match.end())) >= 0
-    ]
-
-    # A comma-delimited middle unit: ``proof, CI passed, and consequence``.
-    if left >= 0 and right_candidates:
-        right = min(right_candidates)
-        suffix = value[right + 1 :].lstrip()
-        connector = re.match(r"(?i)(and|but|while)\s+", suffix)
-        if connector:
-            suffix = suffix[connector.end() :]
-            candidate = (
-                value[:left].rstrip(" ,;—")
-                + f" {connector.group(1).lower()} "
-                + suffix
+    for key, label in labels:
+        count = int(counts.get(key) or 0)
+        if count:
+            parts.append(f"{count} {label}")
+    retrieval = _text(state.get("retrieval_outcome"))
+    if retrieval in {"partial", "error", "unverified"}:
+        parts.append(f"retrieval {retrieval}")
+    observed = ", ".join(parts) or "unresolved evidence"
+    if state.get("posture") == "not_observed":
+        if retrieval == "no_hit":
+            return (
+                "Exact-head CI reported no statuses or check runs; no "
+                "CI-dependent merge-safety claim is made."
             )
-        else:
-            separator = value[left] if value[left] in ";—" else ","
-            candidate = value[:left].rstrip(" ,;—") + separator + " " + suffix
-        if finished := _finish_clear_ci_contraction(candidate):
-            return finished
-
-    trailing = value[match.end() :].strip(" .!?")
-    trailing_is_ci_modifier = bool(
-        not trailing
-        or re.fullmatch(
-            r"(?i)(?:at|on)\s+(?:the\s+)?[\w-]+(?:\s+[\w-]+){0,2}",
-            trailing,
+        return (
+            "Exact-head CI evidence was not observed; no CI-dependent "
+            "merge-safety claim is made."
         )
+    if state.get("posture") == "unrelated_supported":
+        return (
+            f"Exact-head CI reports {observed}; retained exact evidence "
+            "attributes those failures outside this change."
+        )
+    return (
+        f"Exact-head CI remains unresolved ({observed}); no CI-dependent "
+        "merge-safety claim is made."
     )
-    clause_start = max(left, value.rfind(".", 0, match.start()))
-
-    # A trailing coordinated unit: ``consumers remain safe and CI is green``.
-    conjunctions = list(
-        re.finditer(r"(?i)\b(?:and|but|while)\b", value[clause_start + 1 : match.start()])
-    )
-    if conjunctions and trailing_is_ci_modifier:
-        conjunction = conjunctions[-1]
-        start = clause_start + 1 + conjunction.start()
-        bridge = value[conjunction.end() + clause_start + 1 : match.start()]
-        if len(bridge.split()) <= 4:
-            if finished := _finish_clear_ci_contraction(value[:start]):
-                return finished
-
-    # A CI-leading clause whose independent suffix follows ``and``:
-    # ``; supplied CI is green and no reachable regression is supported``.
-    suffix_match = re.match(
-        r"\s+(?:and|but|while)\s+(.+)$",
-        value[match.end() :],
-        flags=re.IGNORECASE,
-    )
-    if left >= 0 and suffix_match:
-        lead = value[left + 1 : match.start()]
-        if len(lead.split()) <= 4:
-            candidate = (
-                value[: left + 1].rstrip()
-                + " "
-                + suffix_match.group(1).lstrip()
-            )
-            if finished := _finish_clear_ci_contraction(candidate):
-                return finished
-
-    # Existing conservative trailing-clause behavior remains the final safe
-    # representation path.
-    if not trailing and left >= 0:
-        return _finish_clear_ci_contraction(value[:left])
-    return ""
 
 
 def _first_sentence(text: str) -> str:
@@ -403,8 +323,8 @@ def _clear_first_screen_lines(
     lines: list[str] = []
     source = ""
     model_proof = _first_sentence(model_sentence)
-    if _clear_sentence_mentions_ci(model_proof):
-        model_proof = _contract_clear_ci_clause(model_proof)
+    if _is_mechanical_pass_fragment(model_proof):
+        model_proof = ""
     model_proof = _bounded_first_screen_explanation(model_proof)
     if model_proof and not model_proof.endswith((".", "!", "?", "…")):
         model_proof += "."
@@ -412,7 +332,6 @@ def _clear_first_screen_lines(
         model_proof
         and len(model_proof) <= 360
         and not _template_artifact_lint(model_proof)
-        and not _clear_sentence_mentions_ci(model_proof)
     )
     if model_ok:
         lines.append(model_proof)
@@ -539,8 +458,15 @@ def _format_details(
     scope = review.get("evidence_scope") or []
     if scope:
         lines.append("### LlamaPReview checks")
-        for item in scope[:MAX_VISIBLE_SCOPE_ITEMS]:
-            lines.append(f"- {_text(item.get('description'))}")
+        seen_descriptions: set[str] = set()
+        for item in scope:
+            description = _text(item.get("description"))
+            if not description or description in seen_descriptions:
+                continue
+            seen_descriptions.add(description)
+            lines.append(f"- {description}")
+            if len(seen_descriptions) >= MAX_VISIBLE_SCOPE_ITEMS:
+                break
         lines.append("")
     lines.append("</details>")
     return "\n".join(lines)
@@ -578,7 +504,19 @@ def render_v3_markdown(review: Dict[str, Any]) -> str:
 
     decision = review.get("decision") or {}
     visible_verdict = _text(review.get("visible_verdict")) or "unverified"
-    heading = _decision_heading(visible_verdict)
+    ci_state = _ci_public_state(review)
+    ci_unresolved = ci_state.get("posture") in {
+        "unresolved",
+        "unrelated_supported",
+    } or (
+        ci_state.get("posture") == "not_observed"
+        and ci_state.get("retrieval_outcome") != "not_observed"
+    )
+    heading = (
+        "Conditional code-review clear"
+        if visible_verdict == "clear" and ci_unresolved
+        else _decision_heading(visible_verdict)
+    )
     unknowns = [
         item
         for item in review.get("material_unknowns") or []
@@ -595,7 +533,23 @@ def render_v3_markdown(review: Dict[str, Any]) -> str:
     )
     fold_lines: list[str] = []
     clear_projection_source = ""
-    if visible_verdict == "clear":
+    if visible_verdict == "clear" and ci_unresolved:
+        fold_lines = [_ci_fact_sentence(ci_state)]
+        clear_projection_source = "structured_ci"
+        findings = [
+            item
+            for item in review.get("findings") or []
+            if isinstance(item, dict)
+        ]
+        if findings:
+            top = _highest_value_nonblocking_finding(review)
+            count = len(findings)
+            plural = "" if count == 1 else "s"
+            fold_lines.append(
+                f"{count} non-blocking finding{plural} retained — highest: "
+                f"{_text((top or {}).get('headline')).rstrip('.')}."
+            )
+    elif visible_verdict == "clear":
         fold_lines, clear_projection_source = _clear_first_screen_lines(
             review,
             public_sentence,
@@ -628,6 +582,9 @@ def render_v3_markdown(review: Dict[str, Any]) -> str:
                 unknowns,
             )
         fold_lines = [sentence]
+
+    if ci_unresolved and visible_verdict != "clear":
+        fold_lines.append(_ci_fact_sentence(ci_state))
 
     lines = [f"### LlamaPReview — {heading}"]
     for fold_line in fold_lines:
@@ -772,6 +729,8 @@ def render_v3_markdown(review: Dict[str, Any]) -> str:
             elif not safe_proof.endswith((".", "!", "?")):
                 safe_proof += "."
         lines.extend(["", safe_proof])
+        if ci_unresolved and _ci_fact_sentence(ci_state) != safe_proof:
+            lines.extend(["", _ci_fact_sentence(ci_state)])
         if action_segments:
             candidate_action = f"Owner action: {action_segments[0]}"
             candidate_lines = [*lines, "", candidate_action]

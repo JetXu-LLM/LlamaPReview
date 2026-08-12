@@ -70,11 +70,12 @@ FINDING_FIELDS = {
     "owner_action",
     "required_evidence_refs",
     "supporting_evidence_refs",
+    "representation_requirement",
     "placement",
     "suggestion",
 }
 UNKNOWN_FIELDS = {"missing_fact", "impact", "owner_action", "evidence_refs"}
-CHECK_FIELDS = {"check", "result", "evidence_refs"}
+CHECK_FIELDS = {"check", "result", "evidence_refs", "ci_relevance"}
 DIAGRAM_FIELDS = {"purpose", "caption", "mermaid", "evidence_refs"}
 SUGGESTION_FIELDS = {"type", "content"}
 
