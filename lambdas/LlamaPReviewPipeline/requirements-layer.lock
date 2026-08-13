@@ -1,5 +1,5 @@
 # Linux x86_64 / CPython 3.12 dependency closure for the isolated Pipeline Layer.
-# llama-github==0.4.5 is supplied as a separately verified wheel and installed
+# llama-github==0.4.6 is supplied as a separately verified wheel and installed
 # with --no-deps. Regenerate all hashes together; never hand-upgrade one line.
 
 certifi==2026.6.17 \

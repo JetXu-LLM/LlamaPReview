@@ -39,11 +39,11 @@
       "implementation": "cp",
       "abi": "cp312",
       "requirements_lock": "lambdas/LlamaPReviewPipeline/requirements-layer.lock",
-      "requirements_lock_sha256": "b446f0b4ba19c1a6971592f1bc246c9c3a829d9e2041dfb530791c060b51e798",
+      "requirements_lock_sha256": "2f4fdb842bb55bf3f77d03646232fc7c627650050342b2165c3bb1d2c08d246d",
       "wheel_project": "llama-github",
-      "wheel_version": "0.4.5",
-      "wheel_filename": "llama_github-0.4.5-py3-none-any.whl",
-      "wheel_sha256": "20eec18cdad00689ee0ce07eb7645a6893c3de279c7beaaccf24ce4ea9c03092",
+      "wheel_version": "0.4.6",
+      "wheel_filename": "llama_github-0.4.6-py3-none-any.whl",
+      "wheel_sha256": "d43ebf756cbd29fdfbd47b11e996c71a1967d03c5bcf65e27a1dcb09447e3553",
       "max_unzipped_bytes": 52428800,
       "functions": [
         "LlamaPReviewPipeline"
@@ -66,8 +66,8 @@
   },
   "sdk_release": {
     "project": "llama-github",
-    "version": "0.4.5",
-    "wheel_filename": "llama_github-0.4.5-py3-none-any.whl",
-    "wheel_sha256": "20eec18cdad00689ee0ce07eb7645a6893c3de279c7beaaccf24ce4ea9c03092"
+    "version": "0.4.6",
+    "wheel_filename": "llama_github-0.4.6-py3-none-any.whl",
+    "wheel_sha256": "d43ebf756cbd29fdfbd47b11e996c71a1967d03c5bcf65e27a1dcb09447e3553"
   }
 }

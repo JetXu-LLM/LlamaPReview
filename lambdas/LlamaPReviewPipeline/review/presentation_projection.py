@@ -604,6 +604,32 @@ def _normalize_finding(
     category = raw.get("category")
     confidence = raw.get("confidence")
     requested_placement = raw.get("placement")
+    carries_blocking_decision = (
+        verdict == "blocking"
+        and category not in {"test-gap", "question", "note"}
+    )
+    representation_requirement = raw.get("representation_requirement")
+    if representation_requirement is None:
+        representation_requirement = "semantic"
+        state.normalize(
+            f"{location}.representation_requirement:legacy_semantic_defaulted"
+        )
+    if representation_requirement not in {
+        "semantic",
+        "exact_postimage",
+        "exact_full_file",
+    }:
+        state.add_issue(
+            "representation_requirement_invalid",
+            f"{location}.representation_requirement",
+            (
+                "representation requirement is invalid"
+            ),
+            "item",
+        )
+        if carries_blocking_decision:
+            state.contract_blocking_decision_if_needed(location)
+        return None
     path_value = raw.get("file_path")
     path = (
         normalize_repo_path(path_value)
@@ -651,10 +677,6 @@ def _normalize_finding(
     )
     if placement != requested_placement:
         state.normalize(f"{location}.placement:unsupported_collapsed", partial=True)
-    carries_blocking_decision = (
-        verdict == "blocking"
-        and category not in {"test-gap", "question", "note"}
-    )
     requires_anchor = placement == "inline"
     if (path and path not in known_paths) or (requires_anchor and not path):
         state.add_issue(
@@ -849,6 +871,7 @@ def _normalize_finding(
         "owner_action": owner_action,
         "required_evidence_refs": required,
         "supporting_evidence_refs": supporting,
+        "representation_requirement": representation_requirement,
         "placement": normalized_placement,
         "suggestion": normalized_suggestion,
     }
@@ -868,6 +891,7 @@ def _normalize_finding(
         "file_path": path,
         "code_snippet": snippet,
         "comment": f"{analysis}\n\nOwner action: {owner_action}",
+        "representation_requirement": representation_requirement,
         "required_evidence_refs": required,
         "supporting_evidence_refs": supporting,
         "evidence_refs": refs,
@@ -1053,7 +1077,128 @@ def _normalize_check(
                 "surface",
             )
         return None
-    return {"check": check, "result": result, "evidence_refs": refs}
+    ci_refs = [ref for ref in refs if str(ref).startswith("ci:")]
+    ci_relevance = raw.get("ci_relevance")
+    if ci_refs:
+        if ci_relevance not in {"unrelated", "pr_related", "uncertain"}:
+            ci_relevance = "uncertain"
+            state.normalize(
+                f"{location}.ci_relevance:missing_or_invalid_defaulted"
+            )
+    else:
+        ci_relevance = "not_applicable"
+    return {
+        "check": check,
+        "result": result,
+        "evidence_refs": refs,
+        "ci_relevance": ci_relevance,
+    }
+
+
+def _structured_ci_public_state(
+    context_meta: Optional[Dict[str, Any]],
+    checks: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Compile objective CI state plus Deep-owned, evidence-bound relevance."""
+
+    snapshot = (context_meta or {}).get("ci_snapshot") or {}
+    if not (
+        isinstance(snapshot, dict)
+        and snapshot.get("schema_version") == 1
+    ):
+        return {
+            "posture": "not_observed",
+            "retrieval_outcome": "not_observed",
+            "counts": {},
+        }
+    observed = [
+        item
+        for item in snapshot.get("checks") or []
+        if isinstance(item, dict)
+    ]
+    counts = {
+        classification: sum(
+            1
+            for item in observed
+            if str(item.get("classification") or "") == classification
+        )
+        for classification in (
+            "failure",
+            "action_required",
+            "pending",
+            "incomplete",
+            "success",
+        )
+    }
+    retrieval = str(snapshot.get("retrieval_outcome") or "unverified")
+    risk_checks = [
+        item
+        for item in observed
+        if str(item.get("classification") or "")
+        in {"failure", "action_required", "pending", "incomplete"}
+    ]
+    risk_refs = {
+        f"ci:{item['identity']}"
+        for item in risk_checks
+        if str(item.get("identity") or "").strip()
+    }
+    observed_by_ref = {
+        f"ci:{item['identity']}": item
+        for item in observed
+        if str(item.get("identity") or "").strip()
+    }
+    catalog = {
+        str(item.get("id")): item
+        for item in (context_meta or {}).get("evidence_catalog") or []
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    unrelated_refs: set[str] = set()
+    for item in checks:
+        if item.get("ci_relevance") != "unrelated":
+            continue
+        refs = {
+            str(ref)
+            for ref in item.get("evidence_refs") or []
+            if isinstance(ref, str)
+        }
+        ci_refs = refs & risk_refs
+        has_exact_diagnostic = any(
+            bool((observed_by_ref.get(ref) or {}).get("output"))
+            or bool((observed_by_ref.get(ref) or {}).get("annotations"))
+            for ref in ci_refs
+        )
+        has_exact_repository_support = any(
+            (catalog.get(ref) or {}).get("source_type") in {"diff", "pfr"}
+            and (catalog.get(ref) or {}).get("coverage_type")
+            in {"changed_region", "file_slice", "full_file"}
+            for ref in refs - ci_refs
+        )
+        if has_exact_diagnostic or has_exact_repository_support:
+            unrelated_refs.update(ci_refs)
+    only_completed_failures = bool(risk_checks) and all(
+        str(item.get("classification") or "") == "failure"
+        for item in risk_checks
+    )
+    complete = retrieval in {"ok", "no_hit"}
+    has_ci = bool(snapshot.get("has_ci")) or bool(observed)
+    if not has_ci and complete:
+        posture = "not_observed"
+    elif not risk_checks and complete:
+        posture = "resolved"
+    elif (
+        complete
+        and only_completed_failures
+        and risk_refs
+        and risk_refs <= unrelated_refs
+    ):
+        posture = "unrelated_supported"
+    else:
+        posture = "unresolved"
+    return {
+        "posture": posture,
+        "retrieval_outcome": retrieval,
+        "counts": counts,
+    }
 
 
 def _normalize_diagram(
@@ -1749,6 +1894,12 @@ def compile_presentation_object(
             context_meta,
         ),
         "diagram": v3_diagram,
+        "rendering_plan": {
+            "ci_public_state": _structured_ci_public_state(
+                context_meta,
+                checks,
+            )
+        },
     }
     try:
         review = build_v3_review(

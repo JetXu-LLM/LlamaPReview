@@ -540,6 +540,55 @@ def _repair_bare_impact_note(lines: List[str]) -> List[str]:
             repaired.append(line)
     return repaired
 
+
+def _remove_empty_groups(lines: List[str]) -> List[str]:
+    """Omit matched Mermaid groups with no visible statement.
+
+    Group labels and branch markers are control syntax, not visible flow.  A
+    matched label-only group therefore renders as misleading slivers on GitHub.
+    This pass removes only structurally matched empty spans; ambiguous or
+    otherwise invalid diagrams remain unchanged for the strict validator to
+    reject as one optional surface.
+    """
+
+    stack: List[Dict[str, Any]] = []
+    empty_spans: List[Tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        match = RE_BLOCK_START.match(stripped)
+        if match:
+            stack.append({"start": index, "has_content": False})
+            continue
+        if RE_BLOCK_END.match(stripped):
+            if not stack:
+                continue
+            block = stack.pop()
+            if block["has_content"]:
+                if stack:
+                    stack[-1]["has_content"] = True
+            else:
+                empty_spans.append((int(block["start"]), index))
+            continue
+        if (
+            not stripped
+            or RE_COMMENT_FULL.match(stripped)
+            or RE_DIRECTIVE.match(stripped)
+            or RE_ELSE.match(stripped)
+            or RE_AND.match(stripped)
+        ):
+            continue
+        if stack:
+            stack[-1]["has_content"] = True
+
+    if stack or not empty_spans:
+        return list(lines)
+    removed = {
+        index
+        for start, end in empty_spans
+        for index in range(start, end + 1)
+    }
+    return [line for index, line in enumerate(lines) if index not in removed]
+
 def format_mermaid(
     diagram: str,
     *,
@@ -615,6 +664,11 @@ def format_mermaid(
         # A standalone ``Impact — ...`` line is clearly note content, not a
         # message or a new claim.  Restore only the missing Mermaid prefix.
         lines = _repair_bare_impact_note(lines)
+
+        # A matched control group with no visible statement has no semantic
+        # content and renders as a label-only sliver in GitHub. Remove only
+        # that empty optional structure before the strict validation pass.
+        lines = _remove_empty_groups(lines)
 
         lines = [
             line

@@ -1,4 +1,4 @@
-llama-github==0.4.5
+llama-github==0.4.6
 PyJWT[crypto]>=2.13,<3
 requests>=2.33,<3
 urllib3>=2.7,<3

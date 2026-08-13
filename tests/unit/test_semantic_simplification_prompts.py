@@ -28,7 +28,7 @@ class TestSemanticSimplificationPrompts(unittest.TestCase):
             "Treat mutable CI as PR evidence, not as a repository-policy proxy",
             'A label such\nas "quality gate" or a configured threshold proves the reported metric outcome',
             "not that repository owners require that check for merge",
-            "merely possible required-check policy stays nonblocking",
+            "merely possible required-check policy stays non-code-blocking",
             "do not turn it into a finding, material unknown, merge gate",
             "only as a confidence-changing check",
             "Every\nrequest-changes reason, including a merge-deciding P2",

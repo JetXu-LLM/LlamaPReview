@@ -77,10 +77,10 @@ Release builders need the exact hash-bound `llama-github` wheel named in `lambda
 
 ```bash
 python -m pip download --no-deps --only-binary=:all: \
-  llama-github==0.4.5 --dest /secure/wheels
+  llama-github==0.4.6 --dest /secure/wheels
 
 make release \
-  SDK_WHEEL=/secure/wheels/llama_github-0.4.5-py3-none-any.whl \
+  SDK_WHEEL=/secure/wheels/llama_github-0.4.6-py3-none-any.whl \
   RELEASE_DIR=dist/release \
   RELEASE_COMMIT="$(git rev-parse HEAD)" \
   RELEASE_TAG="$(git describe --tags --exact-match)"

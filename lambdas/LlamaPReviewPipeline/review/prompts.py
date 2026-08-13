@@ -77,7 +77,12 @@ do not turn it into a finding, material unknown, merge gate, or owner action.
 CI may decide the posture only when supplied evidence establishes either the
 concrete failing mechanism and consequence in changed behavior, or an explicit
 repository acceptance or branch-policy requirement. An unknown failure cause
-or merely possible required-check policy stays nonblocking.
+or merely possible required-check policy stays non-code-blocking, but remains
+a confidence-changing CI uncertainty. For every retained CI check, label its
+relevance exactly `unrelated`, `pr_related`, or `uncertain`; use `unrelated`
+only when exact evidence establishes that narrower attribution. Never convert
+unknown causality into merge safety or describe unresolved exact-head CI as
+all-green.
 
 ## Quality bar
 
@@ -126,6 +131,15 @@ evidence for its changed mechanism and causal consequence. Include a complete
 verbatim contiguous post-change snippet when the supplied changed region
 supports one. A missing or uncertain inline anchor changes placement, not an
 otherwise supported finding, severity, or merge posture.
+For every retained finding, label its source representation requirement exactly
+`semantic`, `exact_postimage`, or `exact_full_file`. Use `exact_postimage` when
+literal whitespace, indentation, token bytes, or encoding within a changed
+source window decides the claim. Use `exact_full_file` when first-byte,
+file-boundary, complete-header, or whole-file representation decides it. A
+unified-diff prefix, line-number gutter, context marker, or truncation marker is
+presentation rather than source. Do not promote a representation-sensitive
+claim to a blocker unless matching exact-head source representation is in its
+required evidence; otherwise omit it or keep it nonblocking and unverified.
 Priority expresses severity, not merge posture: a verified P2 may still require
 a pre-merge owner action, so state the overall merge posture explicitly. For
 each verified regression, decide whether its concrete owner action must happen
@@ -233,6 +247,7 @@ Return one valid JSON object and nothing else, using exactly this fixed shape:
       "owner_action": "Concrete Deep-derived action for this finding.",
       "required_evidence_refs": ["exact catalog ID"],
       "supporting_evidence_refs": ["exact catalog ID"],
+      "representation_requirement": "semantic|exact_postimage|exact_full_file",
       "placement": "inline|headline|collapsed",
       "suggestion": null
     }
@@ -249,6 +264,7 @@ Return one valid JSON object and nothing else, using exactly this fixed shape:
     {
       "check": "A decision-relevant check Deep performed.",
       "result": "Its evidence-bounded result.",
+      "ci_relevance": "unrelated|pr_related|uncertain|not_applicable",
       "evidence_refs": ["exact catalog ID"]
     }
   ],
@@ -377,6 +393,11 @@ blocker may instead use an exact causal CI diagnostic as required evidence,
 with an empty path, empty snippet, and `headline` placement. A
 retrieval gap stays
 at the importance Deep assigned it.
+Copy each finding's explicit representation requirement. For P0/P1 this field
+is mandatory. `exact_postimage` requires a verbatim post-change anchor and
+required exact-postimage provenance; `exact_full_file` additionally requires a
+same-path complete PR-head file read. Never infer literal source bytes from a
+diff marker, gutter, Markdown indentation, or truncated slice.
 Use `test-gap` only for missing or insufficient coverage. A changed behavior
 that violates an existing test or explicit acceptance contract is the causal
 defect Deep described, not a test-gap merely because a test exposed it.
@@ -404,6 +425,10 @@ appear with a finding only when Deep made its exact reference required evidence
 for that finding's causal conclusion; emit it in `required_evidence_refs` and
 discuss it only with that deciding finding. Classify by Deep's evidence role,
 never by CI check name or other name heuristics.
+Copy Deep's `CI relevance` classification to `ci_relevance` for every CI-backed
+confidence check. Use `not_applicable` only when the check has no CI evidence.
+Do not label a failure unrelated unless Deep cited exact evidence for that
+attribution; otherwise emit `uncertain`.
 
 Aim for at most 8 findings, at most 8 material unknowns, and at most 6
 confidence checks. Prioritize and merge shared causal roots without omitting a

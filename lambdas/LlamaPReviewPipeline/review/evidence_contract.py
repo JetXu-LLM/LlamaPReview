@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-import textwrap
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ..context_engine.evidence import event_supports_answer
@@ -834,10 +833,13 @@ def _normalized_code_block(value: str) -> Tuple[List[str], List[int]]:
     retained_indexes = list(range(first, last))
     if not retained_indexes:
         return [], []
-    dedented = textwrap.dedent(
-        "\n".join(raw_lines[first:last])
-    ).splitlines()
-    return [line.rstrip() for line in dedented], retained_indexes
+    # A unified diff's first column is transport syntax.  Once that one marker
+    # byte has been removed by ``changed_postimages`` / ``changed_preimages``,
+    # every remaining byte is source representation.  Do not dedent or trim
+    # line endings here: doing so makes a decorated diff line look identical
+    # to a differently-indented source line and can turn a representation
+    # premise into false "exact" evidence.
+    return raw_lines[first:last], retained_indexes
 
 
 def _normalized_code_lines(value: str) -> List[str]:
