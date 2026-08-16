@@ -910,6 +910,96 @@ class PublicationTransactionTests(unittest.TestCase):
             )
         return stored
 
+    def test_first_transaction_locked_after_intent_aborts_exactly_once(self):
+        self._put_item()
+        claim = self._claim()
+        ordinary = _prepared()
+        prepared = PreparedGitHubReview(
+            head_sha=ordinary.head_sha,
+            main_body=ordinary.main_body,
+            comments=ordinary.comments,
+            artifact=ordinary.artifact,
+            publication_kind="post_merge_follow_up",
+            required_disposition="merged_same_head",
+        )
+        context = pipeline_publication.PublicationContext(
+            repo="owner/repo",
+            pr_number=7,
+            head_sha=HEAD,
+            expected_status="CONTEXT_READY",
+            phase="review",
+            run_id="run-7",
+            generation_attempt=1,
+            runtime_identity={"phase": "review"},
+            phase_claim=claim,
+            dry_run=False,
+            publication_kind="post_merge_follow_up",
+            required_disposition="merged_same_head",
+        )
+        stopped = PRLifecycleSuperseded(
+            HEAD,
+            HEAD,
+            current_state="closed",
+            merged=True,
+            stage="publication.pre_publish_disposition",
+            superseded_kind="publication_unavailable_locked",
+        )
+        pre_publish = Mock(side_effect=[None, stopped])
+        observer = Mock()
+
+        with patch.object(
+            persistence,
+            "get_s3_client",
+            return_value=self.s3,
+        ), patch.object(
+            persistence,
+            "load_publication_candidate",
+            side_effect=AssertionError(
+                "first transaction must reuse its in-memory candidate"
+            ),
+        ):
+            stored = publish_prepared_transaction(
+                prepared,
+                repo_obj=self.repo,
+                repo="owner/repo",
+                pr_number=7,
+                expected_status="CONTEXT_READY",
+                run_id="run-7",
+                phase="review",
+                generation_attempt=1,
+                runtime_identity={"phase": "review"},
+                terminal_attributes=_complete_accounting(),
+                pre_publish_check=pre_publish,
+                phase_claim=claim,
+                prepared_pre_dispatch_failure_commit=(
+                    lambda candidate, intent, exc: (
+                        pipeline_publication._commit_prepared_locked_unavailable(
+                            candidate,
+                            intent,
+                            exc,
+                            context=context,
+                            lifecycle_unavailable_observer=observer,
+                            table=self.table,
+                        )
+                    )
+                ),
+                table=self.table,
+            )
+
+        self.assertTrue(stored)
+        self.assertEqual(pre_publish.call_count, 2)
+        self.assertEqual(self.pull.create_count, 0)
+        observer.assert_called_once()
+        terminal = persistence.get_item("owner/repo", 7, table=self.table)
+        self.assertEqual(terminal["status"], "SUPERSEDED")
+        self.assertEqual(
+            terminal["publication_status"],
+            "aborted_before_dispatch",
+        )
+        self.assertTrue(
+            terminal["deepseek_usage_accounting"]["complete_numeric_usage"]
+        )
+
     def test_artifact_or_intent_failure_performs_zero_github_writes(self):
         for failing_step in ("artifact", "intent"):
             with self.subTest(failing_step=failing_step):
@@ -1107,6 +1197,7 @@ class PublicationTransactionTests(unittest.TestCase):
                 "head_sha": HEAD,
                 "state": "closed",
                 "merged": True,
+                "locked": False,
             },
             get_repository=lambda _repo: self.repo,
         )
@@ -1141,6 +1232,147 @@ class PublicationTransactionTests(unittest.TestCase):
             )
 
         self.assertEqual(self.pull.create_count, 0)
+
+    def test_locked_post_merge_prepared_recovery_aborts_before_dispatch(self):
+        self._put_item()
+        claim = self._claim()
+        ordinary = _prepared()
+        prepared = PreparedGitHubReview(
+            head_sha=ordinary.head_sha,
+            main_body=ordinary.main_body,
+            comments=ordinary.comments,
+            artifact=ordinary.artifact,
+            publication_kind="post_merge_follow_up",
+            required_disposition="merged_same_head",
+        )
+        candidate = build_candidate(
+            prepared,
+            repo="owner/repo",
+            pr_number=7,
+            run_id="run-7",
+            phase="review",
+            owner_event_id=EVENT,
+            owner_request_id="request-1",
+            publication_generation_attempt=1,
+            preflight_completed_at=NOW.isoformat(),
+            generation_runtime_identity={"phase": "review"},
+            terminal_attributes={
+                "publication_kind": "post_merge_follow_up",
+                "required_disposition": "merged_same_head",
+                **_complete_accounting(),
+            },
+            publication_key="b" * 32,
+        )
+        intent = _intent(candidate, state="prepared")
+        current = persistence.get_item("owner/repo", 7, table=self.table)
+        current["publication_intent"] = intent
+        current["initial_admission"] = {
+            "schema_version": 1,
+            "disposition": "open_same_head",
+            "head_sha": HEAD,
+            "run_id": "run-7",
+            "admitted_at": NOW.isoformat(),
+        }
+        self.table.put_item(Item=current)
+        runtime = SimpleNamespace(
+            get_pr_head_snapshot=lambda _repo, _pr: {
+                "head_sha": HEAD,
+                "state": "closed",
+                "merged": True,
+                "locked": True,
+            },
+            get_repository=Mock(
+                side_effect=AssertionError(
+                    "locked prepared recovery must not acquire repository"
+                )
+            ),
+        )
+        context = pipeline_publication.PublicationContext(
+            repo="owner/repo",
+            pr_number=7,
+            head_sha=HEAD,
+            expected_status="CONTEXT_READY",
+            phase="review",
+            run_id="run-7",
+            generation_attempt=1,
+            runtime_identity={"phase": "review"},
+            phase_claim=claim,
+            dry_run=False,
+        )
+
+        observer = Mock()
+        with patch.object(
+            persistence,
+            "load_publication_candidate",
+            return_value=candidate,
+        ) as load_candidate_mock, patch.object(
+            pipeline_publication,
+            "fetch_pr_details",
+        ) as fetch:
+            recovered = pipeline_publication.recover_pending(
+                current,
+                context=context,
+                runtime=runtime,
+                deadline=None,
+                lifecycle_unavailable_observer=observer,
+                table=self.table,
+            )
+
+        self.assertTrue(recovered)
+        self.assertEqual(self.pull.create_count, 0)
+        runtime.get_repository.assert_not_called()
+        fetch.assert_not_called()
+        observer.assert_called_once()
+        load_candidate_mock.assert_called_once()
+        terminal = persistence.get_item("owner/repo", 7, table=self.table)
+        self.assertEqual(terminal["status"], "SUPERSEDED")
+        self.assertEqual(
+            terminal["superseded_kind"],
+            "publication_unavailable_locked",
+        )
+        self.assertEqual(
+            terminal["publication_status"],
+            "aborted_before_dispatch",
+        )
+        self.assertTrue(
+            terminal["deepseek_usage_accounting"]["complete_numeric_usage"]
+        )
+
+    def test_locked_terminal_cas_rejects_replaced_intent(self):
+        self._put_item()
+        claim = self._claim()
+        intent_a = {
+            "state": "prepared",
+            "publication_key": "a" * 32,
+        }
+        intent_b = {
+            "state": "prepared",
+            "publication_key": "b" * 32,
+        }
+        current = persistence.get_item("owner/repo", 7, table=self.table)
+        current["publication_intent"] = intent_b
+        self.table.put_item(Item=current)
+
+        stored = persistence.mark_superseded(
+            "owner/repo",
+            7,
+            "CONTEXT_READY",
+            expected_head_sha=HEAD,
+            actual_head_sha=HEAD,
+            stage="publication.pre_dispatch",
+            superseded_kind="publication_unavailable_locked",
+            current_state="closed",
+            merged=True,
+            extra_attrs={"publication_unavailable_locked": True},
+            phase_claim=claim,
+            expected_publication_intent=intent_a,
+            table=self.table,
+        )
+
+        self.assertFalse(stored)
+        latest = persistence.get_item("owner/repo", 7, table=self.table)
+        self.assertEqual(latest["status"], "CONTEXT_READY")
+        self.assertEqual(latest["publication_intent"], intent_b)
 
     def test_intent_and_artifact_bind_all_publication_identity(self):
         self._put_item()

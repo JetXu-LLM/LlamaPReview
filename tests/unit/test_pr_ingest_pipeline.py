@@ -172,6 +172,7 @@ class TestPRIngestPipeline(unittest.TestCase):
             state="closed",
             merged=True,
             merged_at="2026-07-16T02:04:45Z",
+            locked=True,
         )
         repo = SimpleNamespace(repo=SimpleNamespace(get_pull=MagicMock(return_value=pull)))
         runtime = GitHubRuntime.__new__(GitHubRuntime)
@@ -185,10 +186,46 @@ class TestPRIngestPipeline(unittest.TestCase):
                 "head_sha": "abcdef123456",
                 "state": "closed",
                 "merged": True,
+                "locked": True,
             },
         )
         runtime.get_repository.assert_called_once_with("owner/repo")
         repo.repo.get_pull.assert_called_once_with(42)
+
+    def test_github_runtime_head_snapshot_does_not_guess_missing_lock_state(self):
+        pull = SimpleNamespace(
+            head=SimpleNamespace(sha="abcdef123456"),
+            state="closed",
+            merged=True,
+            merged_at="2026-07-16T02:04:45Z",
+        )
+        repo = SimpleNamespace(
+            repo=SimpleNamespace(get_pull=MagicMock(return_value=pull))
+        )
+        runtime = GitHubRuntime.__new__(GitHubRuntime)
+        runtime.get_repository = MagicMock(return_value=repo)
+
+        snapshot = runtime.get_pr_head_snapshot("owner/repo", 42)
+
+        self.assertIsNone(snapshot["locked"])
+
+    def test_github_runtime_head_snapshot_does_not_coerce_malformed_lock_state(self):
+        pull = SimpleNamespace(
+            head=SimpleNamespace(sha="abcdef123456"),
+            state="closed",
+            merged=True,
+            merged_at="2026-07-16T02:04:45Z",
+            locked="true",
+        )
+        repo = SimpleNamespace(
+            repo=SimpleNamespace(get_pull=MagicMock(return_value=pull))
+        )
+        runtime = GitHubRuntime.__new__(GitHubRuntime)
+        runtime.get_repository = MagicMock(return_value=repo)
+
+        snapshot = runtime.get_pr_head_snapshot("owner/repo", 42)
+
+        self.assertIsNone(snapshot["locked"])
 
     def test_github_runtime_avoids_cleanup_thread_and_closes_client(self):
         client = MagicMock()

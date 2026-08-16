@@ -1537,6 +1537,7 @@ def mark_superseded(
     merged: Optional[bool] = None,
     extra_attrs: Optional[Dict[str, Any]] = None,
     phase_claim: Optional[Mapping[str, Any]] = None,
+    expected_publication_intent: Optional[Mapping[str, Any]] = None,
     table=None,
 ) -> bool:
     attributes = {
@@ -1559,6 +1560,16 @@ def mark_superseded(
         next_status="SUPERSEDED",
         attributes=attributes,
         phase_claim=phase_claim,
+        expected_attributes=(
+            {"publication_intent": expected_publication_intent}
+            if expected_publication_intent is not None
+            else None
+        ),
+        expected_missing_attributes=(
+            ("publication_receipt",)
+            if expected_publication_intent is not None
+            else ()
+        ),
         table=table,
     )
 

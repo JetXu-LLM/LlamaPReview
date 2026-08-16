@@ -458,6 +458,12 @@ def publish_prepared_transaction(
     post_write_observation: Optional[
         Callable[[Mapping[str, Any]], Mapping[str, Any]]
     ] = None,
+    prepared_pre_dispatch_failure_commit: Optional[
+        Callable[
+            [Mapping[str, Any], Mapping[str, Any], BaseException],
+            Optional[bool],
+        ]
+    ] = None,
     deadline: Optional[Deadline] = None,
     table=None,
 ) -> bool:
@@ -490,7 +496,18 @@ def publish_prepared_transaction(
         phase_claim=phase_claim,
         table=table,
     )
-    pre_publish_check()
+    try:
+        pre_publish_check()
+    except Exception as exc:
+        if prepared_pre_dispatch_failure_commit is not None:
+            handled = prepared_pre_dispatch_failure_commit(
+                candidate,
+                intent,
+                exc,
+            )
+            if handled is not None:
+                return handled
+        raise
     assert_no_existing_bot_review(
         repo_obj,
         pr_number,
@@ -543,6 +560,12 @@ def recover_publication_transaction(
     prepared_no_write_commit: Optional[
         Callable[[Mapping[str, Any], Mapping[str, Any]], bool]
     ] = None,
+    prepared_pre_dispatch_failure_commit: Optional[
+        Callable[
+            [Mapping[str, Any], Mapping[str, Any], BaseException],
+            Optional[bool],
+        ]
+    ] = None,
     deadline: Optional[Deadline] = None,
     table=None,
 ) -> bool:
@@ -579,9 +602,20 @@ def recover_publication_transaction(
     if state == "prepared":
         if prepared_no_write_commit is not None:
             return prepared_no_write_commit(candidate, intent)
-        repo_obj = repository_for(str(candidate.get("repo") or ""))
         pre_publish_check = pre_publish_check_for(candidate)
-        pre_publish_check()
+        try:
+            pre_publish_check()
+        except Exception as exc:
+            if prepared_pre_dispatch_failure_commit is not None:
+                handled = prepared_pre_dispatch_failure_commit(
+                    candidate,
+                    intent,
+                    exc,
+                )
+                if handled is not None:
+                    return handled
+            raise
+        repo_obj = repository_for(str(candidate.get("repo") or ""))
         assert_no_existing_bot_review(
             repo_obj,
             int(candidate.get("pr_number") or 0),

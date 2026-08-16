@@ -87,12 +87,15 @@ class PRLifecycleSuperseded(PipelineFailure):
         current_state: str,
         merged: bool,
         stage: str,
+        superseded_kind: str = "",
     ):
         self.expected_head_sha = expected_head_sha
         self.actual_head_sha = actual_head_sha
         self.current_state = current_state
         self.merged = bool(merged)
-        self.superseded_kind = "pr_merged" if self.merged else "pr_closed"
+        self.superseded_kind = str(superseded_kind or (
+            "pr_merged" if self.merged else "pr_closed"
+        ))
         lifecycle = "merged" if self.merged else current_state or "not_open"
         super().__init__(
             f"PR lifecycle changed to {lifecycle} at head {actual_head_sha}",

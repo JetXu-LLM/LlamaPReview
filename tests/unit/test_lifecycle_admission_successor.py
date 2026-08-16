@@ -89,7 +89,12 @@ class LifecycleDispositionTests(unittest.TestCase):
             with self.subTest(expected=expected):
                 disposition = pipeline_admission.current_pr_disposition(
                     SnapshotRuntime(
-                        {"head_sha": actual, "state": state, "merged": merged}
+                        {
+                            "head_sha": actual,
+                            "state": state,
+                            "merged": merged,
+                            "locked": False,
+                        }
                     ),
                     REPO,
                     PR,
@@ -107,9 +112,60 @@ class LifecycleDispositionTests(unittest.TestCase):
         )
         self.assertEqual(unverified.kind.value, "unverified")
 
+        ended_without_lock = pipeline_admission.current_pr_disposition(
+            SnapshotRuntime(
+                {"head_sha": HEAD_A, "state": "closed", "merged": True}
+            ),
+            REPO,
+            PR,
+            HEAD_A,
+            stage="context.ingest",
+        )
+        self.assertEqual(ended_without_lock.kind.value, "unverified")
+
+        malformed_lock = pipeline_admission.current_pr_disposition(
+            SnapshotRuntime(
+                {
+                    "head_sha": HEAD_A,
+                    "state": "closed",
+                    "merged": True,
+                    "locked": "true",
+                }
+            ),
+            REPO,
+            PR,
+            HEAD_A,
+            stage="context.ingest",
+        )
+        self.assertEqual(malformed_lock.kind.value, "unverified")
+
+    def test_disposition_carries_structural_lock_state(self):
+        disposition = pipeline_admission.current_pr_disposition(
+            SnapshotRuntime(
+                {
+                    "head_sha": HEAD_A,
+                    "state": "closed",
+                    "merged": True,
+                    "locked": True,
+                }
+            ),
+            REPO,
+            PR,
+            HEAD_A,
+            stage="context.ingest",
+        )
+
+        self.assertEqual(disposition.kind.value, "merged_same_head")
+        self.assertTrue(disposition.locked)
+
     def test_assert_current_head_classifies_ended_before_changed_head(self):
         runtime = SnapshotRuntime(
-            {"head_sha": HEAD_B, "state": "closed", "merged": True}
+            {
+                "head_sha": HEAD_B,
+                "state": "closed",
+                "merged": True,
+                "locked": False,
+            }
         )
         with self.assertRaises(PRLifecycleSuperseded) as raised:
             pipeline_admission.assert_current_head(

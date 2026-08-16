@@ -63,6 +63,13 @@ text. It is not quality-scoreable and records the corresponding lifecycle
 exclusion reason. If the head also changed, the old run is superseded silently
 instead of publishing a stale cancellation.
 
+GitHub may report the pull request review surface as locked. If that typed
+state is observed before dispatch, a cancellation or post-merge follow-up is
+not publishable and the run is superseded silently with
+`publication_unavailable_locked`. No template, model text, inline comment,
+footer, issue-comment fallback, or alternate credential is used. An unknown
+lock state does not get guessed from arbitrary API error text.
+
 ## Stable publication identity
 
 Publication identity binds the exact head SHA, required lifecycle disposition,

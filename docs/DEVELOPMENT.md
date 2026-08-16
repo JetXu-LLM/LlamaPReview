@@ -43,6 +43,14 @@ unchanged ordinary open-PR output. Callback-order tests must place lifecycle
 checks before the first Reconcile and before Final without changing the normal
 number of bounded PFR rounds.
 
+Lifecycle publication tests must also cover a structurally locked ended PR.
+Cancellation and post-merge follow-up must make zero GitHub calls, preserve
+complete accounting, and persist `publication_unavailable_locked`; unlocked
+and unknown-lock fixtures retain the normal publication contract. Recovery
+must terminalize only a prepared, undispatched locked intent. A dispatching
+intent still uses duplicate/outcome reconciliation because its write may have
+crossed the external boundary.
+
 Replay fixtures should exercise lifecycle transitions with synthetic public
 facts and make both cancellation and post-merge Markdown available for manual
 inspection. A release candidate must also pass Python 3.11 and 3.12 unit and

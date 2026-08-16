@@ -18,7 +18,10 @@ install_fake_jwt_module()
 install_fake_requests_module()
 
 from lambdas.LlamaPReviewPipeline import orchestrator, pipeline_admission
-from lambdas.LlamaPReviewPipeline.errors import HeadVerificationUnavailable
+from lambdas.LlamaPReviewPipeline.errors import (
+    HeadVerificationUnavailable,
+    PRLifecycleSuperseded,
+)
 from lambdas.LlamaPReviewPipeline.review.publish import PreparedGitHubReview
 
 
@@ -40,8 +43,13 @@ class SequenceRuntime:
         return dict(self.last)
 
 
-def _snapshot(head=HEAD_A, *, state="open", merged=False):
-    return {"head_sha": head, "state": state, "merged": merged}
+def _snapshot(head=HEAD_A, *, state="open", merged=False, locked=False):
+    return {
+        "head_sha": head,
+        "state": state,
+        "merged": merged,
+        "locked": locked,
+    }
 
 
 def _claim(phase="context"):
@@ -86,6 +94,205 @@ def _admission(item, phase="context"):
 
 
 class ContextLifecycleOrchestrationTests(unittest.TestCase):
+    def test_locked_unavailable_uses_distinct_terminal_metric(self):
+        disposition = pipeline_admission.PRLifecycleDisposition(
+            kind=pipeline_admission.PRDispositionKind.MERGED_SAME_HEAD,
+            expected_head_sha=HEAD_A,
+            actual_head_sha=HEAD_A,
+            current_state="closed",
+            merged=True,
+            stage="context.ingest",
+            locked=True,
+        )
+        context = orchestrator.pipeline_publication.PublicationContext(
+            repo=REPO,
+            pr_number=PR,
+            head_sha=HEAD_A,
+            expected_status="PENDING",
+            phase="context",
+            run_id=RUN,
+            generation_attempt=1,
+            runtime_identity={},
+            phase_claim=_claim(),
+            dry_run=False,
+        )
+        accounting = {
+            "deepseek_usage_accounting": {
+                "complete_numeric_usage": True,
+                "unreported_usage_call_count": 0,
+            }
+        }
+        with patch.object(
+            orchestrator.persistence,
+            "mark_superseded",
+            return_value=True,
+        ) as superseded, patch.object(
+            orchestrator,
+            "_emit_pipeline_metric",
+        ) as metric:
+            stored = orchestrator._mark_lifecycle_publication_unavailable(
+                disposition,
+                context=context,
+                publication_kind="lifecycle_cancellation",
+                accounting=accounting,
+                table=object(),
+            )
+
+        self.assertTrue(stored)
+        attrs = superseded.call_args.kwargs["extra_attrs"]
+        self.assertEqual(
+            superseded.call_args.kwargs["superseded_kind"],
+            "publication_unavailable_locked",
+        )
+        self.assertEqual(attrs["publication_status"], "unavailable_locked")
+        self.assertTrue(attrs["publication_unavailable_locked"])
+        self.assertTrue(
+            attrs["deepseek_usage_accounting"]["complete_numeric_usage"]
+        )
+        self.assertEqual(
+            metric.call_args.args[0],
+            "lifecycle_publication_unavailable",
+        )
+        self.assertNotEqual(
+            metric.call_args.args[0],
+            "lifecycle_publication_complete",
+        )
+
+    def test_second_precheck_unavailable_does_not_emit_cancellation_complete(self):
+        disposition = pipeline_admission.PRLifecycleDisposition(
+            kind=pipeline_admission.PRDispositionKind.MERGED_SAME_HEAD,
+            expected_head_sha=HEAD_A,
+            actual_head_sha=HEAD_A,
+            current_state="closed",
+            merged=True,
+            stage="context.pre_reconcile",
+            locked=False,
+        )
+        context = orchestrator.pipeline_publication.PublicationContext(
+            repo=REPO,
+            pr_number=PR,
+            head_sha=HEAD_A,
+            expected_status="PENDING",
+            phase="context",
+            run_id=RUN,
+            generation_attempt=1,
+            runtime_identity={},
+            phase_claim=_claim(),
+            dry_run=False,
+        )
+        accounting = {
+            "deepseek_usage_accounting": {
+                "complete_numeric_usage": True,
+                "unreported_usage_call_count": 0,
+            }
+        }
+
+        def locked_after_intent(**kwargs):
+            kwargs["lifecycle_unavailable_observer"](
+                {
+                    "phase": "context",
+                    "stage": "publication.pre_publish_disposition",
+                    "publication_kind": "lifecycle_cancellation",
+                    "lifecycle": "merged",
+                    "reason": "locked",
+                    "stored": True,
+                    **accounting,
+                }
+            )
+            return True
+
+        with patch.object(
+            orchestrator.pipeline_publication,
+            "commit_lifecycle_cancellation",
+            side_effect=locked_after_intent,
+        ), patch.object(
+            orchestrator,
+            "_emit_pipeline_metric",
+        ) as metric:
+            orchestrator._commit_lifecycle_cancellation(
+                disposition,
+                context=context,
+                runtime=object(),
+                deadline=object(),
+                accounting=accounting,
+                table=object(),
+            )
+
+        names = [call.args[0] for call in metric.call_args_list]
+        self.assertEqual(names.count("lifecycle_publication_unavailable"), 1)
+        self.assertNotIn("lifecycle_publication_complete", names)
+
+    def test_locked_prepared_recovery_retains_candidate_accounting(self):
+        item = _item(marker=True)
+        item["publication_intent"] = {
+            "state": "prepared",
+            "publication_key": "1" * 32,
+            "publication_kind": "post_merge_follow_up",
+            "required_disposition": "merged_same_head",
+        }
+        stopped = PRLifecycleSuperseded(
+            HEAD_A,
+            HEAD_A,
+            current_state="closed",
+            merged=True,
+            stage="publication.pre_publish_disposition",
+            superseded_kind="publication_unavailable_locked",
+        )
+        accounting = {
+            "deepseek_all_attempt_model_phases": [{"phase": "route"}],
+            "deepseek_usage_total": {"total_tokens": 29},
+            "deepseek_usage_accounting": {
+                "complete_numeric_usage": True,
+                "unreported_usage_call_count": 0,
+            },
+        }
+        with patch.object(
+            orchestrator.pipeline_admission,
+            "claim_phase_delivery",
+            return_value=_admission(item),
+        ), patch.object(
+            orchestrator.pipeline_admission,
+            "installation_token",
+            return_value="token",
+        ), patch.object(
+            orchestrator.pipeline_publication,
+            "recover_pending",
+            side_effect=stopped,
+        ), patch.object(
+            orchestrator.pipeline_publication.persistence,
+            "get_item",
+            return_value=item,
+        ), patch.object(
+            orchestrator.pipeline_publication,
+            "load_candidate",
+            return_value={"terminal_attributes": accounting},
+        ), patch.object(
+            orchestrator.persistence,
+            "mark_superseded",
+            return_value=True,
+        ) as superseded, patch.object(
+            orchestrator,
+            "_emit_pipeline_metric",
+        ) as metric:
+            orchestrator.run_context_phase(
+                item,
+                runtime=SequenceRuntime(
+                    _snapshot(state="closed", merged=True, locked=True)
+                ),
+                stream_event_id="context-stream",
+            )
+
+        attrs = superseded.call_args.kwargs["extra_attrs"]
+        self.assertEqual(attrs["publication_status"], "aborted_before_dispatch")
+        self.assertEqual(attrs["deepseek_usage_total"]["total_tokens"], 29)
+        self.assertTrue(
+            attrs["deepseek_usage_accounting"]["complete_numeric_usage"]
+        )
+        self.assertFalse(
+            any(call.args and call.args[0] == "lifecycle_publication_complete"
+                for call in metric.call_args_list)
+        )
+
     def test_context_claim_binds_exact_stream_head_and_run(self):
         item = _item()
         with patch.object(
@@ -220,6 +427,48 @@ class ContextLifecycleOrchestrationTests(unittest.TestCase):
                 else:
                     cancellation.assert_not_called()
                     superseded.assert_called_once()
+
+    def test_locked_admitted_merge_is_silent_unavailable_not_cancellation(self):
+        item = _item(marker=True)
+        runtime = SequenceRuntime(
+            _snapshot(state="closed", merged=True, locked=True)
+        )
+        with patch.object(
+            orchestrator.pipeline_admission,
+            "claim_phase_delivery",
+            return_value=_admission(item),
+        ), patch.object(
+            orchestrator.pipeline_admission,
+            "installation_token",
+            return_value="token",
+        ), patch.object(
+            orchestrator.pipeline_publication,
+            "recover_pending",
+            return_value=False,
+        ), patch.object(
+            orchestrator.persistence,
+            "get_item",
+            return_value=item,
+        ), patch.object(
+            orchestrator,
+            "_mark_lifecycle_publication_unavailable",
+            return_value=True,
+        ) as unavailable, patch.object(
+            orchestrator.pipeline_publication,
+            "commit_lifecycle_cancellation",
+        ) as cancellation:
+            orchestrator.run_context_phase(
+                item,
+                runtime=runtime,
+                stream_event_id="context-stream",
+            )
+
+        unavailable.assert_called_once()
+        self.assertEqual(
+            unavailable.call_args.kwargs["publication_kind"],
+            "lifecycle_cancellation",
+        )
+        cancellation.assert_not_called()
 
     def test_normal_context_forwards_pre_reconcile_boundary(self):
         callback = Mock()
@@ -408,6 +657,73 @@ class ReviewLifecycleOrchestrationTests(unittest.TestCase):
             commit.call_args.kwargs["context"].required_disposition,
             "merged_same_head",
         )
+
+    def test_locked_merge_after_final_stops_before_projection_and_dispatch(self):
+        item = _item("CONTEXT_READY", marker=True)
+        runtime = SequenceRuntime(
+            _snapshot(),
+            _snapshot(state="closed", merged=True, locked=True),
+        )
+        final_review = {
+            "review_generation_status": "complete",
+            "review_publishable": True,
+            "review_publication_safe": True,
+            "review_fallback_used": False,
+            "inline_comments": [],
+            "review_model_phases": [],
+        }
+        patches = self._run_review_patches(item, runtime)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patch.object(
+            orchestrator,
+            "refresh_review_ci_context",
+            side_effect=lambda _runtime, _repo, _head, details, meta, **_kw: (
+                details,
+                meta,
+            ),
+        ), patch.object(
+            orchestrator, "bind_provider_call_accounting"
+        ), patch.object(
+            orchestrator, "generate_review", return_value=final_review
+        ), patch.object(
+            orchestrator.result_artifact,
+            "is_nonpublishable",
+            return_value=False,
+        ), patch.object(
+            orchestrator,
+            "_lifecycle_accounting",
+            return_value={
+                "deepseek_usage_accounting": {
+                    "complete_numeric_usage": True,
+                    "unreported_usage_call_count": 0,
+                }
+            },
+        ), patch.object(
+            orchestrator,
+            "_mark_lifecycle_publication_unavailable",
+            return_value=True,
+        ) as unavailable, patch.object(
+            orchestrator,
+            "prepare_review_publication",
+        ) as prepare, patch.object(
+            orchestrator.pipeline_publication,
+            "commit_prepared",
+        ) as commit:
+            orchestrator.run_review_phase(
+                item,
+                runtime=runtime,
+                deepseek_client=SimpleNamespace(
+                    provider_call_records=lambda: []
+                ),
+                stream_event_id="review-stream",
+            )
+
+        unavailable.assert_called_once()
+        self.assertEqual(
+            unavailable.call_args.kwargs["publication_kind"],
+            "post_merge_follow_up",
+        )
+        prepare.assert_not_called()
+        commit.assert_not_called()
 
 
 if __name__ == "__main__":

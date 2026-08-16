@@ -290,10 +290,19 @@ class _PostWriteChangingHeadRuntime(_Runtime):
 
 
 class _LifecycleRuntime(_Runtime):
-    def __init__(self, *, state="open", merged=False, head_sha="abcdef123456", content=None):
+    def __init__(
+        self,
+        *,
+        state="open",
+        merged=False,
+        locked=False,
+        head_sha="abcdef123456",
+        content=None,
+    ):
         super().__init__(content=content, head_sha=head_sha)
         self.state = state
         self.merged = merged
+        self.locked = locked
         self.ci_calls = 0
 
     def get_pr_head_snapshot(self, repo_full_name, pr_number):
@@ -301,6 +310,7 @@ class _LifecycleRuntime(_Runtime):
             "head_sha": self.head_sha,
             "state": self.state,
             "merged": self.merged,
+            "locked": self.locked,
         }
 
     def get_ci_results_for_head(
@@ -3625,8 +3635,18 @@ class TestOrchestratorPipeline(unittest.TestCase):
         )["Item"]
         runtime = _SequenceLifecycleRuntime(
             [
-                {"head_sha": "abcdef123456", "state": "open", "merged": False},
-                {"head_sha": "abcdef123456", "state": "closed", "merged": True},
+                {
+                    "head_sha": "abcdef123456",
+                    "state": "open",
+                    "merged": False,
+                    "locked": False,
+                },
+                {
+                    "head_sha": "abcdef123456",
+                    "state": "closed",
+                    "merged": True,
+                    "locked": False,
+                },
             ]
         )
         generated = {
@@ -3723,9 +3743,24 @@ class TestOrchestratorPipeline(unittest.TestCase):
         )["Item"]
         runtime = _SequenceLifecycleRuntime(
             [
-                {"head_sha": "abcdef123456", "state": "open", "merged": False},
-                {"head_sha": "abcdef123456", "state": "open", "merged": False},
-                {"head_sha": "abcdef123456", "state": "closed", "merged": False},
+                {
+                    "head_sha": "abcdef123456",
+                    "state": "open",
+                    "merged": False,
+                    "locked": False,
+                },
+                {
+                    "head_sha": "abcdef123456",
+                    "state": "open",
+                    "merged": False,
+                    "locked": False,
+                },
+                {
+                    "head_sha": "abcdef123456",
+                    "state": "closed",
+                    "merged": False,
+                    "locked": False,
+                },
             ]
         )
         generated = {
