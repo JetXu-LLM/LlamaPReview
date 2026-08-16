@@ -2,7 +2,7 @@
 
 ## Official hosted service
 
-The official GitHub App reviews supported pull request events from public repositories. Its running Webhook, Pipeline, and dependency bytes are independently verified against the exact public `v0.1.0` release from this repository.
+The official GitHub App reviews supported pull request events from public repositories. Its running Webhook, Pipeline, and dependency bytes are independently verified against one exact attested semantic release from this repository. Each deployment records that exact release identity; this guide deliberately does not hard-code a version that will become stale.
 
 - Installation: [GitHub App](https://github.com/apps/llamapreview)
 - Product site: [jetxu-llm.github.io/LlamaPReview-site](https://jetxu-llm.github.io/LlamaPReview-site/)
@@ -28,3 +28,11 @@ Follow [AWS deployment](AWS_DEPLOYMENT.md) rather than copying official producti
 ## Behavioral parity
 
 Hosted and self-hosted deployments share the same admission, retrieval, judgment, projection, accounting, recovery, and publication code. Deployment configuration can change resource names, retention, budgets, and model routing; it should not silently change the review-output contract.
+
+That shared contract includes lifecycle rereads before consequential work,
+at most one early successor when an admitted open pull request advances to a
+new head, deterministic cancellation when an exact admitted head ends before
+review completion, and an exact-head post-merge follow-up only when Final was
+already publishable. These behaviors use the same native review publication
+and recovery transaction; they do not require a placeholder comment, a second
+publication surface, or wider GitHub App permissions.

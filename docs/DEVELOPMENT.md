@@ -34,6 +34,36 @@ A review-behavior change should include:
 
 Do not replace model-owned engineering judgment with repository-specific keywords. Prompts and behavior must remain general across repositories and languages.
 
+Lifecycle changes additionally require deterministic coverage for the full
+state matrix: same/new head crossed with open/merged/closed, plus an unverified
+snapshot. Tests must prove durable initial admission, one bounded early
+successor, silent late supersession, cancellation and post-merge rendering,
+disposition-bound dispatch and recovery, complete predecessor accounting, and
+unchanged ordinary open-PR output. Callback-order tests must place lifecycle
+checks before the first Reconcile and before Final without changing the normal
+number of bounded PFR rounds.
+
+Replay fixtures should exercise lifecycle transitions with synthetic public
+facts and make both cancellation and post-merge Markdown available for manual
+inspection. A release candidate must also pass Python 3.11 and 3.12 unit and
+replay tests, focused lint/static checks, compile/import checks,
+`git diff --check`, deterministic double builds, Linux x86_64/Python 3.12 Layer
+imports, and the source/history/artifact, dependency, license, SBOM, checksum,
+manifest, and provenance gates in `make verify`.
+
+GitHub platform compatibility may be checked with a deliberately selected
+public, already-merged fixture and the normal native `COMMENT` review transport.
+Such a probe must use no provider, make no AWS product write, bind an exact
+commit, add no inline comments, and prove the before/after GitHub surface. A
+permission, authentication, identity, or API-contract failure is a release stop
+condition; it must not fall back to an issue comment or another credential.
+
+After deployment, acceptance should be bounded by time or completed-review
+count. Record lifecycle/publication kinds, successor count, saved provider work,
+deadline margin before each Reconcile, latency, complete accounting,
+publication identity, and alarm/event-source health. Absence of a natural
+lifecycle transition is reported as unexercised rather than manufactured.
+
 ## Paid validation
 
 Paid provider tests are never part of ordinary contributor CI. A maintainer must opt in deliberately, freeze an exact public head, use the isolated local DRY_RUN harness, reconcile every provider call/token/cost, and prove zero GitHub/AWS product writes. Validation evidence must stay in an explicitly chosen local, access-controlled destination.

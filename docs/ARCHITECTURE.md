@@ -11,7 +11,7 @@ verified GitHub webhook
 → Deep engineering judgment
 → Final presentation
 → deterministic Projection and local degradation
-→ exact-head, idempotent GitHub publication
+→ lifecycle-bound, exact-head, idempotent GitHub publication
 ```
 
 ![LlamaPReview production architecture](assets/architecture.svg)
@@ -37,7 +37,41 @@ The Webhook verifies the signature, reads event type and repository visibility, 
 
 ### Exact-head evidence
 
-The queued head SHA is not treated as sufficient proof. The Pipeline rereads the pull request lifecycle and head before context work, before review work, and before publication. Repository reads are pinned to that head where GitHub supports an exact ref. Evidence records carry provenance and coverage rather than silently promoting search hints to facts.
+The queued head SHA is not treated as sufficient proof. The Pipeline rereads the pull request lifecycle and head before context work, before the first expensive PFR Reconcile, before Final presentation, and before publication. Repository reads are pinned to that head where GitHub supports an exact ref. Evidence records carry provenance and coverage rather than silently promoting search hints to facts.
+
+### Lifecycle disposition and bounded succession
+
+Admission owns one typed description of the current pull request state relative
+to the reviewed head:
+
+- open, merged, or closed on the same head;
+- open, merged, or closed on a newer head;
+- unverified when the current state cannot be proved.
+
+The orchestrator consumes that disposition; retrieval, review generation, and
+publication do not independently infer lifecycle policy. The first successful
+open/same-head admission is durable, so a retry cannot mistake a pull request
+that ended before work began for one that ended during an admitted review.
+
+An early open-head change, detected at context admission or immediately before
+the first Reconcile, may create exactly one successor for the new head. The
+predecessor remains a fully accounted superseded run. The successor is created
+by an owner-bound conditional update with a deterministic identity; it cannot
+chase another head change. A late head change remains a silent fail-closed
+supersession and can never publish the old review.
+
+| Observed transition | Before first Reconcile | After first Reconcile |
+| --- | --- | --- |
+| Open, same head | Continue | Continue |
+| Open, newer head | Requeue one successor at most | Supersede silently |
+| Merged/closed, same head after admission | Stop remaining model work and prepare a code-owned cancellation | Cancel, unless a publishable Final already exists for the exact merged head |
+| Merged/closed, newer head | Supersede silently | Supersede silently |
+| Unverified | Retry or fail closed without publication | Retry or fail closed without publication |
+
+A publishable Final that finishes after the exact reviewed head was merged may
+be projected as a post-merge follow-up. A closed-unmerged pull request receives
+only the cancellation. Pull requests already ended at initial admission receive
+no public message.
 
 ### Model and code boundaries
 
@@ -45,11 +79,18 @@ The model owns engineering judgment. Code owns bounded inputs, sensitive-path ex
 
 ### Exactly-once publication
 
-Before a GitHub write, the Pipeline stores an immutable publication candidate and an owner-bound intent. After dispatch it reconciles the exact head, payload digest, bot identity, and returned GitHub identifiers. Retries reuse the durable candidate or receipt; they do not regenerate and blindly post a second review.
+Before a GitHub write, the Pipeline stores an immutable publication candidate and an owner-bound intent. The candidate binds an explicit publication kind—ordinary review, lifecycle cancellation, or post-merge follow-up—to the exact head and required lifecycle disposition. The Pipeline revalidates that disposition immediately before dispatch. After dispatch it reconciles the payload digest, bot identity, exact commit, and returned GitHub identifiers. Retries reuse the durable candidate or receipt; they do not regenerate and blindly post a second review or fall back to an issue comment.
 
 ### Accounting truth
 
 Each provider HTTP attempt has a durable dispatch fence and a stable operation identity. The ledger retains logical routing identity, billed transport identity, status, token classes, and usage. A successful review cannot make a discarded or retried provider call disappear from accounting.
+
+Lifecycle cancellation and supersession do not erase work that already
+occurred. Content-safe telemetry records each checkpoint disposition, successor
+count, publication kind, remaining deadline before each Reconcile, elapsed
+provider time, and the same complete token/accounting facts used by ordinary
+reviews. The second bounded Reconcile remains available; lifecycle checks do
+not introduce a fixed wait or an implicit deadline-based skip.
 
 ## Repository map
 
