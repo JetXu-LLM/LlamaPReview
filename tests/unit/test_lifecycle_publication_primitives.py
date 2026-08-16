@@ -37,11 +37,19 @@ HEAD = "a" * 40
 
 
 class _Runtime:
-    def __init__(self, *, state="open", merged=False, head=HEAD):
+    def __init__(
+        self,
+        *,
+        state="open",
+        merged=False,
+        head=HEAD,
+        locked=False,
+    ):
         self.snapshot = {
             "head_sha": head,
             "state": state,
             "merged": merged,
+            "locked": locked,
         }
 
     def get_pr_head_snapshot(self, repo, pr_number):
@@ -415,6 +423,126 @@ class LifecyclePublicationPrimitiveTests(unittest.TestCase):
                 stage="publication.pre_dispatch",
             )
         self.assertEqual(raised.exception.actual_head_sha, "b" * 40)
+
+    def test_locked_ended_pre_dispatch_aborts_before_full_pr_fetch(self):
+        context = _context(
+            kind="lifecycle_cancellation",
+            disposition="merged_same_head",
+        )
+        item = {
+            "status": "PENDING",
+            "initial_admission": {
+                "schema_version": 1,
+                "disposition": "open_same_head",
+                "head_sha": HEAD,
+                "run_id": "run-7",
+                "admitted_at": "2026-08-16T00:00:00+00:00",
+            },
+        }
+        with patch.object(
+            pipeline_publication.persistence,
+            "get_item",
+            return_value=item,
+        ), patch.object(
+            pipeline_publication,
+            "fetch_pr_details",
+        ) as fetch:
+            check = pipeline_publication.make_pre_publish_check(
+                context,
+                _Runtime(state="closed", merged=True, locked=True),
+                check_duplicate=False,
+            )
+            with self.assertRaises(PRLifecycleSuperseded) as raised:
+                check()
+
+        self.assertEqual(
+            raised.exception.superseded_kind,
+            "publication_unavailable_locked",
+        )
+        fetch.assert_not_called()
+
+    def test_locked_ended_transition_precedes_lifecycle_mismatch(self):
+        context = _context(
+            kind="lifecycle_cancellation",
+            disposition="closed_same_head",
+        )
+        with self.assertRaises(PRLifecycleSuperseded) as locked:
+            pipeline_publication._require_publication_disposition(
+                context,
+                _Runtime(state="closed", merged=True, locked=True),
+                stage="publication.pre_dispatch",
+            )
+        self.assertEqual(
+            locked.exception.superseded_kind,
+            "publication_unavailable_locked",
+        )
+
+        with self.assertRaises(PublicationStateConflict):
+            pipeline_publication._require_publication_disposition(
+                context,
+                _Runtime(state="closed", merged=True, locked=False),
+                stage="publication.pre_dispatch",
+            )
+
+    def test_locked_prepared_intent_records_aborted_before_dispatch(self):
+        intent = {
+            "state": "prepared",
+            "publication_key": "1" * 32,
+            "publication_kind": "post_merge_follow_up",
+            "required_disposition": "merged_same_head",
+        }
+        error = PRLifecycleSuperseded(
+            HEAD,
+            HEAD,
+            current_state="closed",
+            merged=True,
+            stage="publication.pre_publish_disposition",
+            superseded_kind="publication_unavailable_locked",
+        )
+        candidate_accounting = {
+            "deepseek_model_phases": [{"phase": "route"}],
+            "deepseek_all_attempt_model_phases": [{"phase": "route"}],
+            "deepseek_usage_total": {"total_tokens": 17},
+            "deepseek_usage_accounting": {
+                "complete_numeric_usage": True,
+                "unreported_usage_call_count": 0,
+            },
+        }
+        with patch.object(
+            pipeline_publication.persistence,
+            "get_item",
+            return_value={"publication_intent": intent},
+        ), patch.object(
+            pipeline_publication,
+            "load_candidate",
+            return_value={"terminal_attributes": candidate_accounting},
+        ):
+            attrs = pipeline_publication.failure_attributes(
+                repo="owner/repo",
+                pr_number=7,
+                exc=error,
+                base={
+                    "deepseek_usage_accounting": {
+                        "complete_numeric_usage": True
+                    }
+                },
+            )
+
+        self.assertEqual(attrs["publication_status"], "aborted_before_dispatch")
+        self.assertTrue(attrs["publication_unavailable_locked"])
+        self.assertFalse(attrs["quality_scoreable"])
+        self.assertEqual(
+            attrs["quality_exclusion_reasons"],
+            ["publication_unavailable_locked"],
+        )
+        self.assertTrue(
+            attrs["deepseek_usage_accounting"]["complete_numeric_usage"]
+        )
+        self.assertEqual(attrs["deepseek_usage_total"]["total_tokens"], 17)
+        self.assertEqual(
+            attrs["deepseek_all_attempt_model_phases"],
+            [{"phase": "route"}],
+        )
 
     def test_candidate_and_intent_bind_kind_and_disposition(self):
         prepared = PreparedGitHubReview(

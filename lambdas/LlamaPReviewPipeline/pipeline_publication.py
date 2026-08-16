@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from . import persistence
 from .deadline import Deadline, DeadlineExceeded
@@ -34,7 +34,7 @@ from .review.publication import (
 from .review.github_publication_surface import (
     GITHUB_SURFACE_OPERATION_BUDGET_SECONDS,
 )
-from .review.publication_candidate import prepared_from_candidate
+from .review.publication_candidate import load_candidate, prepared_from_candidate
 from .review.publish import (
     GITHUB_PUBLICATION_FIELDS,
     PUBLICATION_KIND_DISPOSITIONS,
@@ -132,6 +132,21 @@ def _require_publication_disposition(
             merged=disposition.merged,
             stage=stage,
         )
+    if (
+        context.publication_kind
+        in {"lifecycle_cancellation", "post_merge_follow_up"}
+        and disposition.ended
+        and disposition.same_head
+        and disposition.locked is True
+    ):
+        raise PRLifecycleSuperseded(
+            context.head_sha,
+            disposition.actual_head_sha,
+            current_state=disposition.current_state,
+            merged=disposition.merged,
+            stage=stage,
+            superseded_kind="publication_unavailable_locked",
+        )
     if disposition.kind.value != context.required_disposition:
         raise PublicationStateConflict(
             "Current pull request lifecycle does not match the immutable "
@@ -213,6 +228,11 @@ def make_pre_publish_check(
                 "aborting GitHub write"
             )
         _require_initial_admission(context, latest)
+        _require_publication_disposition(
+            context,
+            runtime,
+            stage="publication.pre_publish_disposition",
+        )
         latest_pr_content, _ = fetch_pr_details(
             runtime,
             context.repo,
@@ -225,11 +245,6 @@ def make_pre_publish_check(
                 "Pre-publish duplicate guard: already reviewed by "
                 "llamapreview[bot]"
             )
-        _require_publication_disposition(
-            context,
-            runtime,
-            stage="publication.pre_publish_disposition",
-        )
 
     return pre_publish_check
 
@@ -284,12 +299,111 @@ def post_publication_observation(
     }
 
 
+def _commit_prepared_locked_unavailable(
+    candidate: Mapping[str, Any],
+    intent: Mapping[str, Any],
+    exc: BaseException,
+    *,
+    context: PublicationContext,
+    lifecycle_unavailable_observer: Optional[
+        Callable[[Mapping[str, Any]], None]
+    ],
+    table,
+) -> Optional[bool]:
+    if not (
+        isinstance(exc, PRLifecycleSuperseded)
+        and exc.superseded_kind == "publication_unavailable_locked"
+    ):
+        return None
+    terminal_attributes = dict(candidate.get("terminal_attributes") or {})
+    accounting = {
+        key: deepcopy(terminal_attributes[key])
+        for key in (
+            "deepseek_model_phases",
+            "deepseek_discarded_model_phases",
+            "deepseek_all_attempt_model_phases",
+            "deepseek_usage_total",
+            "deepseek_winning_usage_total",
+            "deepseek_discarded_usage_total",
+            "deepseek_usage_accounting",
+        )
+        if key in terminal_attributes
+    }
+    lifecycle = "merged" if exc.merged else "closed"
+    publication_kind = str(candidate.get("publication_kind") or "")
+    terminal = {
+        **accounting,
+        "publication_key": str(intent.get("publication_key") or ""),
+        "publication_kind": publication_kind,
+        "required_disposition": str(
+            candidate.get("required_disposition") or ""
+        ),
+        "publication_status": "aborted_before_dispatch",
+        "publication_unavailable_locked": True,
+        "review_lifecycle_outcome": lifecycle,
+        "quality_scoreable": False,
+        "quality_exclusion_reasons": ["publication_unavailable_locked"],
+    }
+    stored = persistence.mark_superseded(
+        str(candidate.get("repo") or ""),
+        int(candidate.get("pr_number") or 0),
+        context.expected_status,
+        expected_head_sha=str(candidate.get("head_sha") or ""),
+        actual_head_sha=exc.actual_head_sha,
+        stage=exc.stage,
+        superseded_kind="publication_unavailable_locked",
+        current_state=exc.current_state,
+        merged=exc.merged,
+        extra_attrs=terminal,
+        phase_claim=context.phase_claim,
+        expected_publication_intent=intent,
+        table=table,
+    )
+    if not stored:
+        latest = persistence.get_item(
+            str(candidate.get("repo") or ""),
+            int(candidate.get("pr_number") or 0),
+            table=table,
+            consistent_read=True,
+        ) or {}
+        stored = bool(
+            latest.get("status") == "SUPERSEDED"
+            and latest.get("superseded_kind")
+            == "publication_unavailable_locked"
+            and latest.get("publication_unavailable_locked") is True
+            and str(latest.get("publication_key") or "")
+            == str(intent.get("publication_key") or "")
+        )
+    if not stored:
+        raise PublicationStateConflict(
+            "Locked publication terminal write lost its exact prepared "
+            "intent.",
+            stage="publication.locked_unavailable",
+        )
+    if lifecycle_unavailable_observer is not None:
+        lifecycle_unavailable_observer(
+            {
+                "phase": context.phase,
+                "stage": exc.stage,
+                "publication_kind": publication_kind,
+                "lifecycle": lifecycle,
+                "reason": "locked",
+                "stored": True,
+                **accounting,
+            }
+        )
+    return True
+
+
 def recover_pending(
     item: Mapping[str, Any],
     *,
     context: PublicationContext,
     runtime: Any,
     deadline: Optional[Deadline],
+    lifecycle_unavailable_observer: Optional[
+        Callable[[Mapping[str, Any]], None]
+    ] = None,
     table=None,
 ) -> bool:
     """Recover the current intent without replaying phase generation."""
@@ -382,6 +496,22 @@ def recover_pending(
             stage="publication.dry_run_suppression",
         )
 
+    def commit_prepared_locked_unavailable(
+        candidate: Mapping[str, Any],
+        intent: Mapping[str, Any],
+        exc: BaseException,
+    ) -> Optional[bool]:
+        return _commit_prepared_locked_unavailable(
+            candidate,
+            intent,
+            exc,
+            context=context,
+            lifecycle_unavailable_observer=(
+                lifecycle_unavailable_observer
+            ),
+            table=table,
+        )
+
     return recover_publication_transaction(
         current_item=item,
         expected_status=context.expected_status,
@@ -406,6 +536,11 @@ def recover_pending(
         prepared_no_write_commit=(
             commit_prepared_without_write if context.dry_run else None
         ),
+        prepared_pre_dispatch_failure_commit=(
+            commit_prepared_locked_unavailable
+            if not context.dry_run
+            else None
+        ),
         deadline=deadline,
         table=table,
     )
@@ -419,6 +554,9 @@ def commit_prepared(
     runtime: Any,
     deadline: Optional[Deadline],
     pre_persist_stage: str,
+    lifecycle_unavailable_observer: Optional[
+        Callable[[Mapping[str, Any]], None]
+    ] = None,
     table=None,
 ) -> bool:
     """Commit one prepared result through the sole live or dry-run boundary."""
@@ -468,6 +606,20 @@ def commit_prepared(
                     deadline=deadline,
                 )
             ),
+            prepared_pre_dispatch_failure_commit=(
+                lambda candidate, intent, exc: (
+                    _commit_prepared_locked_unavailable(
+                        candidate,
+                        intent,
+                        exc,
+                        context=context,
+                        lifecycle_unavailable_observer=(
+                            lifecycle_unavailable_observer
+                        ),
+                        table=table,
+                    )
+                )
+            ),
             deadline=deadline,
             table=table,
         )
@@ -514,6 +666,9 @@ def commit_terminal_result(
     generation_status: str = "complete",
     quality_scoreable: bool = True,
     quality_exclusion_reasons: Optional[list[str]] = None,
+    lifecycle_unavailable_observer: Optional[
+        Callable[[Mapping[str, Any]], None]
+    ] = None,
     table=None,
 ) -> bool:
     """Build and commit a deterministic Context terminal notice."""
@@ -602,6 +757,7 @@ def commit_terminal_result(
         runtime=runtime,
         deadline=deadline,
         pre_persist_stage="terminal_result.pre_persist",
+        lifecycle_unavailable_observer=lifecycle_unavailable_observer,
         table=table,
     )
 
@@ -614,6 +770,9 @@ def commit_lifecycle_cancellation(
     deadline: Optional[Deadline] = None,
     ci_snapshot: Optional[Mapping[str, Any]] = None,
     extra_attributes: Optional[Mapping[str, Any]] = None,
+    lifecycle_unavailable_observer: Optional[
+        Callable[[Mapping[str, Any]], None]
+    ] = None,
     table=None,
 ) -> bool:
     """Publish the sole code-owned cancellation through the normal path."""
@@ -660,6 +819,7 @@ def commit_lifecycle_cancellation(
         generation_status="cancelled",
         quality_scoreable=False,
         quality_exclusion_reasons=[exclusion_reason],
+        lifecycle_unavailable_observer=lifecycle_unavailable_observer,
         table=table,
     )
 
@@ -693,6 +853,38 @@ def failure_attributes(
                         "required_disposition"
                     ),
                 }
+            )
+        if (
+            isinstance(exc, PRLifecycleSuperseded)
+            and exc.superseded_kind == "publication_unavailable_locked"
+        ):
+            if isinstance(intent, Mapping) and intent.get("state") == "prepared":
+                candidate = load_candidate(intent)
+                terminal_attributes = dict(
+                    candidate.get("terminal_attributes") or {}
+                )
+                for key in (
+                    "deepseek_model_phases",
+                    "deepseek_discarded_model_phases",
+                    "deepseek_all_attempt_model_phases",
+                    "deepseek_usage_total",
+                    "deepseek_winning_usage_total",
+                    "deepseek_discarded_usage_total",
+                    "deepseek_usage_accounting",
+                ):
+                    if key in terminal_attributes:
+                        attrs[key] = deepcopy(terminal_attributes[key])
+            attrs["publication_unavailable_locked"] = True
+            if not attrs.get("publication_status"):
+                attrs["publication_status"] = "unavailable_locked"
+            attrs["quality_scoreable"] = False
+            attrs["quality_exclusion_reasons"] = list(
+                dict.fromkeys(
+                    [
+                        *(attrs.get("quality_exclusion_reasons") or []),
+                        "publication_unavailable_locked",
+                    ]
+                )
             )
         return attrs
     if not isinstance(

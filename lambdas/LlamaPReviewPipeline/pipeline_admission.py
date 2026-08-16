@@ -59,6 +59,7 @@ class PRLifecycleDisposition:
     current_state: str
     merged: bool
     stage: str
+    locked: Optional[bool] = None
 
     @property
     def same_head(self) -> bool:
@@ -239,7 +240,18 @@ def current_pr_snapshot(
                 "GitHub did not return a complete PR head/lifecycle snapshot",
                 stage=stage,
             )
-        return {"head_sha": head_sha, "state": state, "merged": merged}
+        locked = snapshot.get("locked")
+        if locked is not None and type(locked) is not bool:
+            raise HeadVerificationUnavailable(
+                "GitHub returned an invalid PR conversation-lock state",
+                stage=stage,
+            )
+        return {
+            "head_sha": head_sha,
+            "state": state,
+            "merged": merged,
+            "locked": locked,
+        }
 
     head_sha = extract_pr_head_sha(pr_content or {})
     if not head_sha:
@@ -253,7 +265,12 @@ def current_pr_snapshot(
         )
     # Compatibility for unit/runtime adapters that predate lifecycle snapshots.
     # Production GitHubRuntime always uses the fresh typed branch above.
-    return {"head_sha": head_sha, "state": "", "merged": False}
+    return {
+        "head_sha": head_sha,
+        "state": "",
+        "merged": False,
+        "locked": None,
+    }
 
 
 def assert_current_head(
@@ -319,7 +336,8 @@ def current_pr_disposition(
 ) -> PRLifecycleDisposition:
     """Classify lifecycle and exact-head identity from one current snapshot.
 
-    Production adapters return all three snapshot fields. Compatibility
+    Production adapters return the lifecycle fields plus structural lock
+    state. Compatibility
     adapters that expose only a head SHA remain usable by the legacy
     ``assert_current_head`` boundary when that SHA is present, while the typed
     lifecycle result is explicitly unverified rather than guessing open.
@@ -345,12 +363,17 @@ def current_pr_disposition(
     actual = str(snapshot["head_sha"])
     state = str(snapshot.get("state") or "").strip().lower()
     merged = bool(snapshot.get("merged"))
+    locked = snapshot.get("locked")
     same_head = bool(actual and actual == str(expected_head_sha))
     if not actual:
         kind = PRDispositionKind.UNVERIFIED
     elif not state:
         # Legacy exact-head-only runtime adapter. assert_current_head preserves
         # its historic behavior; lifecycle-aware callers see unverified.
+        kind = PRDispositionKind.UNVERIFIED
+    elif (merged or state == "closed") and type(locked) is not bool:
+        # An ended pull request may reject the sole native review surface when
+        # its conversation is locked. Do not guess publication availability.
         kind = PRDispositionKind.UNVERIFIED
     elif merged:
         kind = (
@@ -379,6 +402,7 @@ def current_pr_disposition(
         current_state=state,
         merged=merged,
         stage=str(stage),
+        locked=locked if type(locked) is bool else None,
     )
 
 

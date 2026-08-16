@@ -404,6 +404,7 @@ class GitHubRuntime:
 
         repo = self.get_repository(repo_full_name)
         pull = repo.repo.get_pull(int(pr_number))
+        raw_locked = getattr(pull, "locked", None)
         return {
             "head_sha": str(
                 getattr(getattr(pull, "head", None), "sha", "") or ""
@@ -413,6 +414,7 @@ class GitHubRuntime:
                 getattr(pull, "merged", False)
                 or getattr(pull, "merged_at", None)
             ),
+            "locked": raw_locked if type(raw_locked) is bool else None,
         }
 
     def get_ci_results_for_head(

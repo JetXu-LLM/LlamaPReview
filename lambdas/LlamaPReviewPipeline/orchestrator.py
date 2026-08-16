@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from copy import deepcopy
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from . import config, persistence, pipeline_admission, pipeline_publication
 from .context_engine.low_route import (
@@ -218,6 +218,12 @@ def _commit_lifecycle_cancellation(
         publication_kind="lifecycle_cancellation",
         required_disposition=required,
     )
+    unavailable_observed = {"value": False}
+
+    def observe_unavailable(fields: Mapping[str, Any]) -> None:
+        unavailable_observed["value"] = True
+        _observe_lifecycle_publication_unavailable(fields)
+
     stored = pipeline_publication.commit_lifecycle_cancellation(
         context=cancellation_context,
         runtime=runtime,
@@ -227,8 +233,11 @@ def _commit_lifecycle_cancellation(
             **accounting,
             **(extra_attributes or {}),
         },
+        lifecycle_unavailable_observer=observe_unavailable,
         table=table,
     )
+    if unavailable_observed["value"]:
+        return
     accounting_status = dict(
         accounting.get("deepseek_usage_accounting") or {}
     )
@@ -239,6 +248,91 @@ def _commit_lifecycle_cancellation(
         publication_kind="lifecycle_cancellation",
         lifecycle=lifecycle,
         stored=stored,
+        provider_accounting_complete=bool(
+            accounting_status.get("complete_numeric_usage")
+        ),
+        unreported_usage_call_count=int(
+            accounting_status.get("unreported_usage_call_count") or 0
+        ),
+    )
+
+
+def _mark_lifecycle_publication_unavailable(
+    disposition: pipeline_admission.PRLifecycleDisposition,
+    *,
+    context: pipeline_publication.PublicationContext,
+    publication_kind: str,
+    accounting: Dict[str, Any],
+    table: Any,
+    extra_attributes: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Persist a structurally locked, ended publication as silent supersession."""
+
+    if not (
+        disposition.ended
+        and disposition.same_head
+        and disposition.locked is True
+        and publication_kind
+        in {"lifecycle_cancellation", "post_merge_follow_up"}
+    ):
+        raise ValueError(
+            "locked lifecycle publication requires an exact ended head"
+        )
+    lifecycle = "merged" if disposition.merged else "closed"
+    stored = persistence.mark_superseded(
+        context.repo,
+        context.pr_number,
+        context.expected_status,
+        expected_head_sha=context.head_sha,
+        actual_head_sha=disposition.actual_head_sha,
+        stage=disposition.stage,
+        superseded_kind="publication_unavailable_locked",
+        current_state=disposition.current_state,
+        merged=disposition.merged,
+        extra_attrs={
+            **accounting,
+            **(extra_attributes or {}),
+            "publication_kind": publication_kind,
+            "required_disposition": f"{lifecycle}_same_head",
+            "publication_status": "unavailable_locked",
+            "publication_unavailable_locked": True,
+            "review_lifecycle_outcome": lifecycle,
+            "quality_scoreable": False,
+            "quality_exclusion_reasons": [
+                "publication_unavailable_locked"
+            ],
+        },
+        phase_claim=context.phase_claim,
+        table=table,
+    )
+    _observe_lifecycle_publication_unavailable(
+        {
+            "phase": context.phase,
+            "stage": disposition.stage,
+            "publication_kind": publication_kind,
+            "lifecycle": lifecycle,
+            "reason": "locked",
+            "stored": stored,
+            **accounting,
+        }
+    )
+    return stored
+
+
+def _observe_lifecycle_publication_unavailable(
+    fields: Mapping[str, Any],
+) -> None:
+    accounting_status = dict(
+        fields.get("deepseek_usage_accounting") or {}
+    )
+    _emit_pipeline_metric(
+        "lifecycle_publication_unavailable",
+        phase=fields.get("phase"),
+        stage=fields.get("stage"),
+        publication_kind=fields.get("publication_kind"),
+        lifecycle=fields.get("lifecycle"),
+        reason=fields.get("reason"),
+        stored=bool(fields.get("stored")),
         provider_accounting_complete=bool(
             accounting_status.get("complete_numeric_usage")
         ),
@@ -685,6 +779,9 @@ def run_context_phase(
             context=context_publication,
             runtime=active_runtime,
             deadline=deadline,
+            lifecycle_unavailable_observer=(
+                _observe_lifecycle_publication_unavailable
+            ),
             table=table,
         ):
             return
@@ -815,19 +912,34 @@ def run_context_phase(
                     **lifecycle_terminal_attrs,
                 }
                 if disposition.same_head and has_admission:
-                    _commit_lifecycle_cancellation(
-                        disposition,
-                        context=context_publication,
-                        runtime=active_runtime,
-                        deadline=deadline,
-                        accounting=accounting,
-                        table=table,
-                        extra_attributes={
-                            "context_runtime_identity": (
-                                context_runtime_identity
-                            ),
-                        },
-                    )
+                    if disposition.locked is True:
+                        _mark_lifecycle_publication_unavailable(
+                            disposition,
+                            context=context_publication,
+                            publication_kind="lifecycle_cancellation",
+                            accounting=accounting,
+                            table=table,
+                            extra_attributes={
+                                "context_runtime_identity": (
+                                    context_runtime_identity
+                                ),
+                                "review_generation_status": "cancelled",
+                            },
+                        )
+                    else:
+                        _commit_lifecycle_cancellation(
+                            disposition,
+                            context=context_publication,
+                            runtime=active_runtime,
+                            deadline=deadline,
+                            accounting=accounting,
+                            table=table,
+                            extra_attributes={
+                                "context_runtime_identity": (
+                                    context_runtime_identity
+                                ),
+                            },
+                        )
                 else:
                     _mark_lifecycle_superseded(
                         disposition,
@@ -1437,6 +1549,9 @@ def run_review_phase(
             context=review_publication,
             runtime=active_runtime,
             deadline=deadline,
+            lifecycle_unavailable_observer=(
+                _observe_lifecycle_publication_unavailable
+            ),
             table=table,
         ):
             return
@@ -1527,6 +1642,34 @@ def run_review_phase(
                     and final_publishable
                     and disposition.merged
                 ):
+                    if disposition.locked is True:
+                        accounting = _lifecycle_accounting(
+                            repo=repo,
+                            pr_number=pr_number,
+                            table=table,
+                            client=review_client,
+                            context_attempt=int(
+                                item_for_review.get("context_attempt") or 0
+                            ),
+                            review_attempt=attempt,
+                        )
+                        _mark_lifecycle_publication_unavailable(
+                            disposition,
+                            context=review_publication,
+                            publication_kind="post_merge_follow_up",
+                            accounting=accounting,
+                            table=table,
+                            extra_attributes={
+                                "context_runtime_identity": (
+                                    context_runtime_identity
+                                ),
+                                "review_runtime_identity": (
+                                    review_runtime_identity
+                                ),
+                                "review_generation_status": "complete",
+                            },
+                        )
+                        raise _LifecycleStop()
                     return disposition
                 accounting = _lifecycle_accounting(
                     repo=repo,
@@ -1539,22 +1682,40 @@ def run_review_phase(
                     review_attempt=attempt,
                 )
                 if disposition.same_head and has_admission:
-                    _commit_lifecycle_cancellation(
-                        disposition,
-                        context=review_publication,
-                        runtime=active_runtime,
-                        deadline=deadline,
-                        accounting=accounting,
-                        table=table,
-                        extra_attributes={
-                            "context_runtime_identity": (
-                                context_runtime_identity
-                            ),
-                            "review_runtime_identity": (
-                                review_runtime_identity
-                            ),
-                        },
-                    )
+                    if disposition.locked is True:
+                        _mark_lifecycle_publication_unavailable(
+                            disposition,
+                            context=review_publication,
+                            publication_kind="lifecycle_cancellation",
+                            accounting=accounting,
+                            table=table,
+                            extra_attributes={
+                                "context_runtime_identity": (
+                                    context_runtime_identity
+                                ),
+                                "review_runtime_identity": (
+                                    review_runtime_identity
+                                ),
+                                "review_generation_status": "cancelled",
+                            },
+                        )
+                    else:
+                        _commit_lifecycle_cancellation(
+                            disposition,
+                            context=review_publication,
+                            runtime=active_runtime,
+                            deadline=deadline,
+                            accounting=accounting,
+                            table=table,
+                            extra_attributes={
+                                "context_runtime_identity": (
+                                    context_runtime_identity
+                                ),
+                                "review_runtime_identity": (
+                                    review_runtime_identity
+                                ),
+                            },
+                        )
                 else:
                     _mark_lifecycle_superseded(
                         disposition,
@@ -1873,6 +2034,12 @@ def run_review_phase(
             publication_kind=prepared.publication_kind,
             required_disposition=prepared.required_disposition,
         )
+        unavailable_observed = {"value": False}
+
+        def observe_unavailable(fields: Mapping[str, Any]) -> None:
+            unavailable_observed["value"] = True
+            _observe_lifecycle_publication_unavailable(fields)
+
         stored = pipeline_publication.commit_prepared(
             prepared,
             projected.terminal_attributes,
@@ -1880,8 +2047,11 @@ def run_review_phase(
             runtime=active_runtime,
             deadline=deadline,
             pre_persist_stage="review.pre_persist",
+            lifecycle_unavailable_observer=observe_unavailable,
             table=table,
         )
+        if unavailable_observed["value"]:
+            return
         accounting_status = projected.terminal_attributes.get(
             "deepseek_usage_accounting"
         )
