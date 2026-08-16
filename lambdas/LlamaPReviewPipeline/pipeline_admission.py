@@ -11,6 +11,7 @@ import logging
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, Optional
 
 from . import config, persistence
@@ -34,6 +35,46 @@ class PhaseAdmission:
     current_item: Dict[str, Any]
     phase_claim: Dict[str, Any]
     attempt: int
+
+
+class PRDispositionKind(str, Enum):
+    """Exact current PR lifecycle relative to one expected review head."""
+
+    OPEN_SAME_HEAD = "open_same_head"
+    OPEN_NEW_HEAD = "open_new_head"
+    MERGED_SAME_HEAD = "merged_same_head"
+    MERGED_NEW_HEAD = "merged_new_head"
+    CLOSED_SAME_HEAD = "closed_same_head"
+    CLOSED_NEW_HEAD = "closed_new_head"
+    UNVERIFIED = "unverified"
+
+
+@dataclass(frozen=True, slots=True)
+class PRLifecycleDisposition:
+    """Typed, content-safe lifecycle result owned by exact-head admission."""
+
+    kind: PRDispositionKind
+    expected_head_sha: str
+    actual_head_sha: str
+    current_state: str
+    merged: bool
+    stage: str
+
+    @property
+    def same_head(self) -> bool:
+        return bool(
+            self.actual_head_sha
+            and self.actual_head_sha == self.expected_head_sha
+        )
+
+    @property
+    def ended(self) -> bool:
+        return self.kind in {
+            PRDispositionKind.MERGED_SAME_HEAD,
+            PRDispositionKind.MERGED_NEW_HEAD,
+            PRDispositionKind.CLOSED_SAME_HEAD,
+            PRDispositionKind.CLOSED_NEW_HEAD,
+        }
 
 
 def require_item_field(item: Mapping[str, Any], key: str) -> Any:
@@ -122,6 +163,8 @@ def claim_phase_delivery(
     expected_status: str,
     runtime_identity: Dict[str, Any],
     stream_event_id: str,
+    stream_head_sha: str = "",
+    stream_run_id: str = "",
     table=None,
 ) -> Optional[PhaseAdmission]:
     """Consistently reread and claim one current stream-delivered phase.
@@ -133,6 +176,11 @@ def claim_phase_delivery(
 
     if phase not in {"context", "review"}:
         raise ValueError(f"Unsupported pipeline phase: {phase}")
+    identity_fence: Dict[str, str] = {}
+    if stream_head_sha:
+        identity_fence["expected_head_sha"] = str(stream_head_sha)
+    if stream_run_id:
+        identity_fence["expected_run_id"] = str(stream_run_id)
     delivery = persistence.claim_current_phase_delivery(
         repo,
         pr_number,
@@ -140,6 +188,7 @@ def claim_phase_delivery(
         expected_status=expected_status,
         runtime_identity=runtime_identity,
         stream_event_id=stream_event_id,
+        **identity_fence,
         table=table,
     )
     if not delivery["eligible"]:
@@ -218,27 +267,119 @@ def assert_current_head(
 ) -> str:
     """Require the queued exact head to remain open and unmerged."""
 
-    snapshot = current_pr_snapshot(
+    disposition = current_pr_disposition(
         runtime,
         repo,
         pr_number,
+        expected_head_sha,
         pr_content=pr_content,
         stage=stage,
     )
-    actual = str(snapshot["head_sha"])
-    if actual != expected_head_sha:
-        raise HeadSuperseded(expected_head_sha, actual, stage=stage)
-    state = str(snapshot.get("state") or "")
-    merged = bool(snapshot.get("merged"))
-    if state and (state != "open" or merged):
-        raise PRLifecycleSuperseded(
-            expected_head_sha,
-            actual,
-            current_state=state,
-            merged=merged,
+    if disposition.kind is PRDispositionKind.UNVERIFIED:
+        if disposition.actual_head_sha and not disposition.current_state:
+            if disposition.actual_head_sha != expected_head_sha:
+                raise HeadSuperseded(
+                    expected_head_sha,
+                    disposition.actual_head_sha,
+                    stage=stage,
+                )
+            return disposition.actual_head_sha
+        raise HeadVerificationUnavailable(
+            "GitHub did not return a complete PR head/lifecycle snapshot",
             stage=stage,
         )
-    return actual
+    # Lifecycle is intentionally classified before an ended PR's head change.
+    # This prevents a merged/closed item from entering the open-head successor
+    # path merely because its final head differs from the queued revision.
+    if disposition.ended:
+        raise PRLifecycleSuperseded(
+            expected_head_sha,
+            disposition.actual_head_sha,
+            current_state=disposition.current_state,
+            merged=disposition.merged,
+            stage=stage,
+        )
+    if disposition.kind is PRDispositionKind.OPEN_NEW_HEAD:
+        raise HeadSuperseded(
+            expected_head_sha,
+            disposition.actual_head_sha,
+            stage=stage,
+        )
+    return disposition.actual_head_sha
+
+
+def current_pr_disposition(
+    runtime: Any,
+    repo: str,
+    pr_number: int,
+    expected_head_sha: str,
+    *,
+    pr_content: Optional[Dict[str, Any]] = None,
+    stage: str,
+) -> PRLifecycleDisposition:
+    """Classify lifecycle and exact-head identity from one current snapshot.
+
+    Production adapters return all three snapshot fields. Compatibility
+    adapters that expose only a head SHA remain usable by the legacy
+    ``assert_current_head`` boundary when that SHA is present, while the typed
+    lifecycle result is explicitly unverified rather than guessing open.
+    """
+
+    try:
+        snapshot = current_pr_snapshot(
+            runtime,
+            repo,
+            pr_number,
+            pr_content=pr_content,
+            stage=stage,
+        )
+    except HeadVerificationUnavailable:
+        return PRLifecycleDisposition(
+            kind=PRDispositionKind.UNVERIFIED,
+            expected_head_sha=str(expected_head_sha),
+            actual_head_sha="",
+            current_state="",
+            merged=False,
+            stage=str(stage),
+        )
+    actual = str(snapshot["head_sha"])
+    state = str(snapshot.get("state") or "").strip().lower()
+    merged = bool(snapshot.get("merged"))
+    same_head = bool(actual and actual == str(expected_head_sha))
+    if not actual:
+        kind = PRDispositionKind.UNVERIFIED
+    elif not state:
+        # Legacy exact-head-only runtime adapter. assert_current_head preserves
+        # its historic behavior; lifecycle-aware callers see unverified.
+        kind = PRDispositionKind.UNVERIFIED
+    elif merged:
+        kind = (
+            PRDispositionKind.MERGED_SAME_HEAD
+            if same_head
+            else PRDispositionKind.MERGED_NEW_HEAD
+        )
+    elif state == "closed":
+        kind = (
+            PRDispositionKind.CLOSED_SAME_HEAD
+            if same_head
+            else PRDispositionKind.CLOSED_NEW_HEAD
+        )
+    elif state == "open":
+        kind = (
+            PRDispositionKind.OPEN_SAME_HEAD
+            if same_head
+            else PRDispositionKind.OPEN_NEW_HEAD
+        )
+    else:
+        kind = PRDispositionKind.UNVERIFIED
+    return PRLifecycleDisposition(
+        kind=kind,
+        expected_head_sha=str(expected_head_sha),
+        actual_head_sha=actual,
+        current_state=state,
+        merged=merged,
+        stage=str(stage),
+    )
 
 
 def hard_input_skip_reason(file_changes: Any) -> str:

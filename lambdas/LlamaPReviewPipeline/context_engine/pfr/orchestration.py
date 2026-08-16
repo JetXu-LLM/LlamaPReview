@@ -21,7 +21,7 @@ from ..packing import ContextSection, pack_sections, truncate_preserving_current
 from ..repo_structure import RepoInventory
 from string import Template
 from ..tools import ToolExecutor
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from .common import PFRReconcileFailure, _message_content, _parse_json_object, _pfr_model_phase, _require_complete_response, _truncate
 from .prompts import PFR_SYSTEM_PROMPT, PLAN_CONTINUATION_PROMPT, PLAN_PROMPT
 from .hints import build_repo_fact_sheet, format_unique_suffix_path_hints, read_owner_docs
@@ -128,6 +128,7 @@ def collect_context_pfr(
     deadline: Optional[Deadline] = None,
     repo_inventory: Optional[RepoInventory] = None,
     initial_evidence_ledger: Optional[Dict[str, Any]] = None,
+    before_first_reconcile: Optional[Callable[[], Any]] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     state = initialize_collection(
         runtime=runtime,
@@ -388,7 +389,15 @@ def collect_context_pfr(
     _sync_plan_from_steps(plan, planned_steps)
     _execute_steps(executor, planned_steps, record_skipped_verification=True)
 
+    # Lifecycle policy remains outside retrieval.  This capability boundary is
+    # deliberately after the initial exact-head tools and before Reconcile has
+    # assembled or dispatched its first model request.  Callback failures must
+    # escape so the orchestrator can persist the appropriate terminal state.
+    if before_first_reconcile is not None:
+        before_first_reconcile()
+
     reconcile: Dict[str, Any] = {}
+    pfr_reconcile_dispatches: List[Dict[str, Any]] = []
     effective_reconcile_rounds = max(
         1,
         min(2, int(config.PFR_MAX_RECONCILE_ROUNDS)),
@@ -454,21 +463,42 @@ def collect_context_pfr(
             terminal_tool_event_count = len(state.tool_events)
             break
         try:
-            reconcile = reconcile_contract._reconcile(
-                client=client,
-                model=model,
-                reasoning_effort=reasoning_effort,
-                pr_details=pr_details,
-                plan=plan,
-                context_text=context_snapshot,
-                evidence_index_envelope=evidence_index_envelope,
-                trace_metadata=trace_metadata,
-                round_index=round_index + 1,
-                allow_representation_repair=(
-                    not pfr_reconcile_representation_repair_consumed
+            dispatch_started = time.monotonic()
+            dispatch_telemetry: Dict[str, Any] = {
+                "round": round_index + 1,
+                "deadline_remaining_seconds": (
+                    round(deadline.remaining_seconds(), 3)
+                    if deadline is not None
+                    else None
                 ),
-                deadline=deadline,
-            )
+                "deadline_elapsed_seconds": (
+                    round(deadline.elapsed_seconds(), 3)
+                    if deadline is not None
+                    else None
+                ),
+            }
+            pfr_reconcile_dispatches.append(dispatch_telemetry)
+            try:
+                reconcile = reconcile_contract._reconcile(
+                    client=client,
+                    model=model,
+                    reasoning_effort=reasoning_effort,
+                    pr_details=pr_details,
+                    plan=plan,
+                    context_text=context_snapshot,
+                    evidence_index_envelope=evidence_index_envelope,
+                    trace_metadata=trace_metadata,
+                    round_index=round_index + 1,
+                    allow_representation_repair=(
+                        not pfr_reconcile_representation_repair_consumed
+                    ),
+                    deadline=deadline,
+                )
+            finally:
+                dispatch_telemetry["elapsed_seconds"] = round(
+                    time.monotonic() - dispatch_started,
+                    3,
+                )
             reconcile_usages = reconcile.pop("_model_usages", [])
             reconcile_phases = reconcile.pop("_model_phases", [])
             if isinstance(reconcile_phases, list):
@@ -900,6 +930,7 @@ def collect_context_pfr(
                 unique_suffix_path_candidates
             ),
             "pfr_reconcile_usages": pfr_reconcile_usages,
+            "pfr_reconcile_dispatches": pfr_reconcile_dispatches,
             "pfr_reconcile_representation_repairs": (
                 pfr_reconcile_representation_repairs
             ),

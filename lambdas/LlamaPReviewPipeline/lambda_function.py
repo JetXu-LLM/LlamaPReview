@@ -6,7 +6,7 @@ import base64
 import logging
 from typing import Any, Dict
 
-from . import orchestrator
+from . import orchestrator, persistence
 from .errors import PhaseClaimUnavailable
 
 logger = logging.getLogger()
@@ -51,7 +51,8 @@ def process_record(record: Dict[str, Any], *, lambda_context=None) -> None:
     old = from_dynamodb_image(old_image)
     status = item.get("status")
     if status == old.get("status"):
-        return
+        if not persistence.is_valid_head_successor_transition(old, item):
+            return
     stream_event_id = str(record.get("eventID") or "").strip()
     if status in {"PENDING", "CONTEXT_READY"} and not stream_event_id:
         raise PhaseClaimUnavailable(

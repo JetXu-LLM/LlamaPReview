@@ -24,6 +24,7 @@ from .deepseek_client import (
 from .errors import (
     CIRefreshUnavailable,
     HeadSuperseded,
+    HeadVerificationUnavailable,
     PRLifecycleSuperseded,
     ReviewGenerationIncomplete,
     classify_failure,
@@ -68,6 +69,183 @@ from .review.evidence_contract import (
 from .runtime_identity import capture_runtime_identity
 
 logger = logging.getLogger(__name__)
+
+
+class _LifecycleStop(RuntimeError):
+    """Internal control signal after lifecycle state is durably handled."""
+
+
+def _verified_disposition(
+    runtime: Any,
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    *,
+    stage: str,
+) -> pipeline_admission.PRLifecycleDisposition:
+    disposition = pipeline_admission.current_pr_disposition(
+        runtime,
+        repo,
+        pr_number,
+        head_sha,
+        stage=stage,
+    )
+    if disposition.kind is pipeline_admission.PRDispositionKind.UNVERIFIED:
+        raise HeadVerificationUnavailable(
+            "GitHub did not return a complete PR head/lifecycle snapshot",
+            stage=stage,
+        )
+    _emit_pipeline_metric(
+        "lifecycle_checkpoint",
+        phase=stage.split(".", 1)[0],
+        stage=stage,
+        disposition=disposition.kind.value,
+    )
+    return disposition
+
+
+def _has_exact_initial_admission(
+    item: Dict[str, Any],
+    *,
+    head_sha: str,
+    run_id: str,
+) -> bool:
+    admission = item.get("initial_admission")
+    return bool(
+        isinstance(admission, dict)
+        and int(admission.get("schema_version") or 0) == 1
+        and str(admission.get("disposition") or "") == "open_same_head"
+        and str(admission.get("head_sha") or "") == str(head_sha)
+        and str(admission.get("run_id") or "") == str(run_id)
+        and str(admission.get("admitted_at") or "")
+    )
+
+
+def _publication_context_for_lifecycle(
+    context: pipeline_publication.PublicationContext,
+    *,
+    publication_kind: str,
+    required_disposition: str,
+) -> pipeline_publication.PublicationContext:
+    return pipeline_publication.PublicationContext(
+        repo=context.repo,
+        pr_number=context.pr_number,
+        head_sha=context.head_sha,
+        expected_status=context.expected_status,
+        phase=context.phase,
+        run_id=context.run_id,
+        generation_attempt=context.generation_attempt,
+        runtime_identity=context.runtime_identity,
+        phase_claim=context.phase_claim,
+        dry_run=context.dry_run,
+        publication_kind=publication_kind,
+        required_disposition=required_disposition,
+    )
+
+
+def _lifecycle_accounting(
+    *,
+    repo: str,
+    pr_number: int,
+    table: Any,
+    client: Any,
+    context_attempt: int,
+    review_attempt: Optional[int],
+) -> Dict[str, Any]:
+    return provider_usage_accounting(
+        provider_calls=provider_call_records(
+            repo=repo,
+            pr_number=pr_number,
+            table=table,
+            client=client,
+        ),
+        fallback_winning_phases=[],
+        context_attempt=int(context_attempt or 0),
+        review_attempt=review_attempt,
+    )
+
+
+def _mark_lifecycle_superseded(
+    disposition: pipeline_admission.PRLifecycleDisposition,
+    *,
+    context: pipeline_publication.PublicationContext,
+    stage: str,
+    accounting: Dict[str, Any],
+    table: Any,
+) -> None:
+    if disposition.kind in {
+        pipeline_admission.PRDispositionKind.MERGED_SAME_HEAD,
+        pipeline_admission.PRDispositionKind.MERGED_NEW_HEAD,
+    }:
+        superseded_kind = "pr_merged"
+    elif disposition.kind in {
+        pipeline_admission.PRDispositionKind.CLOSED_SAME_HEAD,
+        pipeline_admission.PRDispositionKind.CLOSED_NEW_HEAD,
+    }:
+        superseded_kind = "pr_closed"
+    else:
+        superseded_kind = "head_changed"
+    persistence.mark_superseded(
+        context.repo,
+        context.pr_number,
+        context.expected_status,
+        expected_head_sha=context.head_sha,
+        actual_head_sha=disposition.actual_head_sha,
+        stage=stage,
+        superseded_kind=superseded_kind,
+        current_state=disposition.current_state,
+        merged=disposition.merged,
+        extra_attrs=accounting,
+        phase_claim=context.phase_claim,
+        table=table,
+    )
+
+
+def _commit_lifecycle_cancellation(
+    disposition: pipeline_admission.PRLifecycleDisposition,
+    *,
+    context: pipeline_publication.PublicationContext,
+    runtime: Any,
+    deadline: Deadline,
+    accounting: Dict[str, Any],
+    table: Any,
+    extra_attributes: Optional[Dict[str, Any]] = None,
+) -> None:
+    lifecycle = "merged" if disposition.merged else "closed"
+    required = f"{lifecycle}_same_head"
+    cancellation_context = _publication_context_for_lifecycle(
+        context,
+        publication_kind="lifecycle_cancellation",
+        required_disposition=required,
+    )
+    stored = pipeline_publication.commit_lifecycle_cancellation(
+        context=cancellation_context,
+        runtime=runtime,
+        lifecycle=lifecycle,
+        deadline=deadline,
+        extra_attributes={
+            **accounting,
+            **(extra_attributes or {}),
+        },
+        table=table,
+    )
+    accounting_status = dict(
+        accounting.get("deepseek_usage_accounting") or {}
+    )
+    _emit_pipeline_metric(
+        "lifecycle_publication_complete",
+        phase=context.phase,
+        stage=disposition.stage,
+        publication_kind="lifecycle_cancellation",
+        lifecycle=lifecycle,
+        stored=stored,
+        provider_accounting_complete=bool(
+            accounting_status.get("complete_numeric_usage")
+        ),
+        unreported_usage_call_count=int(
+            accounting_status.get("unreported_usage_call_count") or 0
+        ),
+    )
 
 
 def _trace_metadata(repo: str, pr_number: int, head_sha: str, **extra: Any) -> Dict[str, Any]:
@@ -344,6 +522,7 @@ def _context_for_mode(
     table=None,
     repo_inventory: Optional[RepoInventory] = None,
     initial_evidence_ledger: Optional[Dict[str, Any]] = None,
+    before_first_reconcile=None,
 ) -> tuple[str, Dict[str, Any]]:
     if review_mode == "low":
         return _collect_low_same_file_context(
@@ -383,6 +562,7 @@ def _context_for_mode(
     kwargs["deadline"] = deadline
     kwargs["repo_inventory"] = repo_inventory
     kwargs["initial_evidence_ledger"] = initial_evidence_ledger
+    kwargs["before_first_reconcile"] = before_first_reconcile
 
     context_text, meta = collect_context(
         runtime=runtime,
@@ -434,6 +614,12 @@ def run_context_phase(
         expected_status="PENDING",
         runtime_identity=context_runtime_identity,
         stream_event_id=stream_event_id,
+        stream_head_sha=str(item.get("head_sha") or ""),
+        # Legacy queue items may predate a persisted run_id. Every successor
+        # writes one, so the strong stale-event run fence is always active on
+        # the new same-status transition without rejecting legacy ordinary
+        # deliveries that can still be fenced by exact head.
+        stream_run_id=str(item.get("run_id") or ""),
         table=table,
     )
     if admission is None:
@@ -449,6 +635,7 @@ def run_context_phase(
     phase_started = time.monotonic()
     runtime_owned = False
     active_runtime = runtime
+    context_client = deepseek_client
     try:
         if (
             attempt > int(config.MAX_ATTEMPTS)
@@ -519,12 +706,159 @@ def run_context_phase(
                 table=table,
             )
             return
-        prepared_source = prepare_provider_source(
-            active_runtime,
-            repo,
-            pr_number,
-            head_sha,
+
+        lifecycle_terminal_attrs: Dict[str, Any] = {}
+
+        def context_lifecycle_checkpoint(
+            *,
+            stage: str,
+            allow_successor: bool,
+        ) -> pipeline_admission.PRLifecycleDisposition:
+            nonlocal item_for_context
+            disposition = _verified_disposition(
+                active_runtime,
+                repo,
+                pr_number,
+                head_sha,
+                stage=stage,
+            )
+            latest = persistence.get_item(
+                repo,
+                pr_number,
+                table=table,
+                consistent_read=True,
+            ) or item_for_context
+            has_admission = _has_exact_initial_admission(
+                latest,
+                head_sha=head_sha,
+                run_id=run_id,
+            )
+            if (
+                disposition.kind
+                is pipeline_admission.PRDispositionKind.OPEN_SAME_HEAD
+            ):
+                if not has_admission:
+                    recorded = persistence.record_initial_admission(
+                        repo,
+                        pr_number,
+                        expected_status="PENDING",
+                        expected_head_sha=head_sha,
+                        phase_claim=phase_claim,
+                        table=table,
+                    )
+                    if not recorded:
+                        raise RuntimeError(
+                            "Initial lifecycle admission lost its exact owner"
+                        )
+                    item_for_context = persistence.get_item(
+                        repo,
+                        pr_number,
+                        table=table,
+                        consistent_read=True,
+                    ) or item_for_context
+                return disposition
+            if (
+                disposition.kind
+                is pipeline_admission.PRDispositionKind.OPEN_NEW_HEAD
+            ):
+                requeued = False
+                if allow_successor and str(
+                    phase_claim.get("stream_event_id") or ""
+                ):
+                    requeued = persistence.requeue_head_successor(
+                        repo,
+                        pr_number,
+                        expected_status="PENDING",
+                        expected_head_sha=head_sha,
+                        actual_head_sha=disposition.actual_head_sha,
+                        stage=stage,
+                        phase_claim=phase_claim,
+                        table=table,
+                    )
+                if not requeued:
+                    accounting = {
+                        **_lifecycle_accounting(
+                            repo=repo,
+                            pr_number=pr_number,
+                            table=table,
+                            client=context_client,
+                            context_attempt=attempt,
+                            review_attempt=None,
+                        ),
+                        **lifecycle_terminal_attrs,
+                    }
+                    _mark_lifecycle_superseded(
+                        disposition,
+                        context=context_publication,
+                        stage=stage,
+                        accounting=accounting,
+                        table=table,
+                    )
+                _emit_pipeline_metric(
+                    "head_successor",
+                    phase="context",
+                    stage=stage,
+                    requeued=requeued,
+                    successor_count=(1 if requeued else 0),
+                )
+                raise _LifecycleStop()
+            if disposition.ended:
+                accounting = {
+                    **_lifecycle_accounting(
+                        repo=repo,
+                        pr_number=pr_number,
+                        table=table,
+                        client=context_client,
+                        context_attempt=attempt,
+                        review_attempt=None,
+                    ),
+                    **lifecycle_terminal_attrs,
+                }
+                if disposition.same_head and has_admission:
+                    _commit_lifecycle_cancellation(
+                        disposition,
+                        context=context_publication,
+                        runtime=active_runtime,
+                        deadline=deadline,
+                        accounting=accounting,
+                        table=table,
+                        extra_attributes={
+                            "context_runtime_identity": (
+                                context_runtime_identity
+                            ),
+                        },
+                    )
+                else:
+                    _mark_lifecycle_superseded(
+                        disposition,
+                        context=context_publication,
+                        stage=stage,
+                        accounting=accounting,
+                        table=table,
+                    )
+                raise _LifecycleStop()
+            raise HeadVerificationUnavailable(
+                "Pull request lifecycle could not be verified",
+                stage=stage,
+            )
+
+        context_lifecycle_checkpoint(
+            stage="context.ingest",
+            allow_successor=True,
         )
+        try:
+            prepared_source = prepare_provider_source(
+                active_runtime,
+                repo,
+                pr_number,
+                head_sha,
+            )
+        except (HeadSuperseded, PRLifecycleSuperseded):
+            context_lifecycle_checkpoint(
+                stage="context.ingest",
+                allow_successor=True,
+            )
+            raise
         pr_content = prepared_source.pr_content
         pr_details = prepared_source.base_pr_details
         ci_snapshot = prepared_source.ci_snapshot
@@ -571,6 +905,10 @@ def run_context_phase(
             pr_content.get("file_changes")
         )
         if hard_skip_reason:
+            context_lifecycle_checkpoint(
+                stage="context.pre_terminal",
+                allow_successor=False,
+            )
             ci_gate_status = pipeline_publication.terminal_ci_gate_status(ci_snapshot)
             body = skipped_review_notice(hard_skip_reason)
             pipeline_publication.commit_terminal_result(
@@ -640,7 +978,7 @@ def run_context_phase(
         # Route remains the semantic owner. Code only enforces objective input
         # coverage and selectively asks the stronger model to adjudicate a
         # provisional cheap route when the supplied evidence is not closed.
-        context_client = deepseek_client or DeepSeekClient(
+        context_client = context_client or DeepSeekClient(
             model=config.ANALYZER_MODEL,
             reasoning_effort=config.ANALYZER_EFFORT,
         )
@@ -670,6 +1008,10 @@ def run_context_phase(
             public_reason = pipeline_publication.canonical_ai_skip_reason(analyzer_result)
             ci_gate_status = pipeline_publication.terminal_ci_gate_status(ci_snapshot)
             body = skipped_review_notice(public_reason)
+            context_lifecycle_checkpoint(
+                stage="context.pre_terminal",
+                allow_successor=False,
+            )
             accounting = provider_usage_accounting(
                 provider_calls=provider_call_records(
                     repo=repo,
@@ -735,6 +1077,12 @@ def run_context_phase(
             initial_evidence_ledger=analyzer_result.get(
                 "_route_preflight_evidence_ledger"
             ),
+            before_first_reconcile=(
+                lambda: context_lifecycle_checkpoint(
+                    stage="context.pre_reconcile",
+                    allow_successor=True,
+                )
+            ),
         )
         meta["analyzer_result"] = analyzer_result
         meta["provider_source_identity"] = provider_source_identity
@@ -790,12 +1138,17 @@ def run_context_phase(
             "phase_limit_seconds": config.PIPELINE_CONTEXT_PHASE_MAX_SECONDS,
             "state_write_reserve_seconds": config.PIPELINE_STATE_WRITE_RESERVE_SECONDS,
         }
-        pipeline_admission.assert_current_head(
-            active_runtime,
-            repo,
-            pr_number,
-            head_sha,
+        lifecycle_terminal_attrs.update(
+            {
+                "pfr_reconcile_dispatches": deepcopy(
+                    meta.get("pfr_reconcile_dispatches") or []
+                ),
+                "context_deadline": deepcopy(meta.get("deadline") or {}),
+            }
+        )
+        context_lifecycle_checkpoint(
             stage="context.pre_persist",
+            allow_successor=False,
         )
 
         stored, _attrs = persistence.store_context(
@@ -833,6 +1186,28 @@ def run_context_phase(
             run_id=run_id,
             table=table,
         )
+        reconcile_dispatches = [
+            entry
+            for entry in meta.get("pfr_reconcile_dispatches") or []
+            if isinstance(entry, dict)
+        ]
+        reconcile_metric_fields: Dict[str, Any] = {
+            "pfr_reconcile_dispatch_count": len(reconcile_dispatches)
+        }
+        for entry in reconcile_dispatches:
+            round_number = int(entry.get("round") or 0)
+            if round_number not in {1, 2}:
+                continue
+            reconcile_metric_fields.update(
+                {
+                    f"pfr_reconcile_{round_number}_deadline_remaining_seconds": entry.get(
+                        "deadline_remaining_seconds"
+                    ),
+                    f"pfr_reconcile_{round_number}_elapsed_seconds": entry.get(
+                        "elapsed_seconds"
+                    ),
+                }
+            )
         _emit_pipeline_metric(
             "context_phase_complete",
             repo=repo,
@@ -840,8 +1215,11 @@ def run_context_phase(
             attempt=attempt,
             stored=stored,
             review_mode=review_mode,
+            **reconcile_metric_fields,
             elapsed_seconds=round(time.monotonic() - phase_started, 3),
         )
+    except _LifecycleStop:
+        return
     except Exception as exc:
         if isinstance(exc, (HeadSuperseded, PRLifecycleSuperseded)):
             logger.info("Context phase superseded for %s#%s: %s", repo, pr_number, exc)
@@ -988,6 +1366,8 @@ def run_review_phase(
         expected_status="CONTEXT_READY",
         runtime_identity=review_runtime_identity,
         stream_event_id=stream_event_id,
+        stream_head_sha=str(item.get("head_sha") or ""),
+        stream_run_id=str(item.get("run_id") or ""),
         table=table,
     )
     if admission is None:
@@ -1069,6 +1449,126 @@ def run_review_phase(
             or "high"
         )
         model_profile = _review_model_for_mode(review_mode)
+
+        def review_lifecycle_checkpoint(
+            *,
+            stage: str,
+            final_publishable: bool,
+        ) -> pipeline_admission.PRLifecycleDisposition:
+            nonlocal item_for_review
+            disposition = _verified_disposition(
+                active_runtime,
+                repo,
+                pr_number,
+                head_sha,
+                stage=stage,
+            )
+            latest = persistence.get_item(
+                repo,
+                pr_number,
+                table=table,
+                consistent_read=True,
+            ) or item_for_review
+            has_admission = _has_exact_initial_admission(
+                latest,
+                head_sha=head_sha,
+                run_id=run_id,
+            )
+            if (
+                disposition.kind
+                is pipeline_admission.PRDispositionKind.OPEN_SAME_HEAD
+            ):
+                if not has_admission:
+                    recorded = persistence.record_initial_admission(
+                        repo,
+                        pr_number,
+                        expected_status="CONTEXT_READY",
+                        expected_head_sha=head_sha,
+                        phase_claim=phase_claim,
+                        table=table,
+                    )
+                    if not recorded:
+                        raise RuntimeError(
+                            "Review admission lost its exact phase owner"
+                        )
+                    item_for_review = persistence.get_item(
+                        repo,
+                        pr_number,
+                        table=table,
+                        consistent_read=True,
+                    ) or item_for_review
+                return disposition
+            if (
+                disposition.kind
+                is pipeline_admission.PRDispositionKind.OPEN_NEW_HEAD
+            ):
+                accounting = _lifecycle_accounting(
+                    repo=repo,
+                    pr_number=pr_number,
+                    table=table,
+                    client=review_client,
+                    context_attempt=int(
+                        item_for_review.get("context_attempt") or 0
+                    ),
+                    review_attempt=attempt,
+                )
+                _mark_lifecycle_superseded(
+                    disposition,
+                    context=review_publication,
+                    stage=stage,
+                    accounting=accounting,
+                    table=table,
+                )
+                raise _LifecycleStop()
+            if disposition.ended:
+                if (
+                    disposition.same_head
+                    and has_admission
+                    and final_publishable
+                    and disposition.merged
+                ):
+                    return disposition
+                accounting = _lifecycle_accounting(
+                    repo=repo,
+                    pr_number=pr_number,
+                    table=table,
+                    client=review_client,
+                    context_attempt=int(
+                        item_for_review.get("context_attempt") or 0
+                    ),
+                    review_attempt=attempt,
+                )
+                if disposition.same_head and has_admission:
+                    _commit_lifecycle_cancellation(
+                        disposition,
+                        context=review_publication,
+                        runtime=active_runtime,
+                        deadline=deadline,
+                        accounting=accounting,
+                        table=table,
+                        extra_attributes={
+                            "context_runtime_identity": (
+                                context_runtime_identity
+                            ),
+                            "review_runtime_identity": (
+                                review_runtime_identity
+                            ),
+                        },
+                    )
+                else:
+                    _mark_lifecycle_superseded(
+                        disposition,
+                        context=review_publication,
+                        stage=stage,
+                        accounting=accounting,
+                        table=table,
+                    )
+                raise _LifecycleStop()
+            raise HeadVerificationUnavailable(
+                "Pull request lifecycle could not be verified",
+                stage=stage,
+            )
+
         if attempt > int(config.MAX_ATTEMPTS):
             _mark_terminal_error(
                 repo,
@@ -1088,12 +1588,9 @@ def run_review_phase(
                 table=table,
             )
             return
-        pipeline_admission.assert_current_head(
-            active_runtime,
-            repo,
-            pr_number,
-            head_sha,
+        review_lifecycle_checkpoint(
             stage="review.start",
+            final_publishable=False,
         )
         # A live retry may follow a successful GitHub create_review whose
         # terminal DynamoDB write failed. Observe GitHub before spending any
@@ -1105,13 +1602,9 @@ def run_review_phase(
                 repo,
                 pr_number,
             )
-            pipeline_admission.assert_current_head(
-                active_runtime,
-                repo,
-                pr_number,
-                head_sha,
-                pr_content=retry_pr_content,
+            review_lifecycle_checkpoint(
                 stage="review.retry_duplicate_guard",
+                final_publishable=False,
             )
             if has_existing_llamapreview_review(retry_pr_content):
                 persistence.mark_error(
@@ -1182,6 +1675,12 @@ def run_review_phase(
             context_meta=context_meta,
             deadline=deadline,
             phase_sink=completed_review_phases,
+            before_final=(
+                lambda: review_lifecycle_checkpoint(
+                    stage="review.before_final",
+                    final_publishable=False,
+                )
+            ),
             **model_profile,
         )
         fallback_context_phases = [
@@ -1222,6 +1721,18 @@ def run_review_phase(
             context_attempt=int(item_for_review.get("context_attempt") or 0),
             review_attempt=attempt,
         )
+        final_disposition = review_lifecycle_checkpoint(
+            stage="review.after_final",
+            final_publishable=(
+                not result_artifact.is_nonpublishable(review_json)
+            ),
+        )
+        publication_kind = (
+            "post_merge_follow_up"
+            if final_disposition.kind
+            is pipeline_admission.PRDispositionKind.MERGED_SAME_HEAD
+            else "ordinary_review"
+        )
         if _persist_terminal_nonpublishable_review(
             repo=repo,
             pr_number=pr_number,
@@ -1242,12 +1753,15 @@ def run_review_phase(
             return
         if not review_json.get("review_fallback_used"):
             if deadline.remaining_seconds() > 5.0:
-                pipeline_admission.assert_current_head(
-                    active_runtime,
-                    repo,
-                    pr_number,
-                    head_sha,
+                final_disposition = review_lifecycle_checkpoint(
                     stage="review.ci_before_finalize",
+                    final_publishable=True,
+                )
+                publication_kind = (
+                    "post_merge_follow_up"
+                    if final_disposition.kind
+                    is pipeline_admission.PRDispositionKind.MERGED_SAME_HEAD
+                    else "ordinary_review"
                 )
                 pr_details, context_meta = refresh_review_ci_context(
                     active_runtime,
@@ -1301,12 +1815,15 @@ def run_review_phase(
             if isinstance(item, dict) and str(item.get("file_path") or "").strip()
         }
         if inline_target_paths:
-            pipeline_admission.assert_current_head(
-                active_runtime,
-                repo,
-                pr_number,
-                head_sha,
+            final_disposition = review_lifecycle_checkpoint(
                 stage="review.generated",
+                final_publishable=True,
+            )
+            publication_kind = (
+                "post_merge_follow_up"
+                if final_disposition.kind
+                is pipeline_admission.PRDispositionKind.MERGED_SAME_HEAD
+                else "ordinary_review"
             )
         _repo_obj, files, file_contents, placement_fetch = _fetch_pr_files_and_contents(
             active_runtime,
@@ -1317,19 +1834,22 @@ def run_review_phase(
             deadline=deadline,
         )
         diff_maps = build_diff_maps_from_pr_files(files)
-        if not dry_run:
-            pipeline_admission.assert_current_head(
-                active_runtime,
-                repo,
-                pr_number,
-                head_sha,
-                stage="review.pre_publish",
-            )
+        final_disposition = review_lifecycle_checkpoint(
+            stage="review.pre_publish",
+            final_publishable=True,
+        )
+        publication_kind = (
+            "post_merge_follow_up"
+            if final_disposition.kind
+            is pipeline_admission.PRDispositionKind.MERGED_SAME_HEAD
+            else "ordinary_review"
+        )
         prepared = prepare_review_publication(
             review_json,
             head_sha=head_sha,
             diff_maps=diff_maps,
             file_contents=file_contents,
+            publication_kind=publication_kind,
         )
         projected = result_artifact.build_publishable_result(
             prepared,
@@ -1348,10 +1868,15 @@ def run_review_phase(
         )
         prepared = projected.prepared
         generation_fields = projected.generation_fields
+        review_publication_for_commit = _publication_context_for_lifecycle(
+            review_publication,
+            publication_kind=prepared.publication_kind,
+            required_disposition=prepared.required_disposition,
+        )
         stored = pipeline_publication.commit_prepared(
             prepared,
             projected.terminal_attributes,
-            context=review_publication,
+            context=review_publication_for_commit,
             runtime=active_runtime,
             deadline=deadline,
             pre_persist_stage="review.pre_persist",
@@ -1369,6 +1894,7 @@ def run_review_phase(
             attempt=attempt,
             stored=stored,
             review_mode=review_mode,
+            publication_kind=prepared.publication_kind,
             generation_status=generation_fields.get("review_generation_status"),
             failure_kind=generation_fields.get("review_failure_kind"),
             quality_scoreable=generation_fields.get("quality_scoreable"),
@@ -1380,6 +1906,8 @@ def run_review_phase(
             ),
             elapsed_seconds=round(time.monotonic() - phase_started, 3),
         )
+    except _LifecycleStop:
+        return
     except Exception as exc:
         if isinstance(exc, (HeadSuperseded, PRLifecycleSuperseded)):
             logger.info("Review phase superseded for %s#%s: %s", repo, pr_number, exc)

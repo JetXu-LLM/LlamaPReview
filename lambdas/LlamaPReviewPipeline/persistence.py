@@ -26,7 +26,8 @@ REPO_FACT_SHEET_SCHEMA_VERSION = "repo-fact-sheet-v1"
 PROVIDER_CALL_ATTR_PREFIX = "_deepseek_call_"
 _PROVIDER_CALL_ID_RE = re.compile(r"^[0-9a-f]{64}$")
 PHASE_CLAIM_LEASE_SECONDS = 16 * 60
-PUBLICATION_CANDIDATE_SCHEMA_VERSION = 1
+PUBLICATION_CANDIDATE_SCHEMA_VERSION = 2
+SUPPORTED_PUBLICATION_CANDIDATE_SCHEMA_VERSIONS = frozenset({1, 2})
 _PROVIDER_PHASE_ORDER = {
     "route": 0,
     "route_adjudication": 1,
@@ -347,11 +348,23 @@ def load_publication_candidate(
             "Publication candidate pointer digest does not match intent"
         )
     candidate = _read_json_artifact(pointer, s3_client=s3_client)
+    try:
+        candidate_schema = int(candidate.get("publication_schema_version") or 0)
+        intent_schema = int(intent.get("schema_version") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ArtifactIntegrityError(
+            "Publication candidate schema version is invalid"
+        ) from exc
+    if (
+        candidate_schema not in SUPPORTED_PUBLICATION_CANDIDATE_SCHEMA_VERSIONS
+        or candidate_schema != intent_schema
+    ):
+        raise ArtifactIntegrityError(
+            "Publication candidate schema does not match its intent"
+        )
     expected = {
         "kind": "publication_candidate",
-        "publication_schema_version": (
-            PUBLICATION_CANDIDATE_SCHEMA_VERSION
-        ),
+        "publication_schema_version": candidate_schema,
         "repo": str(intent.get("repo") or ""),
         "pr_number": int(intent.get("pr_number") or 0),
         "head_sha": str(intent.get("head_sha") or ""),
@@ -508,6 +521,8 @@ def claim_phase_attempt(
     runtime_identity: Dict[str, Any],
     owner_id: str = "",
     stream_event_id: str = "",
+    expected_head_sha: str = "",
+    expected_run_id: str = "",
     now_epoch: Optional[int] = None,
     lease_seconds: int = PHASE_CLAIM_LEASE_SECONDS,
     table=None,
@@ -561,6 +576,15 @@ def claim_phase_attempt(
         if event_id:
             names["#stream_event_id"] = "stream_event_id"
             values[":stream_event_id"] = event_id
+        identity_clause = ""
+        if expected_head_sha:
+            names["#head_sha"] = "head_sha"
+            values[":expected_head_sha"] = str(expected_head_sha)
+            identity_clause += " AND #head_sha = :expected_head_sha"
+        if expected_run_id:
+            names["#run_id"] = "run_id"
+            values[":expected_run_id"] = str(expected_run_id)
+            identity_clause += " AND #run_id = :expected_run_id"
         response = table.update_item(
             Key={"repo": repo, "pr_number": int(pr_number)},
             UpdateExpression=(
@@ -572,7 +596,7 @@ def claim_phase_attempt(
                 "#s = :expected AND "
                 "(attribute_not_exists(#claim) "
                 "OR #claim.#expires_at_epoch < :now_epoch"
-                f"{same_event_clause})"
+                f"{same_event_clause}){identity_clause}"
             ),
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
@@ -605,6 +629,8 @@ def claim_current_phase_delivery(
     expected_status: str,
     runtime_identity: Dict[str, Any],
     stream_event_id: str,
+    expected_head_sha: str = "",
+    expected_run_id: str = "",
     table=None,
 ) -> Dict[str, Any]:
     """Reread, claim and verify one current stream-delivered phase item."""
@@ -615,8 +641,17 @@ def claim_current_phase_delivery(
         table=table,
         consistent_read=True,
     )
-    if not current or str(current.get("status") or "") != str(
-        expected_status
+    identity_matches = bool(current) and bool(
+        not expected_head_sha
+        or str(current.get("head_sha") or "") == str(expected_head_sha)
+    ) and bool(
+        not expected_run_id
+        or str(current.get("run_id") or "") == str(expected_run_id)
+    )
+    if (
+        not current
+        or str(current.get("status") or "") != str(expected_status)
+        or not identity_matches
     ):
         return {
             "eligible": False,
@@ -631,6 +666,8 @@ def claim_current_phase_delivery(
         expected_status=expected_status,
         runtime_identity=runtime_identity,
         stream_event_id=stream_event_id,
+        expected_head_sha=expected_head_sha,
+        expected_run_id=expected_run_id,
         table=table,
     )
     if phase_claim is None:
@@ -656,6 +693,16 @@ def claim_current_phase_delivery(
         == str(stream_event_id or "")
         and int(claimed_item.get(f"{phase}_attempt") or 0)
         == int(phase_claim.get("attempt") or 0)
+        and (
+            not expected_head_sha
+            or str(claimed_item.get("head_sha") or "")
+            == str(expected_head_sha)
+        )
+        and (
+            not expected_run_id
+            or str(claimed_item.get("run_id") or "")
+            == str(expected_run_id)
+        )
     )
     return {
         "eligible": True,
@@ -1513,6 +1560,464 @@ def mark_superseded(
         attributes=attributes,
         phase_claim=phase_claim,
         table=table,
+    )
+
+
+def head_successor_run_id(repo: str, pr_number: int, head_sha: str) -> str:
+    """Return the one stable queue identity for an early successor head."""
+
+    identity = f"{str(repo)}\n{int(pr_number)}\n{str(head_sha)}".encode(
+        "utf-8"
+    )
+    return f"head_successor_v1_{hashlib.sha256(identity).hexdigest()}"
+
+
+def record_initial_admission(
+    repo: str,
+    pr_number: int,
+    *,
+    expected_status: str,
+    expected_head_sha: str,
+    phase_claim: Mapping[str, Any],
+    table=None,
+) -> bool:
+    """Durably prove the first owner-bound open/same-head admission.
+
+    A retry reuses the original receipt and therefore retains its original
+    ``admitted_at`` rather than making an already-ended pull request look newly
+    admitted.
+    """
+
+    table = table or get_table()
+    phase = str(phase_claim.get("phase") or "")
+    owner = str(phase_claim.get("owner_id") or "")
+    stream_event_id = str(phase_claim.get("stream_event_id") or "")
+    if phase not in {"context", "review"} or not owner:
+        raise ValueError("initial admission requires an active phase owner")
+    expected_phase_status = {
+        "context": "PENDING",
+        "review": "CONTEXT_READY",
+    }[phase]
+    if str(expected_status) != expected_phase_status:
+        raise ValueError("initial admission phase and status do not agree")
+    current = get_item(
+        repo,
+        pr_number,
+        table=table,
+        consistent_read=True,
+    ) or {}
+    run_identity = str(
+        current.get("run_id")
+        or current.get("delivery_id")
+        or f"{str(repo).replace('/', '_')}_{int(pr_number)}"
+    )
+    existing = current.get("initial_admission")
+    if isinstance(existing, Mapping):
+        return bool(
+            int(existing.get("schema_version") or 0) == 1
+            and str(existing.get("disposition") or "")
+            == "open_same_head"
+            and str(existing.get("head_sha") or "")
+            == str(expected_head_sha)
+            and str(existing.get("run_id") or "") == run_identity
+        )
+    if (
+        str(current.get("status") or "") != str(expected_status)
+        or str(current.get("head_sha") or "") != str(expected_head_sha)
+    ):
+        return False
+    receipt = {
+        "schema_version": 1,
+        "disposition": "open_same_head",
+        "head_sha": str(expected_head_sha),
+        "run_id": run_identity,
+        "admitted_at": iso_now(),
+    }
+    try:
+        table.update_item(
+            Key={"repo": repo, "pr_number": int(pr_number)},
+            UpdateExpression="SET #admission = :admission, updated_at = :now",
+            ConditionExpression=(
+                "#s = :expected AND #head = :head AND #run = :run "
+                "AND #claim.#owner_id = :owner_id "
+                "AND #claim.#stream_event_id = :stream_event_id "
+                "AND attribute_not_exists(#admission)"
+            ),
+            ExpressionAttributeNames={
+                "#s": "status",
+                "#head": "head_sha",
+                "#run": "run_id",
+                "#claim": f"{phase}_claim",
+                "#owner_id": "owner_id",
+                "#stream_event_id": "stream_event_id",
+                "#admission": "initial_admission",
+            },
+            ExpressionAttributeValues={
+                ":expected": str(expected_status),
+                ":head": str(expected_head_sha),
+                ":run": run_identity,
+                ":owner_id": owner,
+                ":stream_event_id": stream_event_id,
+                ":admission": receipt,
+                ":now": iso_now(),
+            },
+        )
+        return True
+    except Exception as exc:
+        if not _is_conditional_failure(exc):
+            raise
+        latest = get_item(
+            repo,
+            pr_number,
+            table=table,
+            consistent_read=True,
+        ) or {}
+        persisted = latest.get("initial_admission")
+        return bool(
+            isinstance(persisted, Mapping)
+            and str(persisted.get("head_sha") or "")
+            == str(expected_head_sha)
+            and str(persisted.get("run_id") or "") == run_identity
+            and str(persisted.get("disposition") or "")
+            == "open_same_head"
+        )
+
+
+_SUCCESSOR_STALE_EXACT_FIELDS = {
+    "analyzer_result",
+    "current_head_sha",
+    "current_pr_merged",
+    "current_pr_state",
+    "deepseek_all_attempt_model_phases",
+    "deepseek_discarded_model_phases",
+    "deepseek_discarded_usage_total",
+    "deepseek_model_phases",
+    "deepseek_usage_accounting",
+    "deepseek_usage_total",
+    "deepseek_winning_usage_total",
+    "initial_admission",
+    "provider_source_identity",
+    "provider_source_sha256",
+    "queued_head_sha",
+    "route_reason",
+}
+_SUCCESSOR_STALE_PREFIXES = (
+    "context_",
+    "review_",
+    "publication_",
+    "error_",
+    "superseded_",
+)
+
+
+def _successor_stale_fields(item: Mapping[str, Any]) -> tuple[str, ...]:
+    retained = {"context_attempt", "review_attempt"}
+    return tuple(
+        key
+        for key in item
+        if key not in retained
+        and not str(key).startswith(PROVIDER_CALL_ATTR_PREFIX)
+        and (
+            key in _SUCCESSOR_STALE_EXACT_FIELDS
+            or str(key).startswith(_SUCCESSOR_STALE_PREFIXES)
+        )
+    )
+
+
+def requeue_head_successor(
+    repo: str,
+    pr_number: int,
+    *,
+    expected_status: str,
+    expected_head_sha: str,
+    actual_head_sha: str,
+    stage: str,
+    phase_claim: Mapping[str, Any],
+    table=None,
+) -> bool:
+    """Atomically replace one early superseded head with its sole successor.
+
+    Provider attempt numbers and durable call records remain on the item. The
+    new Context claim increments the monotonic attempt, so predecessor usage is
+    projected as discarded rather than becoming the successor's winning work.
+    """
+
+    table = table or get_table()
+    phase = str(phase_claim.get("phase") or "")
+    owner = str(phase_claim.get("owner_id") or "")
+    stream_event_id = str(phase_claim.get("stream_event_id") or "")
+    try:
+        claim_attempt = int(phase_claim.get("attempt") or 0)
+    except (TypeError, ValueError):
+        claim_attempt = 0
+    if phase != "context" or not owner or not stream_event_id or claim_attempt <= 0:
+        raise ValueError("head successor requires the active context owner")
+    if not actual_head_sha or str(actual_head_sha) == str(expected_head_sha):
+        raise ValueError("head successor requires a distinct nonempty head")
+
+    current = get_item(
+        repo,
+        pr_number,
+        table=table,
+        consistent_read=True,
+    ) or {}
+    predecessor_run_id = str(current.get("run_id") or "")
+    successor_count = int(current.get("head_successor_count") or 0)
+    context_attempt = int(current.get("context_attempt") or 0)
+    active_claim = current.get("context_claim")
+    if (
+        str(current.get("status") or "") != str(expected_status)
+        or str(expected_status) != "PENDING"
+        or str(current.get("head_sha") or "") != str(expected_head_sha)
+        or not predecessor_run_id
+        or successor_count != 0
+        or context_attempt >= int(config.MAX_ATTEMPTS)
+        or "publication_intent" in current
+        or "publication_receipt" in current
+        or not isinstance(active_claim, Mapping)
+        or str(active_claim.get("owner_id") or "") != owner
+        or str(active_claim.get("stream_event_id") or "") != stream_event_id
+        or int(current.get("context_attempt") or 0) != claim_attempt
+    ):
+        return False
+    unresolved = _unresolved_provider_dispatch(current)
+    if unresolved is not None:
+        return False
+
+    provider_records = provider_call_records(current)
+    retained_provider_ids = {
+        str(value.get("call_id") or "")
+        for key, value in current.items()
+        if str(key).startswith(PROVIDER_CALL_ATTR_PREFIX)
+        and isinstance(value, Mapping)
+    }
+    if len(provider_records) > 64:
+        raise ArtifactIntegrityError(
+            "Head predecessor provider ledger exceeds its bounded receipt"
+        )
+    call_ids = [str(record.get("call_id") or "") for record in provider_records]
+    if any(not _PROVIDER_CALL_ID_RE.fullmatch(call_id) for call_id in call_ids):
+        raise ArtifactIntegrityError(
+            "Head predecessor provider ledger contains an invalid call identity"
+        )
+    if set(call_ids) != retained_provider_ids:
+        # Historical aggregate-only records cannot be safely moved while also
+        # clearing stale result projections. Fail closed instead of claiming
+        # that their exact attempt ledger survived the successor transition.
+        return False
+    successor_run_id = head_successor_run_id(repo, pr_number, actual_head_sha)
+    now = iso_now()
+    receipt = {
+        "schema_version": 1,
+        "kind": "head_predecessor",
+        "outcome": "SUPERSEDED",
+        "stage": str(stage),
+        "predecessor_head_sha": str(expected_head_sha),
+        "predecessor_run_id": predecessor_run_id,
+        "successor_head_sha": str(actual_head_sha),
+        "successor_run_id": successor_run_id,
+        "attempt": int(current.get("attempt") or 0),
+        "context_attempt": context_attempt,
+        "review_attempt": int(current.get("review_attempt") or 0),
+        "provider_call_count": len(call_ids),
+        "provider_call_ids": call_ids,
+        "provider_calls_retained_on_item": True,
+        "provider_calls_terminal": True,
+        "superseded_at": now,
+    }
+    stale_fields = _successor_stale_fields(current)
+    successor_attrs = {
+        "head_sha": str(actual_head_sha),
+        "run_id": successor_run_id,
+        "head_successor_count": 1,
+        "head_predecessor_receipt": receipt,
+        "updated_at": now,
+    }
+    candidate = {**current, **successor_attrs}
+    for key in stale_fields:
+        candidate.pop(key, None)
+    if estimate_dynamodb_wire_bytes(candidate) > int(config.MAX_DYNAMODB_WIRE_BYTES):
+        raise DynamoItemTooLarge("Head successor candidate exceeds DynamoDB safe limit")
+
+    names = {
+        "#s": "status",
+        "#head": "head_sha",
+        "#run": "run_id",
+        "#count": "head_successor_count",
+        "#claim": "context_claim",
+        "#owner_id": "owner_id",
+        "#stream_event_id": "stream_event_id",
+        "#context_attempt": "context_attempt",
+        "#publication_intent": "publication_intent",
+        "#publication_receipt": "publication_receipt",
+    }
+    values: Dict[str, Any] = {
+        ":pending": "PENDING",
+        ":expected_head": str(expected_head_sha),
+        ":predecessor_run": predecessor_run_id,
+        ":zero": 0,
+        ":owner_id": owner,
+        ":stream_event_id": stream_event_id,
+        ":context_attempt": claim_attempt,
+    }
+    set_parts: list[str] = []
+    for index, (key, value) in enumerate(successor_attrs.items()):
+        name = f"#set{index}"
+        placeholder = f":set{index}"
+        names[name] = key
+        values[placeholder] = _dynamodb_safe(value)
+        set_parts.append(f"{name} = {placeholder}")
+    remove_parts: list[str] = []
+    for index, key in enumerate(stale_fields):
+        name = f"#remove{index}"
+        names[name] = key
+        remove_parts.append(name)
+    update_expression = "SET " + ", ".join(set_parts)
+    if remove_parts:
+        update_expression += " REMOVE " + ", ".join(remove_parts)
+    try:
+        table.update_item(
+            Key={"repo": repo, "pr_number": int(pr_number)},
+            UpdateExpression=update_expression,
+            ConditionExpression=(
+                "#s = :pending AND #head = :expected_head "
+                "AND #run = :predecessor_run "
+                "AND (attribute_not_exists(#count) OR #count = :zero) "
+                "AND #claim.#owner_id = :owner_id "
+                "AND #claim.#stream_event_id = :stream_event_id "
+                "AND #context_attempt = :context_attempt "
+                "AND attribute_not_exists(#publication_intent) "
+                "AND attribute_not_exists(#publication_receipt)"
+            ),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+        return True
+    except Exception as exc:
+        if _is_conditional_failure(exc):
+            return False
+        raise
+
+
+def is_valid_head_successor_transition(
+    old_item: Mapping[str, Any],
+    new_item: Mapping[str, Any],
+) -> bool:
+    """Validate the sole PENDING-to-PENDING stream transition we dispatch."""
+
+    if str(old_item.get("status") or "") != "PENDING" or str(
+        new_item.get("status") or ""
+    ) != "PENDING":
+        return False
+    try:
+        old_count = int(old_item.get("head_successor_count") or 0)
+        new_count = int(new_item.get("head_successor_count") or 0)
+    except (TypeError, ValueError):
+        return False
+    repo = str(new_item.get("repo") or "")
+    try:
+        pr_number = int(new_item.get("pr_number"))
+        old_pr_number = int(old_item.get("pr_number"))
+    except (TypeError, ValueError):
+        return False
+    old_head = str(old_item.get("head_sha") or "")
+    new_head = str(new_item.get("head_sha") or "")
+    old_run = str(old_item.get("run_id") or "")
+    new_run = str(new_item.get("run_id") or "")
+    receipt = new_item.get("head_predecessor_receipt")
+    receipt_call_ids = (
+        list(receipt.get("provider_call_ids") or [])
+        if isinstance(receipt, Mapping)
+        else []
+    )
+    old_provider_keys = {
+        str(key)
+        for key in old_item
+        if str(key).startswith(PROVIDER_CALL_ATTR_PREFIX)
+    }
+    new_provider_keys = {
+        str(key)
+        for key in new_item
+        if str(key).startswith(PROVIDER_CALL_ATTR_PREFIX)
+    }
+    old_provider_attrs = {
+        key: old_item.get(key)
+        for key in old_provider_keys
+        if isinstance(old_item.get(key), Mapping)
+    }
+    new_provider_attrs = {
+        key: new_item.get(key)
+        for key in new_provider_keys
+        if isinstance(new_item.get(key), Mapping)
+    }
+    old_call_ids = {
+        str(value.get("call_id") or "")
+        for value in old_provider_attrs.values()
+    }
+    new_call_ids = {
+        str(value.get("call_id") or "")
+        for value in new_provider_attrs.values()
+    }
+    try:
+        provider_keys_canonical = all(
+            key == _provider_call_attr(str(value.get("call_id") or ""))
+            for key, value in new_provider_attrs.items()
+        )
+    except ValueError:
+        provider_keys_canonical = False
+    retained_calls_valid = bool(
+        len(old_provider_attrs) == len(old_provider_keys)
+        and len(new_provider_attrs) == len(new_provider_keys)
+        and old_provider_keys == new_provider_keys
+        and old_provider_attrs == new_provider_attrs
+        and old_call_ids == new_call_ids == set(receipt_call_ids)
+        and "" not in old_call_ids
+        and provider_keys_canonical
+        and all(
+            str(value.get("status") or "") != "dispatching"
+            for value in new_provider_attrs.values()
+        )
+    )
+    return bool(
+        repo
+        and repo == str(old_item.get("repo") or "")
+        and pr_number == old_pr_number
+        and old_head
+        and new_head
+        and old_head != new_head
+        and old_run
+        and old_count == 0
+        and new_count == 1
+        and new_run == head_successor_run_id(repo, pr_number, new_head)
+        and isinstance(receipt, Mapping)
+        and int(receipt.get("schema_version") or 0) == 1
+        and str(receipt.get("kind") or "") == "head_predecessor"
+        and str(receipt.get("outcome") or "") == "SUPERSEDED"
+        and str(receipt.get("predecessor_head_sha") or "") == old_head
+        and str(receipt.get("predecessor_run_id") or "") == old_run
+        and str(receipt.get("successor_head_sha") or "") == new_head
+        and str(receipt.get("successor_run_id") or "") == new_run
+        and int(receipt.get("attempt") or 0)
+        == int(old_item.get("attempt") or 0)
+        and int(receipt.get("context_attempt") or 0)
+        == int(old_item.get("context_attempt") or 0)
+        and int(receipt.get("review_attempt") or 0)
+        == int(old_item.get("review_attempt") or 0)
+        and int(new_item.get("attempt") or 0)
+        == int(old_item.get("attempt") or 0)
+        and int(new_item.get("context_attempt") or 0)
+        == int(old_item.get("context_attempt") or 0)
+        and int(new_item.get("review_attempt") or 0)
+        == int(old_item.get("review_attempt") or 0)
+        and int(receipt.get("provider_call_count") or 0)
+        == len(receipt_call_ids)
+        and len(receipt_call_ids) == len(set(receipt_call_ids))
+        and receipt.get("provider_calls_retained_on_item") is True
+        and receipt.get("provider_calls_terminal") is True
+        and retained_calls_valid
+        and "initial_admission" not in new_item
+        and "context_claim" not in new_item
+        and "review_claim" not in new_item
     )
 
 

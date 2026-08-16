@@ -255,6 +255,13 @@ class _Runtime:
     def get_pr_head_sha(self, repo_full_name, pr_number):
         return self.head_sha
 
+    def get_pr_head_snapshot(self, repo_full_name, pr_number):
+        return {
+            "head_sha": self.get_pr_head_sha(repo_full_name, pr_number),
+            "state": "open",
+            "merged": False,
+        }
+
     def get_ci_results_for_head(
         self, repo_full_name, head_sha, *, include_actionable_details=True
     ):
@@ -3533,7 +3540,9 @@ class TestOrchestratorPipeline(unittest.TestCase):
 
     def test_head_change_during_context_prevents_context_ready_transition(self):
         item = self._pending_item()
-        runtime = _ChangingHeadRuntime(["new-head"])
+        runtime = _ChangingHeadRuntime(
+            ["abcdef123456", "abcdef123456", "new-head"]
+        )
         with patch.object(orchestrator.pipeline_admission, "installation_token", return_value="token"), patch.object(
             orchestrator, "analyze_pr_complexity", return_value={"complexity": "normal", "reason": "review", "verification_plan": []}
         ), patch.object(orchestrator, "collect_context", return_value=("ctx", {"context_strategy": "pfr"})):
@@ -3600,7 +3609,7 @@ class TestOrchestratorPipeline(unittest.TestCase):
         self.assertEqual(current["superseded_kind"], "pr_closed")
         self.assertEqual(current["superseded_stage"], "review.start")
 
-    def test_pr_merged_after_generation_is_superseded_before_finalize_or_persist(self):
+    def test_pr_merged_after_generation_becomes_post_merge_follow_up(self):
         self._pending_item()
         persistence.store_context(
             "owner/repo",
@@ -3627,6 +3636,22 @@ class TestOrchestratorPipeline(unittest.TestCase):
             "review_fallback_used": False,
             "review_publishable": True,
             "review_publication_safe": True,
+            "v3_review": {
+                "schema_version": 3,
+                "decision": {
+                    "verdict": "clear",
+                    "public_sentence": "No review blocker found.",
+                    "confidence": "high",
+                    "pr_type": "code",
+                    "risk_domains": [],
+                    "reasons": [],
+                },
+                "owner_action": [],
+                "findings": [],
+                "material_unknowns": [],
+                "evidence_scope": [],
+                "diagram": None,
+            },
         }
         provider_calls = [
             {
@@ -3675,38 +3700,14 @@ class TestOrchestratorPipeline(unittest.TestCase):
             )
 
         generate.assert_called_once()
-        commit_prepared.assert_not_called()
-        current = self.table.get_item(
-            Key={"repo": "owner/repo", "pr_number": 7}
-        )["Item"]
-        self.assertEqual(current["status"], "SUPERSEDED")
-        self.assertEqual(current["superseded_kind"], "pr_merged")
-        self.assertEqual(current["superseded_stage"], "review.ci_before_finalize")
-        self.assertNotIn("review_artifact", current)
-        self.assertEqual(
-            current["deepseek_usage_accounting"],
-            {
-                "schema_version": 2,
-                "all_call_count": 2,
-                "transport_operation_count": 2,
-                "winning_call_count": 1,
-                "discarded_call_count": 1,
-                "unreported_usage_call_count": 0,
-                "usage_merge_conflicts": [],
-                "complete_numeric_usage": True,
-            },
-        )
-        self.assertEqual(current["deepseek_usage_total"]["total_tokens"], 300)
-        self.assertEqual(
-            current["deepseek_winning_usage_total"]["total_tokens"],
-            100,
-        )
-        self.assertEqual(
-            current["deepseek_discarded_usage_total"]["total_tokens"],
-            200,
-        )
+        commit_prepared.assert_called_once()
+        prepared = commit_prepared.call_args.args[0]
+        context = commit_prepared.call_args.kwargs["context"]
+        self.assertEqual(prepared.publication_kind, "post_merge_follow_up")
+        self.assertEqual(prepared.comments, ())
+        self.assertEqual(context.required_disposition, "merged_same_head")
 
-    def test_live_pr_closed_after_finalize_is_superseded_before_publish(self):
+    def test_live_pr_closed_after_finalize_uses_cancellation_publication(self):
         self._pending_item()
         persistence.store_context(
             "owner/repo",
@@ -3751,15 +3752,14 @@ class TestOrchestratorPipeline(unittest.TestCase):
                 runtime=runtime,
             )
 
-        commit_prepared.assert_not_called()
+        commit_prepared.assert_called_once()
+        prepared = commit_prepared.call_args.args[0]
+        context = commit_prepared.call_args.kwargs["context"]
+        self.assertEqual(prepared.publication_kind, "lifecycle_cancellation")
+        self.assertEqual(prepared.required_disposition, "closed_same_head")
+        self.assertEqual(prepared.comments, ())
+        self.assertEqual(context.required_disposition, "closed_same_head")
         self.assertEqual(runtime.pull.reviews, [])
-        current = self.table.get_item(
-            Key={"repo": "owner/repo", "pr_number": 7}
-        )["Item"]
-        self.assertEqual(current["status"], "SUPERSEDED")
-        self.assertEqual(current["superseded_kind"], "pr_closed")
-        self.assertEqual(current["superseded_stage"], "review.pre_publish")
-        self.assertNotIn("review_artifact", current)
 
     def test_retryable_review_error_rethrows_then_terminates_at_phase_cap(self):
         self._pending_item()
