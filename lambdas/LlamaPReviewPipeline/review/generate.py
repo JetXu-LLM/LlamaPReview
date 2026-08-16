@@ -15,7 +15,7 @@ from copy import deepcopy
 import json
 import logging
 import time
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 
 from .. import config
 from ..context_engine.packing import (
@@ -438,6 +438,7 @@ def generate_review(
     model: str = config.REVIEW_MODEL,
     reasoning_effort: str = config.REVIEW_EFFORT,
     phase_sink: Optional[list] = None,
+    before_final: Optional[Callable[[], Any]] = None,
 ) -> Dict[str, Any]:
     """Run the sole production Deep/Final judgment path."""
 
@@ -512,6 +513,13 @@ def generate_review(
             phases=phases,
             finish_reasons=finish_reasons,
         )
+
+    # Lifecycle policy remains with the orchestrator.  Invoke its boundary
+    # only after a successful Deep result and before constructing or
+    # dispatching any Final request.  Deliberately leave callback failures out
+    # of the model-error conversion path so they propagate to terminal flow.
+    if before_final is not None:
+        before_final()
 
     final_messages = _final_messages(deep.message, context_meta)
     final_started = time.monotonic()

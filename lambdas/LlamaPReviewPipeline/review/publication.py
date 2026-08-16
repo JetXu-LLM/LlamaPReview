@@ -226,6 +226,14 @@ def terminal_payload(
     terminal_attributes = deepcopy(
         candidate.get("terminal_attributes") or {}
     )
+    lifecycle_binding = {
+        "publication_kind": str(candidate.get("publication_kind") or ""),
+        "required_disposition": str(
+            candidate.get("required_disposition") or ""
+        ),
+    }
+    artifact.update(lifecycle_binding)
+    terminal_attributes.update(lifecycle_binding)
     fields = receipt.artifact_fields()
     artifact.update(fields)
     artifact["publication_intent"] = deepcopy(dict(intent))

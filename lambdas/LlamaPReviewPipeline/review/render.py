@@ -374,6 +374,7 @@ def _format_details(
     review: Dict[str, Any],
     *,
     shown_action_texts: Tuple[str, ...] = (),
+    include_inline_findings: bool = False,
 ) -> str:
     lines = ["<details>", "<summary>Review details and evidence</summary>", ""]
     findings = review.get("findings") or []
@@ -399,7 +400,10 @@ def _format_details(
             finding
             for finding in visible_findings
             if isinstance(finding, dict)
-            and finding.get("visibility") != "inline"
+            and (
+                include_inline_findings
+                or finding.get("visibility") != "inline"
+            )
         ]
         if detailed_findings:
             lines.append("### Finding details")
@@ -763,6 +767,135 @@ def render_v3_markdown(review: Dict[str, Any]) -> str:
         lines.append("")
         lines.append(
             _format_details(review, shown_action_texts=shown_action_texts)
+        )
+    return "\n".join(lines).strip()
+
+
+POST_MERGE_PREAMBLE = (
+    "### LlamaPReview — Post-merge follow-up\n\n"
+    "This review started before the pull request was merged and completed "
+    "afterward. It covers the exact merged PR head below; treat the findings "
+    "as follow-up work, not a merge gate."
+)
+
+
+def _follow_up_location_lines(
+    placements: Sequence[Dict[str, Any]],
+) -> list[str]:
+    """Render exact placed locations without recreating inline payloads."""
+
+    lines: list[str] = []
+    ordered = sorted(
+        placements,
+        key=lambda item: int(item.get("follow_up_order") or 0),
+    )
+    for placement in ordered:
+        path = _text(placement.get("path")).replace("`", "'")
+        line = placement.get("line")
+        if not path or not isinstance(line, int) or line <= 0:
+            continue
+        actions = placement.get("follow_up_actions") or []
+        for action in actions:
+            text = " ".join(_text(action).split())
+            if text:
+                lines.append(f"- `{path}:{line}` — {text}")
+    return lines
+
+
+def _post_merge_ci_sentence(state: Dict[str, Any]) -> str:
+    counts = state.get("counts") or {}
+    parts: list[str] = []
+    for key, label in (
+        ("failure", "failed"),
+        ("action_required", "action required"),
+        ("pending", "pending"),
+        ("incomplete", "incomplete"),
+    ):
+        count = int(counts.get(key) or 0)
+        if count:
+            parts.append(f"{count} {label}")
+    retrieval = _text(state.get("retrieval_outcome"))
+    if retrieval in {"partial", "error", "unverified"}:
+        parts.append(f"retrieval {retrieval}")
+    observed = ", ".join(parts) or "unresolved evidence"
+    posture = state.get("posture")
+    if posture == "not_observed":
+        if retrieval == "no_hit":
+            return "Exact-head CI reported no statuses or check runs."
+        return "Exact-head CI evidence was not observed."
+    if posture == "unrelated_supported":
+        return (
+            f"Exact-head CI reports {observed}; retained exact evidence "
+            "attributes those failures outside this change."
+        )
+    if posture != "resolved":
+        return (
+            f"Exact-head CI remains unresolved ({observed}); follow-up work "
+            "should account for that uncertainty."
+        )
+    success_count = int((state.get("counts") or {}).get("success") or 0)
+    if success_count:
+        plural = "" if success_count == 1 else "s"
+        return (
+            f"Exact-head CI reports {success_count} successful check{plural} "
+            "and no unresolved check state."
+        )
+    return "Exact-head CI reports no unresolved check state."
+
+
+def render_post_merge_follow_up(
+    review: Dict[str, Any],
+    placements: Sequence[Dict[str, Any]],
+) -> str:
+    """Project a completed exact-head review as non-gating follow-up.
+
+    The open-PR decision heading, sentence and merge posture are deliberately
+    not consumed. Findings, uncertainty, owner actions, structured CI and an
+    already validated diagram remain sourced from the structured review.
+    """
+
+    lines = [POST_MERGE_PREAMBLE]
+    ci_state = _ci_public_state(review)
+    if ci_state:
+        lines.extend(["", _post_merge_ci_sentence(ci_state)])
+
+    actions = [
+        _text(item.get("text"))
+        for item in review.get("owner_action") or []
+        if isinstance(item, dict) and _text(item.get("text"))
+    ]
+    if actions:
+        lines.extend(["", "### Follow-up actions"])
+        lines.extend(f"- {action}" for action in actions[:MAX_OWNER_ACTIONS])
+
+    diagram = review.get("diagram")
+    if isinstance(diagram, dict):
+        lines.extend(["", _format_visible_diagram(diagram)])
+
+    location_lines = _follow_up_location_lines(placements)
+    if location_lines:
+        lines.extend(["", "### Follow-up locations", *location_lines])
+
+    unknowns = [
+        item
+        for item in review.get("material_unknowns") or []
+        if isinstance(item, dict)
+    ]
+    scope = [
+        item
+        for item in review.get("evidence_scope") or []
+        if isinstance(item, dict) and _text(item.get("description"))
+    ]
+    if review.get("findings") or unknowns or scope:
+        lines.extend(
+            [
+                "",
+                _format_details(
+                    review,
+                    shown_action_texts=tuple(actions[:MAX_OWNER_ACTIONS]),
+                    include_inline_findings=True,
+                ),
+            ]
         )
     return "\n".join(lines).strip()
 

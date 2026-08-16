@@ -41,6 +41,27 @@ GITHUB_PUBLICATION_FIELDS = (
     "github_review_commit_id",
     "github_inline_comment_ids",
 )
+PUBLICATION_KINDS = frozenset(
+    {
+        "ordinary_review",
+        "lifecycle_cancellation",
+        "post_merge_follow_up",
+    }
+)
+PUBLICATION_DISPOSITIONS = frozenset(
+    {
+        "open_same_head",
+        "merged_same_head",
+        "closed_same_head",
+    }
+)
+PUBLICATION_KIND_DISPOSITIONS = {
+    "ordinary_review": frozenset({"open_same_head"}),
+    "lifecycle_cancellation": frozenset(
+        {"merged_same_head", "closed_same_head"}
+    ),
+    "post_merge_follow_up": frozenset({"merged_same_head"}),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +72,20 @@ class PreparedGitHubReview:
     main_body: str
     comments: tuple[Dict[str, Any], ...]
     artifact: Dict[str, Any]
+    publication_kind: str = "ordinary_review"
+    required_disposition: str = "open_same_head"
+
+    def __post_init__(self) -> None:
+        allowed = PUBLICATION_KIND_DISPOSITIONS.get(self.publication_kind)
+        if allowed is None:
+            raise ValueError(
+                f"unsupported publication kind: {self.publication_kind}"
+            )
+        if self.required_disposition not in allowed:
+            raise ValueError(
+                "publication kind and required lifecycle disposition do not "
+                "agree"
+            )
 
     def request_payload(self) -> Dict[str, Any]:
         return {
@@ -517,6 +552,13 @@ def _dedupe_and_sort_comments(review_comments: List[Dict[str, Any]]) -> List[Dic
         body_text = str(comment.get("body") or "").strip()
         if key not in merged_map:
             stored = {"path": path, "line": line, "side": side, "body": body_text, "layer": comment.get("layer")}
+            if comment.get("follow_up_actions"):
+                stored["follow_up_actions"] = list(
+                    comment["follow_up_actions"]
+                )
+                stored["follow_up_order"] = int(
+                    comment.get("follow_up_order") or 0
+                )
             if start_line is not None and start_side is not None:
                 stored["start_line"] = start_line
                 stored["start_side"] = start_side
@@ -527,17 +569,38 @@ def _dedupe_and_sort_comments(review_comments: List[Dict[str, Any]]) -> List[Dic
             existing = merged_map[key].get("body") or ""
             if existing.split(separator)[-1].strip() != body_text:
                 merged_map[key]["body"] = existing.rstrip() + separator + body_text
+            actions = comment.get("follow_up_actions") or []
+            if actions:
+                merged_map[key].setdefault("follow_up_actions", []).extend(
+                    action
+                    for action in actions
+                    if action
+                    and action
+                    not in merged_map[key]["follow_up_actions"]
+                )
+                merged_map[key]["follow_up_order"] = min(
+                    int(merged_map[key].get("follow_up_order") or 0),
+                    int(comment.get("follow_up_order") or 0),
+                )
     comments = [merged_map[key] for key in order_keys]
     comments.sort(key=_comment_sort_key)
     return comments
 
 
-def resolve_inline_placements(final_json: Dict[str, Any], diff_maps: Dict[str, Dict[str, Any]], file_contents: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+def resolve_inline_placements(
+    final_json: Dict[str, Any],
+    diff_maps: Dict[str, Dict[str, Any]],
+    file_contents: Optional[Dict[str, str]] = None,
+    *,
+    include_follow_up_actions: bool = False,
+) -> Dict[str, Any]:
     file_contents = file_contents or {}
     file_position_maps = {path: {"old": maps.get("old", {}), "new": maps.get("new", {})} for path, maps in diff_maps.items()}
     placements: List[Dict[str, Any]] = []
     fallback_comments: List[Dict[str, Any]] = []
-    for comment_data in final_json.get("inline_comments", []) or []:
+    for follow_up_order, comment_data in enumerate(
+        final_json.get("inline_comments", []) or []
+    ):
         path = comment_data.get("file_path")
         original_snippet = comment_data.get("code_snippet")
         snippet = _preprocess_snippet(original_snippet or "")
@@ -556,6 +619,11 @@ def resolve_inline_placements(final_json: Dict[str, Any], diff_maps: Dict[str, D
                 continue
             body = _format_inline_comment(comment_data)
             placement = {"path": path, "line": found_line, "side": line_info["side"], "body": body, "layer": 1}
+            if include_follow_up_actions:
+                placement["follow_up_actions"] = [
+                    str(comment_data.get("comment") or "").strip()
+                ]
+                placement["follow_up_order"] = follow_up_order
             snippet_line_count = len([line for line in snippet.strip().splitlines() if line.strip()])
             range_start = line_info.get("range_start_new_line")
             range_end = line_info.get("range_end_new_line")
@@ -580,6 +648,11 @@ def resolve_inline_placements(final_json: Dict[str, Any], diff_maps: Dict[str, D
         if real_line:
             placement = _anchor_contextual_placement(path, real_line, comment_data, file_position_maps, "Layer 2")
             if placement:
+                if include_follow_up_actions:
+                    placement["follow_up_actions"] = [
+                        str(comment_data.get("comment") or "").strip()
+                    ]
+                    placement["follow_up_order"] = follow_up_order
                 placements.append(placement)
                 continue
 
@@ -587,6 +660,11 @@ def resolve_inline_placements(final_json: Dict[str, Any], diff_maps: Dict[str, D
         if real_line:
             placement = _anchor_contextual_placement(path, real_line, comment_data, file_position_maps, "Layer 2.5")
             if placement:
+                if include_follow_up_actions:
+                    placement["follow_up_actions"] = [
+                        str(comment_data.get("comment") or "").strip()
+                    ]
+                    placement["follow_up_order"] = follow_up_order
                 placements.append(placement)
                 continue
 
@@ -594,6 +672,11 @@ def resolve_inline_placements(final_json: Dict[str, Any], diff_maps: Dict[str, D
         if real_line:
             placement = _anchor_contextual_placement(path, real_line, comment_data, file_position_maps, "Layer 2.7")
             if placement:
+                if include_follow_up_actions:
+                    placement["follow_up_actions"] = [
+                        str(comment_data.get("comment") or "").strip()
+                    ]
+                    placement["follow_up_order"] = follow_up_order
                 placements.append(placement)
                 continue
 
@@ -686,6 +769,8 @@ def prepare_main_comment_publication(
     *,
     head_sha: str,
     review_mode: str,
+    publication_kind: str = "ordinary_review",
+    required_disposition: str = "open_same_head",
 ) -> PreparedGitHubReview:
     artifact = {
         "main_comment": main_body,
@@ -695,6 +780,8 @@ def prepare_main_comment_publication(
         "computed_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "review_quality_warnings": [],
         "review_mode": review_mode,
+        "publication_kind": publication_kind,
+        "required_disposition": required_disposition,
         "publication_status": "not_published",
     }
     return prepare_github_review_request(
@@ -702,6 +789,8 @@ def prepare_main_comment_publication(
         (),
         head_sha=head_sha,
         artifact=artifact,
+        publication_kind=publication_kind,
+        required_disposition=required_disposition,
     )
 
 
@@ -711,6 +800,8 @@ def prepare_github_review_request(
     *,
     head_sha: str,
     artifact: Optional[Dict[str, Any]] = None,
+    publication_kind: str = "ordinary_review",
+    required_disposition: str = "open_same_head",
 ) -> PreparedGitHubReview:
     """Compile one immutable GitHub request from internal placements."""
 
@@ -727,6 +818,8 @@ def prepare_github_review_request(
         main_body=str(main_body),
         comments=github_comments,
         artifact=artifact or {},
+        publication_kind=publication_kind,
+        required_disposition=required_disposition,
     )
 
 
@@ -736,6 +829,7 @@ def prepare_review_publication(
     head_sha: str,
     diff_maps: Dict[str, Dict[str, Any]],
     file_contents: Optional[Dict[str, str]] = None,
+    publication_kind: str = "ordinary_review",
 ) -> PreparedGitHubReview:
     if isinstance(final_json, str):
         final_json = json.loads(final_json)
@@ -747,23 +841,56 @@ def prepare_review_publication(
         final_json,
         diff_maps,
         file_contents=file_contents,
+        include_follow_up_actions=(
+            publication_kind == "post_merge_follow_up"
+        ),
     )
-    main_body = build_main_comment(
-        final_json,
-        placement_result["fallback_comments"],
-    )
+    if publication_kind == "post_merge_follow_up":
+        from .render import render_post_merge_follow_up
+
+        v3_review = final_json.get("v3_review")
+        if not isinstance(v3_review, dict):
+            raise ValueError(
+                "post-merge publication requires the structured v3 review"
+            )
+        projected = dict(final_json)
+        projected["pr_review_comment"] = render_post_merge_follow_up(
+            v3_review,
+            placement_result["inline_comments"],
+        )
+        main_body = build_main_comment(
+            projected,
+            placement_result["fallback_comments"],
+        )
+        published_placements: List[Dict[str, Any]] = []
+        required_disposition = "merged_same_head"
+    else:
+        if publication_kind != "ordinary_review":
+            raise ValueError(
+                "generated review supports ordinary or post-merge publication"
+            )
+        main_body = build_main_comment(
+            final_json,
+            placement_result["fallback_comments"],
+        )
+        published_placements = placement_result["inline_comments"]
+        required_disposition = "open_same_head"
     artifact = {
         "main_comment": main_body,
-        "inline_comments": placement_result["inline_comments"],
+        "inline_comments": published_placements,
         "fallback_comments": placement_result["fallback_comments"],
         "head_sha": head_sha,
         "computed_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "review_quality_warnings": final_json.get("review_quality_warnings", []),
+        "publication_kind": publication_kind,
+        "required_disposition": required_disposition,
         "publication_status": "not_published",
     }
     return prepare_github_review_request(
         main_body,
-        placement_result["inline_comments"],
+        published_placements,
         head_sha=head_sha,
         artifact=artifact,
+        publication_kind=publication_kind,
+        required_disposition=required_disposition,
     )

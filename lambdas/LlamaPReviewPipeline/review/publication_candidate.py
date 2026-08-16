@@ -18,11 +18,13 @@ from .. import persistence
 from ..errors import PublicationIntegrityFailure, PublicationStateConflict
 from .publish import (
     GITHUB_REVIEW_COMMENT_FIELDS,
+    PUBLICATION_KIND_DISPOSITIONS,
     PreparedGitHubReview,
 )
 
 
-PUBLICATION_SCHEMA_VERSION = 1
+PUBLICATION_SCHEMA_VERSION = 2
+LEGACY_PUBLICATION_SCHEMA_VERSION = 1
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -59,6 +61,8 @@ def build_candidate(
         "repo": str(repo),
         "pr_number": int(pr_number),
         "head_sha": prepared.head_sha,
+        "publication_kind": prepared.publication_kind,
+        "required_disposition": prepared.required_disposition,
         "run_id": str(run_id),
         "phase": str(phase),
         "owner_event_id": str(owner_event_id),
@@ -79,7 +83,11 @@ def build_candidate(
         ),
         "github_request": prepared.request_payload(),
         "review_artifact": deepcopy(prepared.artifact),
-        "terminal_attributes": deepcopy(dict(terminal_attributes)),
+        "terminal_attributes": {
+            **deepcopy(dict(terminal_attributes)),
+            "publication_kind": prepared.publication_kind,
+            "required_disposition": prepared.required_disposition,
+        },
     }
     if phase == "review":
         candidate["review_generation_attempt"] = int(
@@ -142,6 +150,12 @@ def persist_prepared_intent(
         ),
         "run_id": str(candidate.get("run_id") or ""),
         "head_sha": str(candidate.get("head_sha") or ""),
+        "publication_kind": str(
+            candidate.get("publication_kind") or ""
+        ),
+        "required_disposition": str(
+            candidate.get("required_disposition") or ""
+        ),
         "publication_generation_phase": str(
             candidate.get("publication_generation_phase") or ""
         ),
@@ -201,6 +215,56 @@ def load_candidate(
         intent,
         s3_client=s3_client,
     )
+    try:
+        schema_version = int(candidate.get("publication_schema_version") or 0)
+        intent_schema_version = int(intent.get("schema_version") or 0)
+    except (TypeError, ValueError) as exc:
+        raise PublicationIntegrityFailure(
+            "Publication candidate schema version is invalid.",
+            stage="publication.candidate",
+        ) from exc
+    if schema_version != intent_schema_version:
+        raise PublicationIntegrityFailure(
+            "Publication candidate schema does not match its intent.",
+            stage="publication.candidate",
+        )
+    candidate = deepcopy(candidate)
+    if schema_version == LEGACY_PUBLICATION_SCHEMA_VERSION:
+        lifecycle_fields = ("publication_kind", "required_disposition")
+        if any(
+            field in candidate or field in intent
+            for field in lifecycle_fields
+        ):
+            raise PublicationIntegrityFailure(
+                "Legacy publication lifecycle binding is ambiguous.",
+                stage="publication.candidate",
+            )
+        candidate["publication_kind"] = "ordinary_review"
+        candidate["required_disposition"] = "open_same_head"
+    elif schema_version != PUBLICATION_SCHEMA_VERSION:
+        raise PublicationIntegrityFailure(
+            "Publication candidate schema version is unsupported.",
+            stage="publication.candidate",
+        )
+    publication_kind = str(candidate.get("publication_kind") or "")
+    required_disposition = str(candidate.get("required_disposition") or "")
+    if schema_version == PUBLICATION_SCHEMA_VERSION and (
+        publication_kind != str(intent.get("publication_kind") or "")
+        or required_disposition
+        != str(intent.get("required_disposition") or "")
+    ):
+        raise PublicationIntegrityFailure(
+            "Publication candidate lifecycle binding does not match its intent.",
+            stage="publication.candidate",
+        )
+    if required_disposition not in PUBLICATION_KIND_DISPOSITIONS.get(
+        publication_kind,
+        (),
+    ):
+        raise PublicationIntegrityFailure(
+            "Publication candidate lifecycle binding is invalid.",
+            stage="publication.candidate",
+        )
     request = candidate.get("github_request")
     if not isinstance(request, Mapping):
         raise PublicationIntegrityFailure(
@@ -260,6 +324,10 @@ def prepared_from_candidate(
         main_body=str(request.get("body") or ""),
         comments=allowed_comments,
         artifact=deepcopy(candidate.get("review_artifact") or {}),
+        publication_kind=str(candidate.get("publication_kind") or ""),
+        required_disposition=str(
+            candidate.get("required_disposition") or ""
+        ),
     )
 
 
@@ -329,12 +397,22 @@ def validate_recovery_binding(
             "Current phase claim is not bound to the publication intent.",
             stage="publication.recovery_binding",
         )
+    effective_intent = dict(intent)
+    if int(candidate.get("publication_schema_version") or 0) == 1:
+        effective_intent.update(
+            {
+                "publication_kind": "ordinary_review",
+                "required_disposition": "open_same_head",
+            }
+        )
     bound_fields = (
         "repo",
         "pr_number",
         "phase",
         "owner_event_id",
         "head_sha",
+        "publication_kind",
+        "required_disposition",
         "run_id",
         "publication_key",
         "publication_generation_phase",
@@ -345,7 +423,7 @@ def validate_recovery_binding(
         "preflight_completed_at",
     )
     for field in bound_fields:
-        if candidate.get(field) != intent.get(field):
+        if candidate.get(field) != effective_intent.get(field):
             raise PublicationIntegrityFailure(
                 f"Publication artifact does not match intent field {field}.",
                 stage="publication.recovery_binding",

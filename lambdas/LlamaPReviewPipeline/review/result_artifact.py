@@ -313,6 +313,8 @@ def build_publishable_result(
     )
     artifact["run_id"] = run_id
     artifact["pipeline_attempt"] = int(attempt)
+    artifact["publication_kind"] = prepared.publication_kind
+    artifact["required_disposition"] = prepared.required_disposition
     terminal_attributes = {
         **fields,
         **{
@@ -322,6 +324,8 @@ def build_publishable_result(
         },
         "run_id": run_id,
         "pipeline_attempt": int(attempt),
+        "publication_kind": prepared.publication_kind,
+        "required_disposition": prepared.required_disposition,
         "review_phase_elapsed_seconds": round(elapsed_seconds, 3),
         "inline_comments_count": len(artifact.get("inline_comments") or []),
         "fallback_comments_count": len(
@@ -340,6 +344,8 @@ def build_publishable_result(
             main_body=prepared.main_body,
             comments=prepared.comments,
             artifact=artifact,
+            publication_kind=prepared.publication_kind,
+            required_disposition=prepared.required_disposition,
         ),
         generation_fields=fields,
         terminal_attributes=terminal_attributes,

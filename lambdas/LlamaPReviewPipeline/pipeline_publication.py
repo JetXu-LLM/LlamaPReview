@@ -15,11 +15,17 @@ from typing import Any, Dict, Optional
 from . import persistence
 from .deadline import Deadline, DeadlineExceeded
 from .errors import (
+    HeadSuperseded,
+    HeadVerificationUnavailable,
+    PRLifecycleSuperseded,
     PublicationIntegrityFailure,
     PublicationOutcomeUnknown,
     PublicationStateConflict,
 )
-from .pipeline_admission import assert_current_head, current_pr_snapshot
+from .pipeline_admission import (
+    current_pr_disposition,
+    current_pr_snapshot,
+)
 from .pr_ingest import fetch_pr_details, has_existing_llamapreview_review
 from .review.publication import (
     publish_prepared_transaction,
@@ -31,6 +37,7 @@ from .review.github_publication_surface import (
 from .review.publication_candidate import prepared_from_candidate
 from .review.publish import (
     GITHUB_PUBLICATION_FIELDS,
+    PUBLICATION_KIND_DISPOSITIONS,
     PreparedGitHubReview,
     prepare_main_comment_publication,
 )
@@ -50,6 +57,8 @@ class PublicationContext:
     runtime_identity: Mapping[str, Any]
     phase_claim: Mapping[str, Any]
     dry_run: bool
+    publication_kind: str = "ordinary_review"
+    required_disposition: str = "open_same_head"
 
     def __post_init__(self) -> None:
         expected = {"context": "PENDING", "review": "CONTEXT_READY"}
@@ -59,6 +68,98 @@ class PublicationContext:
             raise ValueError(
                 "Publication phase and expected status do not agree"
             )
+        if self.required_disposition not in PUBLICATION_KIND_DISPOSITIONS.get(
+            self.publication_kind,
+            (),
+        ):
+            raise ValueError(
+                "Publication kind and required lifecycle disposition do not "
+                "agree"
+            )
+
+
+MERGED_CANCELLATION_BODY = (
+    "### LlamaPReview — Review stopped\n\n"
+    "This pull request was merged before the review finished, so "
+    "LlamaPReview stopped the remaining model work. No code-review verdict "
+    "was produced."
+)
+CLOSED_CANCELLATION_BODY = (
+    "### LlamaPReview — Review stopped\n\n"
+    "This pull request was closed before the review finished, so "
+    "LlamaPReview stopped the remaining model work. No code-review verdict "
+    "was produced."
+)
+
+
+def _require_publication_disposition(
+    context: PublicationContext,
+    runtime: Any,
+    *,
+    stage: str,
+) -> None:
+    disposition = current_pr_disposition(
+        runtime,
+        context.repo,
+        context.pr_number,
+        context.head_sha,
+        stage=stage,
+    )
+    if disposition.kind.value == "unverified":
+        raise HeadVerificationUnavailable(
+            "GitHub did not return a complete PR head/lifecycle snapshot",
+            stage=stage,
+        )
+    if disposition.actual_head_sha != context.head_sha:
+        if disposition.ended:
+            raise PRLifecycleSuperseded(
+                context.head_sha,
+                disposition.actual_head_sha,
+                current_state=disposition.current_state,
+                merged=disposition.merged,
+                stage=stage,
+            )
+        raise HeadSuperseded(
+            context.head_sha,
+            disposition.actual_head_sha,
+            stage=stage,
+        )
+    if context.required_disposition == "open_same_head" and disposition.ended:
+        raise PRLifecycleSuperseded(
+            context.head_sha,
+            disposition.actual_head_sha,
+            current_state=disposition.current_state,
+            merged=disposition.merged,
+            stage=stage,
+        )
+    if disposition.kind.value != context.required_disposition:
+        raise PublicationStateConflict(
+            "Current pull request lifecycle does not match the immutable "
+            "publication candidate.",
+            stage=stage,
+        )
+
+
+def _require_initial_admission(
+    context: PublicationContext,
+    item: Mapping[str, Any],
+) -> None:
+    if context.publication_kind == "ordinary_review":
+        return
+    admission = item.get("initial_admission")
+    if not (
+        isinstance(admission, Mapping)
+        and int(admission.get("schema_version") or 0) == 1
+        and admission.get("disposition") == "open_same_head"
+        and str(admission.get("head_sha") or "") == context.head_sha
+        and str(admission.get("run_id") or "") == context.run_id
+        and str(admission.get("admitted_at") or "")
+    ):
+        raise PublicationStateConflict(
+            "Ended-lifecycle publication lacks the exact durable initial "
+            "admission proof.",
+            stage="publication.pre_publish_admission",
+        )
 
 
 def terminal_ci_gate_status(ci_snapshot: Mapping[str, Any]) -> str:
@@ -111,18 +212,11 @@ def make_pre_publish_check(
                 f"Pre-publish status changed to {latest.get('status')}; "
                 "aborting GitHub write"
             )
+        _require_initial_admission(context, latest)
         latest_pr_content, _ = fetch_pr_details(
             runtime,
             context.repo,
             context.pr_number,
-        )
-        assert_current_head(
-            runtime,
-            context.repo,
-            context.pr_number,
-            context.head_sha,
-            pr_content=latest_pr_content,
-            stage="pre_publish",
         )
         if check_duplicate and has_existing_llamapreview_review(
             latest_pr_content
@@ -131,6 +225,11 @@ def make_pre_publish_check(
                 "Pre-publish duplicate guard: already reviewed by "
                 "llamapreview[bot]"
             )
+        _require_publication_disposition(
+            context,
+            runtime,
+            stage="publication.pre_publish_disposition",
+        )
 
     return pre_publish_check
 
@@ -194,6 +293,28 @@ def recover_pending(
     table=None,
 ) -> bool:
     """Recover the current intent without replaying phase generation."""
+
+    def candidate_context(candidate: Mapping[str, Any]) -> PublicationContext:
+        return PublicationContext(
+            repo=str(candidate.get("repo") or ""),
+            pr_number=int(candidate.get("pr_number") or 0),
+            head_sha=str(candidate.get("head_sha") or ""),
+            expected_status=context.expected_status,
+            phase=context.phase,
+            run_id=str(candidate.get("run_id") or ""),
+            generation_attempt=int(
+                candidate.get("publication_generation_attempt") or 0
+            ),
+            runtime_identity=context.runtime_identity,
+            phase_claim=context.phase_claim,
+            dry_run=context.dry_run,
+            publication_kind=str(
+                candidate.get("publication_kind") or ""
+            ),
+            required_disposition=str(
+                candidate.get("required_disposition") or ""
+            ),
+        )
 
     def commit_prepared_without_write(
         candidate: Mapping[str, Any],
@@ -268,20 +389,7 @@ def recover_pending(
         recovery_runtime_identity=context.runtime_identity,
         repository_for=runtime.get_repository,
         pre_publish_check_for=lambda candidate: make_pre_publish_check(
-            PublicationContext(
-                repo=str(candidate.get("repo") or ""),
-                pr_number=int(candidate.get("pr_number") or 0),
-                head_sha=str(candidate.get("head_sha") or ""),
-                expected_status=context.expected_status,
-                phase=context.phase,
-                run_id=str(candidate.get("run_id") or ""),
-                generation_attempt=int(
-                    candidate.get("publication_generation_attempt") or 0
-                ),
-                runtime_identity=context.runtime_identity,
-                phase_claim=context.phase_claim,
-                dry_run=False,
-            ),
+            candidate_context(candidate),
             runtime,
             table=table,
             check_duplicate=False,
@@ -315,6 +423,20 @@ def commit_prepared(
 ) -> bool:
     """Commit one prepared result through the sole live or dry-run boundary."""
 
+    if (
+        prepared.publication_kind != context.publication_kind
+        or prepared.required_disposition != context.required_disposition
+    ):
+        raise PublicationStateConflict(
+            "Prepared publication does not match its lifecycle-bound context.",
+            stage="publication.prepared_binding",
+        )
+    bound_terminal_attributes = {
+        **dict(terminal_attributes),
+        "publication_kind": prepared.publication_kind,
+        "required_disposition": prepared.required_disposition,
+    }
+
     if not context.dry_run:
         repo_obj = runtime.get_repository(context.repo)
         return publish_prepared_transaction(
@@ -327,7 +449,7 @@ def commit_prepared(
             phase=context.phase,
             generation_attempt=context.generation_attempt,
             runtime_identity=context.runtime_identity,
-            terminal_attributes=terminal_attributes,
+            terminal_attributes=bound_terminal_attributes,
             pre_publish_check=make_pre_publish_check(
                 context,
                 runtime,
@@ -350,13 +472,19 @@ def commit_prepared(
             table=table,
         )
 
-    assert_current_head(
+    _require_publication_disposition(
+        context,
         runtime,
-        context.repo,
-        context.pr_number,
-        context.head_sha,
         stage=pre_persist_stage,
     )
+    if context.publication_kind != "ordinary_review":
+        latest = persistence.get_item(
+            context.repo,
+            context.pr_number,
+            table=table,
+            consistent_read=True,
+        ) or {}
+        _require_initial_admission(context, latest)
     artifact = prepared.artifact
     return persistence.store_review_result(
         context.repo,
@@ -366,7 +494,7 @@ def commit_prepared(
         review_comment=str(artifact.get("main_comment") or ""),
         artifact=artifact,
         review_mode=str(artifact.get("review_mode") or ""),
-        extra_attrs=dict(terminal_attributes),
+        extra_attrs=bound_terminal_attributes,
         phase_claim=context.phase_claim,
         head_sha=context.head_sha,
         run_id=context.run_id,
@@ -394,21 +522,26 @@ def commit_terminal_result(
         generation_status = "complete"
         quality_scoreable = False
         quality_exclusion_reasons = ["skipped_by_policy"]
-    assert_current_head(
+    _require_publication_disposition(
+        context,
         runtime,
-        context.repo,
-        context.pr_number,
-        context.head_sha,
         stage="terminal_result.pre_render",
     )
     prepared = prepare_main_comment_publication(
         body,
         head_sha=context.head_sha,
         review_mode=review_mode,
+        publication_kind=context.publication_kind,
+        required_disposition=context.required_disposition,
     )
     artifact = prepared.artifact
     artifact["run_id"] = context.run_id
     artifact["pipeline_attempt"] = int(context.generation_attempt)
+    runtime_identity_field = (
+        "review_runtime_identity"
+        if context.phase == "review"
+        else "context_runtime_identity"
+    )
     artifact.update(
         {
             "review_generation_status": generation_status,
@@ -419,9 +552,9 @@ def commit_terminal_result(
             "quality_exclusion_reasons": list(
                 quality_exclusion_reasons or []
             ),
-            "context_runtime_identity": deepcopy(
-                dict(context.runtime_identity)
-            ),
+            runtime_identity_field: deepcopy(dict(context.runtime_identity)),
+            "publication_kind": context.publication_kind,
+            "required_disposition": context.required_disposition,
         }
     )
     if isinstance(ci_snapshot, Mapping):
@@ -458,7 +591,9 @@ def commit_terminal_result(
         "quality_exclusion_reasons": list(
             quality_exclusion_reasons or []
         ),
-        "context_runtime_identity": deepcopy(dict(context.runtime_identity)),
+        runtime_identity_field: deepcopy(dict(context.runtime_identity)),
+        "publication_kind": context.publication_kind,
+        "required_disposition": context.required_disposition,
     }
     return commit_prepared(
         prepared,
@@ -467,6 +602,64 @@ def commit_terminal_result(
         runtime=runtime,
         deadline=deadline,
         pre_persist_stage="terminal_result.pre_persist",
+        table=table,
+    )
+
+
+def commit_lifecycle_cancellation(
+    *,
+    context: PublicationContext,
+    runtime: Any,
+    lifecycle: str,
+    deadline: Optional[Deadline] = None,
+    ci_snapshot: Optional[Mapping[str, Any]] = None,
+    extra_attributes: Optional[Mapping[str, Any]] = None,
+    table=None,
+) -> bool:
+    """Publish the sole code-owned cancellation through the normal path."""
+
+    cancellation = {
+        "merged": (
+            MERGED_CANCELLATION_BODY,
+            "merged_same_head",
+            "pr_merged_before_review_complete",
+        ),
+        "closed": (
+            CLOSED_CANCELLATION_BODY,
+            "closed_same_head",
+            "pr_closed_before_review_complete",
+        ),
+    }.get(lifecycle)
+    if cancellation is None:
+        raise ValueError("lifecycle cancellation requires merged or closed")
+    body, required_disposition, exclusion_reason = cancellation
+    if (
+        context.publication_kind != "lifecycle_cancellation"
+        or context.required_disposition != required_disposition
+    ):
+        raise PublicationStateConflict(
+            "Cancellation context does not match the ended PR lifecycle.",
+            stage="publication.cancellation_binding",
+        )
+    supplied = dict(extra_attributes or {})
+    supplied.update(
+        {
+            "publication_kind": "lifecycle_cancellation",
+            "required_disposition": required_disposition,
+            "review_lifecycle_outcome": lifecycle,
+        }
+    )
+    return commit_terminal_result(
+        context=context,
+        runtime=runtime,
+        review_mode="cancelled",
+        body=body,
+        deadline=deadline,
+        ci_snapshot=ci_snapshot,
+        extra_attributes=supplied,
+        generation_status="cancelled",
+        quality_scoreable=False,
+        quality_exclusion_reasons=[exclusion_reason],
         table=table,
     )
 
@@ -482,6 +675,26 @@ def failure_attributes(
     """Project publication state into a typed terminal failure."""
 
     attrs = dict(base)
+    if isinstance(exc, (HeadSuperseded, PRLifecycleSuperseded)):
+        latest = persistence.get_item(
+            repo,
+            pr_number,
+            table=table,
+            consistent_read=True,
+        ) or {}
+        intent = latest.get("publication_intent")
+        if isinstance(intent, Mapping) and intent.get("state") == "prepared":
+            attrs.update(
+                {
+                    "publication_status": "aborted_before_dispatch",
+                    "publication_key": intent.get("publication_key"),
+                    "publication_kind": intent.get("publication_kind"),
+                    "required_disposition": intent.get(
+                        "required_disposition"
+                    ),
+                }
+            )
+        return attrs
     if not isinstance(
         exc,
         (

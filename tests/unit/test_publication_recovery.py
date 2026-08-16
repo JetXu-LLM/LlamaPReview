@@ -29,6 +29,7 @@ from lambdas.LlamaPReviewPipeline.deadline import (
     DeadlineExceeded,
 )
 from lambdas.LlamaPReviewPipeline.errors import (
+    PRLifecycleSuperseded,
     PublicationIntegrityFailure,
     PublicationOutcomeUnknown,
     PublicationPreflightUnavailable,
@@ -187,7 +188,7 @@ def _candidate(*, phase: str = "review", inline: bool = False) -> dict:
 
 def _intent(candidate: dict, *, state: str = "dispatching") -> dict:
     value = {
-        "schema_version": 1,
+        "schema_version": candidate["publication_schema_version"],
         "publication_key": candidate["publication_key"],
         "state": state,
         "repo": candidate["repo"],
@@ -197,6 +198,8 @@ def _intent(candidate: dict, *, state: str = "dispatching") -> dict:
         "owner_request_id": candidate["owner_request_id"],
         "run_id": candidate["run_id"],
         "head_sha": candidate["head_sha"],
+        "publication_kind": candidate["publication_kind"],
+        "required_disposition": candidate["required_disposition"],
         "publication_generation_phase": candidate[
             "publication_generation_phase"
         ],
@@ -219,6 +222,22 @@ def _intent(candidate: dict, *, state: str = "dispatching") -> dict:
     if candidate["phase"] == "review":
         value["review_generation_attempt"] = 1
     return value
+
+
+def _legacy_candidate_and_intent(*, state: str) -> tuple[dict, dict]:
+    candidate = _candidate()
+    intent = _intent(candidate, state=state)
+    candidate["publication_schema_version"] = 1
+    candidate.pop("publication_kind")
+    candidate.pop("required_disposition")
+    candidate["terminal_attributes"].pop("publication_kind", None)
+    candidate["terminal_attributes"].pop("required_disposition", None)
+    candidate["review_artifact"].pop("publication_kind", None)
+    candidate["review_artifact"].pop("required_disposition", None)
+    intent["schema_version"] = 1
+    intent.pop("publication_kind")
+    intent.pop("required_disposition")
+    return candidate, intent
 
 
 def _review(
@@ -1005,6 +1024,123 @@ class PublicationTransactionTests(unittest.TestCase):
         self.assertFalse(
             current["deepseek_usage_accounting"]["complete_numeric_usage"]
         )
+
+    def test_v1_prepared_candidate_recovers_once_as_ordinary_open_review(self):
+        self._put_item()
+        claim = self._claim()
+        candidate, intent = _legacy_candidate_and_intent(state="prepared")
+        current = persistence.get_item("owner/repo", 7, table=self.table)
+        current["publication_intent"] = intent
+        self.table.put_item(Item=current)
+
+        with patch.object(
+            persistence,
+            "load_publication_candidate",
+            return_value=candidate,
+        ):
+            recovered = recover_publication_transaction(
+                current_item=current,
+                expected_status="CONTEXT_READY",
+                phase_claim=claim,
+                recovery_runtime_identity={
+                    "phase": "review",
+                    "aws_request_id": "request-1",
+                },
+                repository_for=lambda _repo: self.repo,
+                pre_publish_check_for=lambda loaded: (
+                    lambda: self.assertEqual(
+                        loaded["publication_kind"], "ordinary_review"
+                    )
+                ),
+                table=self.table,
+            )
+
+        self.assertTrue(recovered)
+        self.assertEqual(self.pull.create_count, 1)
+        stored = persistence.get_item("owner/repo", 7, table=self.table)
+        self.assertEqual(stored["status"], "PROCESSED")
+
+    def test_v1_dispatching_candidate_only_adopts_existing_exact_effect(self):
+        self._put_item()
+        claim = self._claim()
+        candidate, intent = _legacy_candidate_and_intent(state="dispatching")
+        current = persistence.get_item("owner/repo", 7, table=self.table)
+        current["publication_intent"] = intent
+        self.table.put_item(Item=current)
+        self.pull.review_pages = [[_review(_prepared())]]
+
+        with patch.object(
+            persistence,
+            "load_publication_candidate",
+            return_value=candidate,
+        ):
+            recovered = recover_publication_transaction(
+                current_item=current,
+                expected_status="CONTEXT_READY",
+                phase_claim=claim,
+                recovery_runtime_identity={
+                    "phase": "review",
+                    "aws_request_id": "request-1",
+                },
+                repository_for=lambda _repo: self.repo,
+                pre_publish_check_for=lambda _candidate: (
+                    lambda: self.fail("dispatching recovery must not preflight")
+                ),
+                table=self.table,
+            )
+
+        self.assertTrue(recovered)
+        self.assertEqual(self.pull.create_count, 0)
+        stored = persistence.get_item("owner/repo", 7, table=self.table)
+        self.assertEqual(stored["status"], "PROCESSED")
+        self.assertEqual(stored["publication_receipt"]["outcome"], "adopted")
+
+    def test_v1_prepared_candidate_that_is_now_merged_performs_zero_writes(self):
+        self._put_item()
+        claim = self._claim()
+        candidate, intent = _legacy_candidate_and_intent(state="prepared")
+        current = persistence.get_item("owner/repo", 7, table=self.table)
+        current["publication_intent"] = intent
+        self.table.put_item(Item=current)
+        runtime = SimpleNamespace(
+            get_pr_head_snapshot=lambda _repo, _pr: {
+                "head_sha": HEAD,
+                "state": "closed",
+                "merged": True,
+            },
+            get_repository=lambda _repo: self.repo,
+        )
+        context = pipeline_publication.PublicationContext(
+            repo="owner/repo",
+            pr_number=7,
+            head_sha=HEAD,
+            expected_status="CONTEXT_READY",
+            phase="review",
+            run_id="run-7",
+            generation_attempt=1,
+            runtime_identity={"phase": "review"},
+            phase_claim=claim,
+            dry_run=False,
+        )
+
+        with patch.object(
+            persistence,
+            "load_publication_candidate",
+            return_value=candidate,
+        ), patch.object(
+            pipeline_publication,
+            "fetch_pr_details",
+            return_value=({}, []),
+        ), self.assertRaises(PRLifecycleSuperseded):
+            pipeline_publication.recover_pending(
+                current,
+                context=context,
+                runtime=runtime,
+                deadline=None,
+                table=self.table,
+            )
+
+        self.assertEqual(self.pull.create_count, 0)
 
     def test_intent_and_artifact_bind_all_publication_identity(self):
         self._put_item()
