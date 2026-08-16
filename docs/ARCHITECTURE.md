@@ -64,14 +64,17 @@ supersession and can never publish the old review.
 | --- | --- | --- |
 | Open, same head | Continue | Continue |
 | Open, newer head | Requeue one successor at most | Supersede silently |
-| Merged/closed, same head after admission | Stop remaining model work and prepare a code-owned cancellation | Cancel, unless a publishable Final already exists for the exact merged head |
+| Merged/closed, same head after admission | Stop remaining model work and prepare a code-owned cancellation when the native review surface is available | Cancel, unless a publishable Final already exists for the exact merged head; a locked review surface supersedes silently |
 | Merged/closed, newer head | Supersede silently | Supersede silently |
 | Unverified | Retry or fail closed without publication | Retry or fail closed without publication |
 
 A publishable Final that finishes after the exact reviewed head was merged may
 be projected as a post-merge follow-up. A closed-unmerged pull request receives
 only the cancellation. Pull requests already ended at initial admission receive
-no public message.
+no public message. GitHub can lock a pull request before or during merge and
+then reject native reviews. A structurally verified locked surface is recorded
+as `publication_unavailable_locked` and superseded silently; it is not retried,
+treated as a provider failure, or redirected to an issue comment.
 
 ### Model and code boundaries
 
@@ -79,7 +82,7 @@ The model owns engineering judgment. Code owns bounded inputs, sensitive-path ex
 
 ### Exactly-once publication
 
-Before a GitHub write, the Pipeline stores an immutable publication candidate and an owner-bound intent. The candidate binds an explicit publication kind—ordinary review, lifecycle cancellation, or post-merge follow-up—to the exact head and required lifecycle disposition. The Pipeline revalidates that disposition immediately before dispatch. After dispatch it reconciles the payload digest, bot identity, exact commit, and returned GitHub identifiers. Retries reuse the durable candidate or receipt; they do not regenerate and blindly post a second review or fall back to an issue comment.
+Before a GitHub write, the Pipeline stores an immutable publication candidate and an owner-bound intent. The candidate binds an explicit publication kind—ordinary review, lifecycle cancellation, or post-merge follow-up—to the exact head and required lifecycle disposition. The Pipeline revalidates that disposition and the structurally reported lock state immediately before dispatch. A prepared, undispatched lifecycle intent that becomes locked is terminalized as unavailable with zero GitHub write; a dispatching intent is still reconciled because the write outcome may already exist. After dispatch the Pipeline reconciles the payload digest, bot identity, exact commit, and returned GitHub identifiers. Retries reuse the durable candidate or receipt; they do not regenerate and blindly post a second review or fall back to an issue comment.
 
 ### Accounting truth
 

@@ -11,6 +11,14 @@ do not appear as project versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A merged or closed pull request whose native review surface is structurally
+  locked now supersedes silently with complete accounting instead of turning
+  GitHub's expected 422 rejection into a terminal publication error.
+
+## [0.1.2] - 2026-08-17
+
 ### Added
 
 - Typed lifecycle dispositions and durable initial-admission evidence across
