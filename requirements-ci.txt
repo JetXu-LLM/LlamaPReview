@@ -1,11 +1,11 @@
 # CI-only tools. Runtime dependencies are isolated in requirements-layer.lock.
-pip-audit==2.10.0
-ruff==0.14.14
+pip-audit==2.10.1
+ruff==0.16.3
 
 # Pure-Python HTTP imports exercised by the extracted unit suite. Production
 # remains bound to requirements-layer.lock and the separately verified SDK.
-certifi==2026.6.17
-charset-normalizer==3.4.9
+certifi==2026.7.22
+charset-normalizer==3.5.0
 idna==3.18
-requests==2.33.0
+requests==2.34.2
 urllib3==2.7.0
