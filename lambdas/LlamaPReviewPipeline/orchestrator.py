@@ -8,7 +8,13 @@ import time
 from copy import deepcopy
 from typing import Any, Dict, Mapping, Optional
 
-from . import config, persistence, pipeline_admission, pipeline_publication
+from . import (
+    config,
+    persistence,
+    pipeline_admission,
+    pipeline_capacity,
+    pipeline_publication,
+)
 from .context_engine.low_route import (
     collect_low_same_file_context as _collect_low_same_file_context,
 )
@@ -1049,6 +1055,63 @@ def run_context_phase(
                         if provider_source_identity is not None
                         else {}
                     ),
+                },
+            )
+            return
+
+        # Charge the shared free budget only once the deterministic skip gates
+        # have passed, so a repository whose traffic is almost entirely skipped
+        # keeps its capacity for the reviews that would actually run.
+        capacity_decision = pipeline_capacity.consume(
+            repo,
+            table=table,
+            is_successor=int(item.get("head_successor_count") or 0) > 0,
+        )
+        _emit_pipeline_metric(
+            "capacity_admission",
+            repo=repo,
+            pr_number=pr_number,
+            **capacity_decision.telemetry(),
+        )
+        if not capacity_decision.allowed:
+            context_lifecycle_checkpoint(
+                stage="context.pre_terminal",
+                allow_successor=False,
+            )
+            if not capacity_decision.should_notify:
+                # A successor re-reviews a pull request that already had its
+                # say, and the global bound is an operator condition, so both
+                # stop on the established silent path rather than speaking.
+                persistence.mark_superseded(
+                    repo,
+                    pr_number,
+                    "PENDING",
+                    expected_head_sha=head_sha,
+                    actual_head_sha=head_sha,
+                    stage="context.capacity",
+                    superseded_kind=capacity_decision.block_reason,
+                    extra_attrs=capacity_decision.telemetry(),
+                    phase_claim=phase_claim,
+                    table=table,
+                )
+                return
+            ci_gate_status = pipeline_publication.terminal_ci_gate_status(ci_snapshot)
+            pipeline_publication.commit_terminal_result(
+                context=context_publication,
+                runtime=active_runtime,
+                table=table,
+                review_mode="skip",
+                body=skipped_review_notice(
+                    pipeline_capacity.capacity_notice_reason(capacity_decision)
+                ),
+                deadline=deadline,
+                ci_snapshot=ci_snapshot,
+                extra_attributes={
+                    "skip_reason": capacity_decision.block_reason,
+                    "ci_gate_status": ci_gate_status,
+                    "ci_snapshot_source": ci_snapshot.get("source", "none"),
+                    "visible_projection_source": "capacity_boundary",
+                    **capacity_decision.telemetry(),
                 },
             )
             return

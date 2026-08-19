@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sys
 import types
 from pathlib import Path
@@ -191,6 +192,15 @@ class FakeTable:
             call_name = names.get("#call", "#call")
             if item.get(call_name) != values.get(":dispatching_record"):
                 raise FakeClientError("ConditionalCheckFailedException")
+        if condition:
+            rotation = re.fullmatch(
+                r"attribute_not_exists\((\w+)\) OR \1 <> (:\w+)",
+                " ".join(condition.split()),
+            )
+            if rotation:
+                attribute, value_key = rotation.group(1), rotation.group(2)
+                if attribute in item and item[attribute] == values.get(value_key):
+                    raise FakeClientError("ConditionalCheckFailedException")
         update = kwargs.get("UpdateExpression", "")
         updated = {}
         if update.startswith("ADD "):

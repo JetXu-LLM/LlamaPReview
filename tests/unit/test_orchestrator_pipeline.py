@@ -1307,6 +1307,62 @@ class TestOrchestratorPipeline(unittest.TestCase):
             "c" * 64,
         )
 
+    def test_capacity_bound_stops_the_run_before_any_paid_call(self):
+        item = self._pending_item()
+        runtime = _Runtime(_pr_content())
+        with patch.object(
+            orchestrator.pipeline_capacity.config,
+            "PIPELINE_CAPACITY_POLICY",
+            "repo_daily=1",
+        ):
+            orchestrator.pipeline_capacity.consume("owner/repo", table=self.table)
+            with patch.object(orchestrator.config, "DRY_RUN", True), patch.object(
+                orchestrator.pipeline_admission,
+                "installation_token",
+                return_value="token",
+            ), patch.object(orchestrator, "analyze_pr_complexity") as analyzer:
+                orchestrator.run_context_phase(
+                    item, table=self.table, runtime=runtime
+                )
+
+        analyzer.assert_not_called()
+        current = self.table.get_item(Key={"repo": "owner/repo", "pr_number": 7})["Item"]
+        self.assertEqual(current["review_mode"], "skip")
+        self.assertEqual(
+            current["skip_reason"],
+            orchestrator.pipeline_capacity.BLOCK_REPO_DAILY,
+        )
+        artifact = persistence.load_review_artifact_from_item(current)
+        self.assertIn("free review capacity", artifact["main_comment"])
+        self.assertIn("Self-hosting", artifact["main_comment"])
+
+    def test_a_blocked_successor_stops_silently_without_publishing(self):
+        item = self._pending_item(head_successor_count=1)
+        runtime = _Runtime(_pr_content())
+        with patch.object(
+            orchestrator.pipeline_capacity.config,
+            "PIPELINE_CAPACITY_POLICY",
+            "repo_daily=1",
+        ):
+            orchestrator.pipeline_capacity.consume("owner/repo", table=self.table)
+            with patch.object(orchestrator.config, "DRY_RUN", True), patch.object(
+                orchestrator.pipeline_admission,
+                "installation_token",
+                return_value="token",
+            ), patch.object(orchestrator, "analyze_pr_complexity") as analyzer:
+                orchestrator.run_context_phase(
+                    item, table=self.table, runtime=runtime
+                )
+
+        analyzer.assert_not_called()
+        current = self.table.get_item(Key={"repo": "owner/repo", "pr_number": 7})["Item"]
+        self.assertEqual(current["status"], "SUPERSEDED")
+        self.assertEqual(
+            current["superseded_kind"],
+            orchestrator.pipeline_capacity.BLOCK_REPO_DAILY,
+        )
+        self.assertNotIn("review_artifact", current)
+
     def test_context_phase_publishes_docs_only_skip_result_after_pr_ingest(self):
         item = self._pending_item()
         runtime = _Runtime(_pr_content(path="README.md", diff="@@ -1 +1 @@\n-Old docs\n+New docs\n", title="docs"))
