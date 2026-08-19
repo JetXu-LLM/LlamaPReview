@@ -39,6 +39,17 @@ The Webhook verifies the signature, reads event type and repository visibility, 
 
 The queued head SHA is not treated as sufficient proof. The Pipeline rereads the pull request lifecycle and head before context work, before the first expensive PFR Reconcile, before Final presentation, and before publication. Repository reads are pinned to that head where GitHub supports an exact ref. Evidence records carry provenance and coverage rather than silently promoting search hints to facts.
 
+### Bounded free capacity
+
+The hosted service allocates a finite personally funded budget, so admission
+charges a per-repository daily bound and a global circuit breaker before Route,
+which is the first paid call. Deterministic skips are charged nothing, so a
+repository whose traffic is mostly skipped keeps its capacity for the reviews
+that would actually run. Counters are sentinel items in the existing table, not
+a new store, and the bounds are code-owned defaults that one environment string
+can retune. Self-hosted deployments fund their own provider account and normally
+disable them.
+
 ### Lifecycle disposition and bounded succession
 
 Admission owns one typed description of the current pull request state relative

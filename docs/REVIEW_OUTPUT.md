@@ -57,6 +57,11 @@ native `COMMENT` review and stop the remaining model work:
 This pull request was merged before the review finished, so LlamaPReview stopped the remaining model work. No code-review verdict was produced.
 ```
 
+A repository that has used its free daily capacity receives one skip notice for
+the first affected pull request in that UTC day. Later pull requests in the same
+day stop silently rather than repeating it, and a head successor never publishes
+a capacity notice because that pull request already had its review.
+
 The closed form changes only `merged` to `closed`. A cancellation contains no
 footer, inline comment, Mermaid diagram, finding, verdict, or model-authored
 text. It is not quality-scoreable and records the corresponding lifecycle

@@ -40,6 +40,32 @@ The principal model controls are:
 
 Context size, tool rounds, provider timeouts, and phase deadlines are bounded by the variables in [`config.py`](../lambdas/LlamaPReviewPipeline/config.py). Treat those defaults as a coherent tested profile. A larger value can raise Lambda duration, provider cost, DynamoDB/S3 pressure, and the probability that a head changes before publication.
 
+## Free review capacity
+
+The hosted service is free for public repositories and funded personally, so a
+daily bound keeps one high-velocity repository from consuming the shared budget.
+Capacity is charged after the deterministic skip gates and before Route, so an
+over-capacity pull request costs no model call, and traffic that would have been
+skipped for free never consumes capacity.
+
+`PIPELINE_CAPACITY_POLICY` is a single compact `key=value;key=value` string
+rather than one variable per bound, because Lambda's 4KB environment budget is
+already nearly consumed:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `repo_daily` | `3` | Admitted paid runs per repository per UTC day. `0` removes the bound. |
+| `global_daily` | `100` | Circuit breaker across all repositories per UTC day. `0` removes the bound. |
+| `successor` | `on` | `off` disables one-time head succession without a redeploy. |
+
+An empty value keeps these defaults; the literal `off` disables both bounds.
+Self-hosted deployments that fund their own provider account will usually set
+`PIPELINE_CAPACITY_POLICY=off`.
+
+Counters live on reserved sentinel items in the existing table at
+`pr_number = -1`, so they cannot collide with a pull request or with the
+repository fact sheet at `pr_number = 0`.
+
 ## Tracing
 
 `DEEPSEEK_TRACE_MODE` accepts:
