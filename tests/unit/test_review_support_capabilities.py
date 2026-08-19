@@ -4,7 +4,9 @@ from lambdas.LlamaPReviewPipeline.review.language_fences import (
     language_fence_for_path,
 )
 from lambdas.LlamaPReviewPipeline.review.rendering_safety import (
+    ALLOWED_ARROWS_SUPERSET,
     format_mermaid,
+    validate_sequence_mermaid_offline,
 )
 from lambdas.LlamaPReviewPipeline.review.terminal_messages import (
     skipped_review_notice,
@@ -116,6 +118,96 @@ class ReviewSupportCapabilityTests(unittest.TestCase):
         )
 
         self.assertEqual(rendered, "")
+
+
+class MermaidArrowLookalikeTests(unittest.TestCase):
+    """Prose must never be admitted as a message by arrow-lookalike characters.
+
+    A published review once carried a diagram GitHub could not render because a
+    wrapped note line was parsed as ``e`` -x-> ``tract``.
+    """
+
+    WRAPPED_NOTE_DIAGRAM = (
+        "sequenceDiagram\n"
+        "participant G as Git\n"
+        "participant Ext as Extractor script\n"
+        "participant GL as gitleaks dir\n"
+        "G->>Ext: merge delta blobs (all paths)\n"
+        "Ext->>Ext: rename suppression paths\n"
+        "Note over Ext: PR change - non-injective rename\n"
+        "extract both to same OUT path\n"
+        "Ext->>G: git show m:p1 > OUT\n"
+        "GL-->>Ext: clean (blob p1 never scanned)"
+    )
+
+    def test_wrapped_note_remainder_is_folded_back_into_its_note(self):
+        rendered = format_mermaid(self.WRAPPED_NOTE_DIAGRAM)
+
+        self.assertIn(
+            "Note over Ext: PR change - non-injective rename"
+            "<br/>extract both to same OUT path",
+            rendered,
+        )
+        self.assertNotIn("\nextract both to same OUT path\n", rendered)
+
+    def test_wrapped_note_remainder_is_rejected_before_repair(self):
+        result = validate_sequence_mermaid_offline(
+            self.WRAPPED_NOTE_DIAGRAM,
+            treat_unknown_as_error=True,
+        )
+
+        self.assertFalse(result["is_valid"])
+        self.assertEqual(result["details"]["implicit_participants"], [])
+
+    def test_prose_without_a_preceding_note_degrades_the_whole_diagram(self):
+        rendered = format_mermaid(
+            "sequenceDiagram\n"
+            "participant A\n"
+            "participant B\n"
+            "A->>B: call\n"
+            "extract both to same OUT path"
+        )
+
+        self.assertEqual(rendered, "")
+
+    def test_prose_containing_arrow_characters_is_unknown_syntax(self):
+        for prose in (
+            "extract both to same OUT path",
+            "both to same OUT path",
+            "context is not available",
+            "before the merge",
+            "fix the collision first",
+            "no reachable consumer",
+        ):
+            with self.subTest(prose=prose):
+                result = validate_sequence_mermaid_offline(
+                    f"sequenceDiagram\nparticipant A\nA->>A: go\n{prose}",
+                    treat_unknown_as_error=True,
+                )
+
+                self.assertFalse(result["is_valid"])
+                self.assertEqual(result["details"]["implicit_participants"], [])
+
+    def test_every_supported_arrow_still_renders(self):
+        for arrow in sorted(ALLOWED_ARROWS_SUPERSET):
+            with self.subTest(arrow=arrow):
+                rendered = format_mermaid(
+                    "sequenceDiagram\n"
+                    "participant A\n"
+                    "participant B\n"
+                    f"A{arrow}B: payload"
+                )
+
+                self.assertIn(f"A{arrow}B: payload", rendered)
+
+    def test_participant_ending_in_an_arrow_character_keeps_the_real_split(self):
+        result = validate_sequence_mermaid_offline(
+            "sequenceDiagram\nparticipant Ao\nparticipant B\nAo-->B: call",
+            treat_unknown_as_error=True,
+        )
+
+        self.assertTrue(result["is_valid"])
+        self.assertEqual(result["details"]["implicit_participants"], [])
 
 
 if __name__ == "__main__":

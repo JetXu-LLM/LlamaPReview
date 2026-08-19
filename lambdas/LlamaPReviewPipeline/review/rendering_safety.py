@@ -7,9 +7,10 @@ from typing import Any, Dict, List, Set, Tuple
 
 __all__ = ["format_mermaid", "validate_sequence_mermaid_offline"]
 
+# Exactly the sequence-message arrows GitHub's Mermaid grammar accepts. This set
+# gates admission, so an entry Mermaid cannot parse would publish a broken diagram.
 ALLOWED_ARROWS_SUPERSET = {
-    "->", "-->", "->>", "-->>", "-x", "--x",
-    "-)", "--)", ")-", ")--", "-o", "--o", "o-", "o--"
+    "->", "-->", "->>", "-->>", "-x", "--x", "-)", "--)",
 }
 
 RE_COMMENT_FULL = re.compile(r'^\s*%%(?!\{).*')
@@ -29,10 +30,13 @@ RE_DEACTIVATE = re.compile(r'^\s*deactivate\s+(".*?"|[A-Za-z0-9_]+)\s*$', re.IGN
 RE_CREATE = re.compile(r'^\s*create\s+(".*?"|[A-Za-z0-9_]+)\s*$', re.IGNORECASE)
 RE_DESTROY = re.compile(r'^\s*destroy\s+(".*?"|[A-Za-z0-9_]+)\s*$', re.IGNORECASE)
 
-RE_BLOCK_START = re.compile(r'^\s*(alt|opt|loop|par|critical|break|rect|box)\b.*$', re.IGNORECASE)
+# ``box`` is omitted: Mermaid only allows participant declarations inside it, so
+# treating it as a generic block admits unrenderable output and also swallows
+# ordinary prose that happens to start with the word.
+RE_BLOCK_START = re.compile(r'^\s*(alt|opt|loop|par|critical|break|rect)\b.*$', re.IGNORECASE)
 RE_BLOCK_END = re.compile(r'^\s*end\s*$', re.IGNORECASE)
 RE_SINGLE_UNCLOSED_BLOCK = re.compile(
-    r"^Unclosed block '(?:alt|opt|loop|par|critical|break|rect|box)' "
+    r"^Unclosed block '(?:alt|opt|loop|par|critical|break|rect)' "
     r"\(line \d+\)\.$",
     re.IGNORECASE,
 )
@@ -43,9 +47,19 @@ RE_NOTE_MULTI_START = re.compile(r'^\s*note\s+(over|left|right|of)\b(?!.*:).*$',
 RE_NOTE_MULTI_END = re.compile(r'^\s*end\s+note\s*$', re.IGNORECASE)
 RE_NOTE_SINGLE = re.compile(r'^\s*note\s+(over|left|right|of)\b.*?:.*$', re.IGNORECASE)
 
+# The arrow token is authoritative: an unanchored character class lets ordinary
+# prose backtrack into a fake message (``extract`` -> ``e`` -x-> ``tract``), which
+# silently admits an unrenderable diagram. Longest-first alternation matches only
+# real arrows and still finds the correct split when a participant name ends in an
+# arrow character.
+_ARROW_ALTERNATION = "|".join(
+    re.escape(arrow)
+    for arrow in sorted(ALLOWED_ARROWS_SUPERSET, key=lambda a: (-len(a), a))
+)
+
 RE_MESSAGE = re.compile(
-    # r'^\s*(".*?"|[A-Za-z0-9_]+)\s*([\-o>x\)]+)\s*(".*?"|[A-Za-z0-9_]+)\s*(?::\s*(.*))?$'
-    r'^\s*(".*?"|[A-Za-z0-9_]+)\s*([\-o>x\)]+)\s*(".*?"|[A-Za-z0-9_]+)\s*(?::\s*)?(.*)$'
+    r'^\s*(".*?"|[A-Za-z0-9_]+)\s*(' + _ARROW_ALTERNATION + r')'
+    r'\s*(".*?"|[A-Za-z0-9_]+)\s*(?::\s*)?(.*)$'
 )
 
 # Mermaid treats semicolons as statement separators, even inside sequence
@@ -356,11 +370,8 @@ def validate_sequence_mermaid_offline(
         m_msg = RE_MESSAGE.match(stripped)
         if m_msg:
             src = _strip_quotes(m_msg.group(1))
-            arrow = m_msg.group(2)
             dst = _strip_quotes(m_msg.group(3))
             _mark_content(block_stack)
-            if arrow not in ALLOWED_ARROWS_SUPERSET and strict:
-                res["warnings"].append(f"Line {idx}: arrow '{arrow}' not in superset (tolerated).")
             for actor in (src, dst):
                 if actor not in participants:
                     if require_explicit_participants:
@@ -541,6 +552,43 @@ def _repair_bare_impact_note(lines: List[str]) -> List[str]:
     return repaired
 
 
+def _is_known_statement(stripped: str) -> bool:
+    """Report whether a line is any Mermaid sequence statement the validator accepts."""
+
+    if not stripped or stripped.startswith("```"):
+        return True
+    for pattern in (
+        RE_COMMENT_FULL, RE_DIRECTIVE, RE_SEQUENCE_START, RE_PARTICIPANT,
+        RE_AUTONUM, RE_TITLE, RE_ACTIVATE, RE_DEACTIVATE, RE_CREATE, RE_DESTROY,
+        RE_BLOCK_START, RE_BLOCK_END, RE_ELSE, RE_AND,
+        RE_NOTE_SINGLE, RE_NOTE_MULTI_START, RE_NOTE_MULTI_END, RE_MESSAGE,
+    ):
+        if pattern.match(stripped):
+            return True
+    return False
+
+
+def _fold_note_continuations(lines: List[str]) -> List[str]:
+    """Rejoin a note whose text the model wrapped onto the following line.
+
+    Mermaid requires a note to occupy one physical line, and the prompt says so,
+    but Final still wraps long note text.  The orphaned remainder is not a valid
+    statement, so folding it back is the only reading that preserves the authored
+    text; anything that could be a real statement is left for the validator.
+    """
+
+    folded: List[str] = []
+    target = -1
+    for line in lines:
+        stripped = line.strip()
+        if target >= 0 and stripped and not _is_known_statement(stripped):
+            folded[target] = f"{folded[target].rstrip()}<br/>{stripped}"
+            continue
+        folded.append(line)
+        target = len(folded) - 1 if RE_NOTE_SINGLE.match(stripped) else -1
+    return folded
+
+
 def _remove_empty_groups(lines: List[str]) -> List[str]:
     """Omit matched Mermaid groups with no visible statement.
 
@@ -664,6 +712,10 @@ def format_mermaid(
         # A standalone ``Impact — ...`` line is clearly note content, not a
         # message or a new claim.  Restore only the missing Mermaid prefix.
         lines = _repair_bare_impact_note(lines)
+
+        # Mermaid notes must occupy one physical line; rejoin the remainder of a
+        # note the model wrapped before anything classifies it as a statement.
+        lines = _fold_note_continuations(lines)
 
         # A matched control group with no visible statement has no semantic
         # content and renders as a label-only sliver in GitHub. Remove only
