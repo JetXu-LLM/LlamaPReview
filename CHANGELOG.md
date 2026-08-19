@@ -11,6 +11,32 @@ do not appear as project versions.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-19
+
+### Added
+
+- A bounded daily review capacity per repository, with a global circuit
+  breaker, charged after the deterministic skip gates and before the first paid
+  call. `PIPELINE_CAPACITY_POLICY` retunes or disables both bounds, and a
+  self-hosted deployment that funds its own provider account can turn them off.
+
+### Changed
+
+- The code-owned open-source footer keeps a fixed opening sentence and now
+  offers one invitation chosen from the reviewed head, so different pull
+  requests surface different entry points while retry and recovery stay stable.
+
+### Fixed
+
+- Mermaid validation no longer accepts ordinary prose as a sequence message.
+  An unanchored arrow pattern let backtracking split words such as `extract`
+  into a participant, an arrow, and a second participant, so diagrams GitHub
+  cannot render were published instead of degrading locally.
+- A single-line `Note` followed by a bare continuation line is folded into the
+  note instead of failing the whole diagram.
+
+## [0.1.3] - 2026-08-17
+
 ### Fixed
 
 - A merged or closed pull request whose native review surface is structurally
@@ -84,6 +110,9 @@ do not appear as project versions.
 - Legacy Handler and Advanced Handler runtimes, rollout lists, shadow/canary
   routing, and private operational history from the public active product.
 
-[Unreleased]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.1...HEAD
-[0.1.1]: https://github.com/JetXu-LLM/LlamaPReview/releases/tag/v0.1.1
+[Unreleased]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/JetXu-LLM/LlamaPReview/releases/tag/v0.1.0

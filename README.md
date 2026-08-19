@@ -47,7 +47,7 @@ A successful review contains one substantive main body, zero or more safely plac
 2. Open a pull request, or move an existing draft pull request to ready for review.
 3. Read the resulting review as decision support; maintainers remain responsible for what they merge.
 
-The hosted service is free for public repositories. Start at the [official website](https://jetxu-llm.github.io/LlamaPReview-site/) for the current product entry point.
+The hosted service is free for public repositories and is funded personally, so each repository gets a small daily review capacity and a shared circuit breaker protects the rest. The first pull request that runs past the daily bound says so and stops before spending anything; later ones that day stop quietly. Self-hosting removes the bound entirely. Start at the [official website](https://jetxu-llm.github.io/LlamaPReview-site/) for the current product entry point.
 
 ## Self-hosted quick start
 
@@ -58,6 +58,10 @@ Self-hosting runs the same public-only Webhook and Pipeline path in your AWS acc
 3. Supply your own GitHub App and DeepSeek credentials, then pay your own AWS and provider costs.
 
 The reference stack has no automatic production deployment, paid secret-management service, hidden private-repository mode, or official AWS identity.
+
+Repository evidence is retrieved through [llama-github](https://github.com/JetXu-LLM/llama-github), an independently released SDK from the same author that you can use on its own.
+
+If this reviewer caught something worth catching, a star helps other maintainers find it.
 
 ## Privacy and security
 
