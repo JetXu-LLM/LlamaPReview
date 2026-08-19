@@ -8,6 +8,8 @@ set_default_env()
 from lambdas.LlamaPReviewPipeline.review.publish import (
     PUBLIC_FOOTER,
     PUBLIC_FOOTER_MARKER,
+    PUBLIC_FOOTER_VARIANTS,
+    public_footer,
     build_diff_maps_from_pr_files,
     build_main_comment,
     prepare_main_comment_publication,
@@ -130,8 +132,8 @@ class PublicationFailureSafetyTests(unittest.TestCase):
 
         self.assertEqual(prepared.comments, ())
         self.assertIn("Unanchored Suggestions", prepared.main_body)
-        self.assertEqual(prepared.main_body.count(PUBLIC_FOOTER), 1)
-        self.assertTrue(prepared.main_body.endswith(PUBLIC_FOOTER))
+        self.assertEqual(prepared.main_body.count(public_footer(HEAD)), 1)
+        self.assertTrue(prepared.main_body.endswith(public_footer(HEAD)))
 
     def test_inline_body_never_contains_footer(self):
         prepared = prepare_review_publication(
@@ -141,9 +143,12 @@ class PublicationFailureSafetyTests(unittest.TestCase):
         )
 
         self.assertEqual(len(prepared.comments), 1)
-        self.assertEqual(prepared.main_body.count(PUBLIC_FOOTER), 1)
+        self.assertEqual(prepared.main_body.count(public_footer(HEAD)), 1)
         self.assertTrue(
-            all(PUBLIC_FOOTER not in comment["body"] for comment in prepared.comments)
+            all(
+                PUBLIC_FOOTER_MARKER not in comment["body"]
+                for comment in prepared.comments
+            )
         )
 
     def test_recovery_round_trip_cannot_duplicate_footer(self):
@@ -169,12 +174,46 @@ class PublicationFailureSafetyTests(unittest.TestCase):
 
         recovered = prepared_from_candidate(candidate)
         rebuilt = build_main_comment(
-            _publishable_review(body=recovered.main_body)
+            _publishable_review(body=recovered.main_body),
+            invitation_seed=HEAD,
         )
 
         self.assertEqual(recovered.main_body, prepared.main_body)
         self.assertEqual(rebuilt, prepared.main_body)
-        self.assertEqual(rebuilt.count(PUBLIC_FOOTER), 1)
+        self.assertEqual(rebuilt.count(public_footer(HEAD)), 1)
+
+    def test_rebuilding_under_a_different_head_still_leaves_one_footer(self):
+        prepared = prepare_review_publication(
+            _publishable_review(),
+            head_sha=HEAD,
+            diff_maps={},
+        )
+        other = "9" * 40
+        self.assertNotEqual(public_footer(HEAD), public_footer(other))
+
+        rebuilt = build_main_comment(
+            _publishable_review(body=prepared.main_body),
+            invitation_seed=other,
+        )
+
+        self.assertEqual(rebuilt.count(PUBLIC_FOOTER_MARKER), 1)
+        self.assertTrue(rebuilt.endswith(public_footer(other)))
+        self.assertNotIn(public_footer(HEAD), rebuilt)
+
+    def test_every_footer_variant_is_one_line_and_carries_the_marker(self):
+        for variant in PUBLIC_FOOTER_VARIANTS:
+            with self.subTest(variant=variant):
+                self.assertTrue(variant.startswith("\n\n---\n*"))
+                self.assertTrue(variant.endswith(".*"))
+                self.assertEqual(variant.count(PUBLIC_FOOTER_MARKER), 1)
+                self.assertEqual(variant.strip().count("\n"), 1)
+
+    def test_footer_choice_is_stable_and_spreads_across_heads(self):
+        self.assertEqual(public_footer(HEAD), public_footer(HEAD))
+        chosen = {
+            public_footer(f"{index:040x}") for index in range(200)
+        }
+        self.assertEqual(chosen, set(PUBLIC_FOOTER_VARIANTS))
 
     def test_exact_head_payload_changes_only_by_code_owned_footer(self):
         model_body = "### Review\n\nThe exact-head evidence is internally consistent."
@@ -189,7 +228,7 @@ class PublicationFailureSafetyTests(unittest.TestCase):
         self.assertEqual(payload["head_sha"], without_footer["head_sha"])
         self.assertEqual(payload["event"], without_footer["event"])
         self.assertEqual(payload["comments"], without_footer["comments"])
-        self.assertEqual(payload["body"], model_body + PUBLIC_FOOTER)
+        self.assertEqual(payload["body"], model_body + public_footer(HEAD))
         self.assertNotEqual(prepared.payload_sha256, "")
 
     def test_main_comment_ignores_retired_diagram_fields(self):

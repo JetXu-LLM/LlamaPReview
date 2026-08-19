@@ -27,6 +27,7 @@ from lambdas.LlamaPReviewPipeline.errors import (
 from lambdas.LlamaPReviewPipeline.review import publication_candidate
 from lambdas.LlamaPReviewPipeline.review.publish import (
     PUBLIC_FOOTER_MARKER,
+    public_footer,
     PreparedGitHubReview,
     build_diff_maps_from_pr_files,
     prepare_review_publication,
@@ -210,11 +211,7 @@ class LifecyclePublicationPrimitiveTests(unittest.TestCase):
         self.assertEqual(prepared.required_disposition, "open_same_head")
         self.assertEqual(
             prepared.main_body,
-            final["pr_review_comment"]
-            + "\n\n---\n"
-            "*LlamaPReview reviewed this pull request at its exact head commit. "
-            "[Inspect the source](https://github.com/JetXu-LLM/LlamaPReview) or "
-            "[share feedback](https://github.com/JetXu-LLM/LlamaPReview/discussions).*",
+            final["pr_review_comment"] + public_footer(HEAD),
         )
 
     def test_post_merge_locations_keep_final_inline_order(self):
