@@ -345,6 +345,54 @@ class ContextLifecycleOrchestrationTests(unittest.TestCase):
         self.assertEqual(requeue.call_args.kwargs["stage"], "context.ingest")
         provider_source.assert_not_called()
 
+    def test_successor_policy_off_supersedes_instead_of_requeueing(self):
+        item = _item()
+        runtime = SequenceRuntime(_snapshot(HEAD_B))
+        with patch.object(
+            orchestrator.pipeline_capacity.config,
+            "PIPELINE_CAPACITY_POLICY",
+            "successor=off",
+        ), patch.object(
+            orchestrator.pipeline_admission,
+            "claim_phase_delivery",
+            return_value=_admission(item),
+        ), patch.object(
+            orchestrator.pipeline_admission,
+            "installation_token",
+            return_value="token",
+        ), patch.object(
+            orchestrator.pipeline_publication,
+            "recover_pending",
+            return_value=False,
+        ), patch.object(
+            orchestrator.persistence,
+            "get_item",
+            return_value=item,
+        ), patch.object(
+            orchestrator.persistence,
+            "requeue_head_successor",
+        ) as requeue, patch.object(
+            orchestrator.persistence,
+            "mark_superseded",
+            return_value=True,
+        ) as superseded, patch.object(
+            orchestrator,
+            "prepare_provider_source",
+        ) as provider_source:
+            orchestrator.run_context_phase(
+                item,
+                runtime=runtime,
+                stream_event_id="context-stream",
+            )
+
+        requeue.assert_not_called()
+        superseded.assert_called_once()
+        self.assertEqual(
+            superseded.call_args.kwargs["superseded_kind"],
+            "head_changed",
+        )
+        provider_source.assert_not_called()
+
     def test_unverified_ingest_is_retryable_and_performs_no_work(self):
         item = _item()
         runtime = SequenceRuntime({"head_sha": HEAD_A, "state": "open"})

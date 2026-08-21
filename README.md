@@ -61,7 +61,7 @@ A successful review contains one substantive main body, zero or more safely plac
 2. Open a pull request, or move an existing draft pull request to ready for review.
 3. Read the resulting review as decision support; maintainers remain responsible for what they merge.
 
-The hosted service is free for public repositories and is funded personally, so each repository gets a small daily review capacity and a shared circuit breaker protects the rest. The first pull request that runs past the daily bound says so and stops before spending anything; later ones that day stop quietly. Self-hosting removes the bound entirely. Start at the [official website](https://jetxu-llm.github.io/LlamaPReview-site/) for the current product entry point.
+The hosted service is free for public repositories and is funded personally, so each repository gets a small daily review capacity and a shared circuit breaker protects the rest. The first pull request that runs past the daily bound says so and stops before spending anything; later ones that day stop quietly. The self-hosted reference stack disables these hosted-service bounds by default. Start at the [official website](https://jetxu-llm.github.io/LlamaPReview-site/) for the current product entry point.
 
 ## Self-hosted quick start
 

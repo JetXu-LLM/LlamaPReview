@@ -29,6 +29,7 @@ deepseek_api_key      = "replace-with-your-provider-key"
 # Safe first apply: no stream consumption and no GitHub product writes.
 pipeline_stream_enabled = false
 pipeline_dry_run        = true
+pipeline_capacity_policy = "off"
 provider_trace_mode     = "summary"
 
 # Optional: connect alarms to one or more SNS topics you operate.

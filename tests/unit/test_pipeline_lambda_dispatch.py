@@ -107,6 +107,22 @@ class TestPipelineLambdaDispatch(unittest.TestCase):
             lambda_function.process_record(record)
         mocked.assert_not_called()
 
+    def test_capacity_sentinel_never_dispatches_pipeline_work(self):
+        record = build_stream_record(
+            repo="!llamapreview-capacity:2026-08-20",
+            pr_number=-1,
+            new_status="PENDING",
+        )
+        with patch(
+            "lambdas.LlamaPReviewPipeline.lambda_function.orchestrator.run_context_phase"
+        ) as context_phase, patch(
+            "lambdas.LlamaPReviewPipeline.lambda_function.orchestrator.run_review_phase"
+        ) as review_phase:
+            lambda_function.process_record(record)
+
+        context_phase.assert_not_called()
+        review_phase.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

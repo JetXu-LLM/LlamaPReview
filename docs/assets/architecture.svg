@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 830" width="900" height="830" role="img" aria-labelledby="t d">
   <title id="t">How LlamaPReview turns a public pull request into a published review</title>
-  <desc id="d">A signed public GitHub event is admitted at an exact head commit. Code gathers bounded public evidence, DeepSeek supplies engineering judgment, and deterministic code owns projection, placement and exactly-once publication. The result is a public review anyone can inspect, from source anyone can run.</desc>
+  <desc id="d">A signed public GitHub event is admitted at an exact head commit. Code gathers bounded public evidence, DeepSeek supplies engineering judgment, and deterministic code owns schema, safety, accounting, recovery, and irreversible publication. The result is a public review anyone can inspect, from source anyone can run.</desc>
 
   <defs>
     <style>
@@ -21,7 +21,7 @@
   <rect x="1" y="1" width="898" height="828" rx="19" fill="none" stroke="#e2e8f0" stroke-width="2"/>
 
   <text x="48" y="62" class="h">From a public pull request to a review you can audit</text>
-  <text x="48" y="94" class="sub">The model judges the engineering. Code owns every boundary and published byte.</text>
+  <text x="48" y="94" class="sub" font-size="15">The model owns engineering judgment. Code owns schema, safety, accounting, recovery, and irreversible publication.</text>
 
   <rect x="48" y="118" width="16" height="16" rx="4" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
   <text x="74" y="132" class="tag" fill="#475569">CODE-OWNED</text>

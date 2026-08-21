@@ -103,6 +103,7 @@ resource "aws_lambda_function" "pipeline" {
       PERSIST_REVIEW_ARTIFACT           = "true"
       PFR_NORMAL_EFFORT                 = var.model_routing.normal_pfr_effort
       PFR_NORMAL_MODEL                  = var.model_routing.normal_pfr_model
+      PIPELINE_CAPACITY_POLICY          = var.pipeline_capacity_policy
       PIPELINE_TTL_DAYS                 = tostring(var.pipeline_ttl_days)
       PUBLICATION_ARTIFACT_BUCKET       = aws_s3_bucket.artifacts.id
       RUN_ARTIFACT_BUCKET               = aws_s3_bucket.artifacts.id
@@ -135,6 +136,21 @@ resource "aws_lambda_event_source_mapping" "pipeline" {
   bisect_batch_on_function_error = true
   enabled                        = var.pipeline_stream_enabled
   function_response_types        = []
+
+  filter_criteria {
+    filter {
+      pattern = jsonencode({
+        eventName = ["INSERT", "MODIFY"]
+        dynamodb = {
+          NewImage = {
+            status = {
+              S = ["PENDING", "CONTEXT_READY"]
+            }
+          }
+        }
+      })
+    }
+  }
 
   depends_on = [aws_iam_role_policy.pipeline]
 }

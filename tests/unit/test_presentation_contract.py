@@ -2026,6 +2026,82 @@ class PresentationCompilationTests(unittest.TestCase):
             1,
         )
 
+    def test_parser_invalid_diagram_is_dropped_without_losing_review_prose(self):
+        invalid_diagrams = (
+            (
+                "sequenceDiagram\n"
+                "participant U\n"
+                "participant A\n"
+                "participant B\n"
+                "Note over U,A,B: changed path\n"
+                "U->>A: call"
+            ),
+            (
+                "sequenceDiagram\n"
+                "participant Poll\n"
+                "participant Actor\n"
+                "Poll->>Actor: wait"
+            ),
+            (
+                "sequenceDiagram\n"
+                "participant Poll\n"
+                "Note right of Actor: wait\n"
+                "Poll->>Poll: continue"
+            ),
+            (
+                "sequenceDiagram\n"
+                "participant Poll\n"
+                "Note left of Actor: wait\n"
+                "Poll->>Poll: continue"
+            ),
+            (
+                "sequenceDiagram\n"
+                "participant A\n"
+                "Note left A: missing of\n"
+                "A->>A: continue"
+            ),
+            (
+                "sequenceDiagram\n"
+                "participant A\n"
+                "Note right A: missing of\n"
+                "A->>A: continue"
+            ),
+            (
+                "sequenceDiagram\n"
+                "participant A\n"
+                "Note of A: standalone of\n"
+                "A->>A: continue"
+            ),
+        )
+        for mermaid in invalid_diagrams:
+            with self.subTest(mermaid=mermaid):
+                result = compile_presentation_v1(
+                    presentation(
+                        diagram={
+                            "purpose": "pr_flow_map",
+                            "caption": "This optional diagram cannot render.",
+                            "mermaid": mermaid,
+                            "evidence_refs": ["path:src/app.py"],
+                        }
+                    ),
+                    pr_details=PR_DETAILS,
+                    context_meta=context_meta(),
+                )
+
+                self.assertTrue(result.publishable)
+                self.assertTrue(result.safe_partial)
+                self.assertIsNone(result.presentation["diagram"])
+                body = result.review["pr_review_comment"]
+                self.assertNotIn("```mermaid", body)
+                self.assertIn(
+                    "The changed value remains locally consistent",
+                    body,
+                )
+                self.assertIn(
+                    "The changed expression remains consistent with the visible contract.",
+                    body,
+                )
+
     def test_one_bad_diagram_ref_is_removed_without_losing_the_diagram(self):
         result = compile_presentation_v1(
             presentation(

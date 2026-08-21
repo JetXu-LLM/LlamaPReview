@@ -54,17 +54,39 @@ already nearly consumed:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `repo_daily` | `3` | Admitted paid runs per repository per UTC day. `0` removes the bound. |
-| `global_daily` | `100` | Circuit breaker across all repositories per UTC day. `0` removes the bound. |
-| `successor` | `on` | `off` disables one-time head succession without a redeploy. |
+| `repo_daily` | `3` | Admitted paid runs per repository per UTC day. It must be `0`–`512`; `0` removes only the repository bound while the global bound remains active. |
+| `global_daily` | `100` | Circuit breaker across all repositories per UTC day. It must be `1`–`512` for an enabled policy. |
+| `successor` | `on` | `off` disables one-time head succession after an immutable configuration version is published and its alias is advanced with CAS. |
 
-An empty value keeps these defaults; the literal `off` disables both bounds.
-Self-hosted deployments that fund their own provider account will usually set
-`PIPELINE_CAPACITY_POLICY=off`.
+An empty value keeps these hosted defaults; the literal `off` disables both
+bounds without disabling normal one-time head succession. The public Terraform
+variable `pipeline_capacity_policy` defaults to `off`, because self-hosted
+deployments fund their own provider account. Set a bounded policy explicitly
+only when the self-hoster wants one.
 
-Counters live on reserved sentinel items in the existing table at
-`pr_number = -1`, so they cannot collide with a pull request or with the
-repository fact sheet at `pr_number = 0`.
+The code-owned maximum of `512` applies to both daily bounds. The global maximum
+bounds the admission-ID set and the per-repository counter/notice attributes on
+the single daily DynamoDB sentinel; the repository maximum also rejects huge
+integers before boto3 can attempt DynamoDB decimal serialization. An enabled
+policy with `global_daily=0`, either value above `512`, an unknown or duplicate
+key, or an invalid value is rejected rather than silently creating unsafe state.
+Use the literal `off` when both quotas should be disabled.
+
+The Pipeline rereads `successor=off` after claiming context work. A successor
+that was already queued stops silently before source retrieval, capacity
+admission, or new paid work. Retained terminal predecessor-call ledgers remain
+on that item. A publication intent or unresolved provider dispatch continues
+through its existing fail-closed recovery path instead of being discarded by
+the operator switch.
+
+Each UTC day uses one reserved sentinel in the existing table at
+`pr_number = -1`, so it cannot collide with a pull request or with the repository
+fact sheet at `pr_number = 0`. One atomic conditional update records the exact
+run admission and charges both active counters. A retry of the same repository,
+pull request, run ID, head, and successor disposition reuses that day's
+admission rather than consuming capacity again within the same UTC day. A retry
+after the UTC boundary is admitted against the new day's quota. Capacity sentinel stream records are
+filtered before Lambda invocation and also rejected by the handler boundary.
 
 ## Tracing
 

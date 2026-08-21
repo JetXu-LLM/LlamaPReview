@@ -106,9 +106,13 @@ run "safe_reference_topology" {
   assert {
     condition = (
       aws_lambda_event_source_mapping.pipeline.function_name == aws_lambda_alias.pipeline.arn &&
-      aws_lambda_event_source_mapping.pipeline.enabled == false
+      aws_lambda_event_source_mapping.pipeline.enabled == false &&
+      length(aws_lambda_event_source_mapping.pipeline.filter_criteria[0].filter) == 1 &&
+      jsondecode(
+        one(aws_lambda_event_source_mapping.pipeline.filter_criteria[0].filter).pattern
+      ).dynamodb.NewImage.status.S == ["PENDING", "CONTEXT_READY"]
     )
-    error_message = "The Stream must target Pipeline LIVE and remain disabled on the safe first plan."
+    error_message = "The Stream must target Pipeline LIVE, exclude sentinel rows, and remain disabled on the safe first plan."
   }
 
   assert {
@@ -133,9 +137,10 @@ run "safe_reference_topology" {
   assert {
     condition = (
       aws_lambda_function.pipeline.environment[0].variables["DRY_RUN"] == "true" &&
-      aws_lambda_function.pipeline.environment[0].variables["PERSIST_REVIEW_ARTIFACT"] == "true"
+      aws_lambda_function.pipeline.environment[0].variables["PERSIST_REVIEW_ARTIFACT"] == "true" &&
+      aws_lambda_function.pipeline.environment[0].variables["PIPELINE_CAPACITY_POLICY"] == "off"
     )
-    error_message = "The first plan must preserve zero-write validation and durable recovery artifacts."
+    error_message = "The first plan must preserve zero-write validation, unbounded self-hosted capacity, and durable recovery artifacts."
   }
 }
 
@@ -161,19 +166,117 @@ run "explicit_activation" {
       }
     }
 
-    github_app_id           = "123456"
-    github_private_key      = "mock-private-key"
-    github_webhook_secret   = "mock-webhook-secret-long-value"
-    deepseek_api_key        = "mock-provider-key"
-    pipeline_dry_run        = false
-    pipeline_stream_enabled = true
+    github_app_id            = "123456"
+    github_private_key       = "mock-private-key"
+    github_webhook_secret    = "mock-webhook-secret-long-value"
+    deepseek_api_key         = "mock-provider-key"
+    pipeline_dry_run         = false
+    pipeline_stream_enabled  = true
+    pipeline_capacity_policy = "repo_daily=3;global_daily=100;successor=off"
   }
 
   assert {
     condition = (
       aws_lambda_event_source_mapping.pipeline.enabled &&
-      aws_lambda_function.pipeline.environment[0].variables["DRY_RUN"] == "false"
+      aws_lambda_function.pipeline.environment[0].variables["DRY_RUN"] == "false" &&
+      aws_lambda_function.pipeline.environment[0].variables["PIPELINE_CAPACITY_POLICY"] == "repo_daily=3;global_daily=100;successor=off"
     )
-    error_message = "Live publication requires both explicit activation inputs."
+    error_message = "Live publication requires explicit activation inputs and preserves a bounded capacity policy."
   }
+}
+
+run "reject_partially_unbounded_capacity" {
+  command = plan
+
+  variables {
+    release_artifacts = {
+      webhook = {
+        path          = "tests/fixtures/mock-artifact.txt"
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
+      }
+      pipeline = {
+        path          = "tests/fixtures/mock-artifact.txt"
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
+      }
+      layer = {
+        path          = "tests/fixtures/mock-artifact.txt"
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
+      }
+    }
+
+    github_app_id            = "123456"
+    github_private_key       = "mock-private-key"
+    github_webhook_secret    = "mock-webhook-secret-long-value"
+    deepseek_api_key         = "mock-provider-key"
+    pipeline_capacity_policy = "repo_daily=3;global_daily=0"
+  }
+
+  expect_failures = [var.pipeline_capacity_policy]
+}
+
+run "reject_capacity_above_item_bound" {
+  command = plan
+
+  variables {
+    release_artifacts = {
+      webhook = {
+        path          = "tests/fixtures/mock-artifact.txt"
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
+      }
+      pipeline = {
+        path          = "tests/fixtures/mock-artifact.txt"
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
+      }
+      layer = {
+        path          = "tests/fixtures/mock-artifact.txt"
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
+      }
+    }
+
+    github_app_id            = "123456"
+    github_private_key       = "mock-private-key"
+    github_webhook_secret    = "mock-webhook-secret-long-value"
+    deepseek_api_key         = "mock-provider-key"
+    pipeline_capacity_policy = "repo_daily=3;global_daily=513"
+  }
+
+  expect_failures = [var.pipeline_capacity_policy]
+}
+
+run "reject_repo_capacity_above_numeric_bound" {
+  command = plan
+
+  variables {
+    release_artifacts = {
+      webhook = {
+        path          = "tests/fixtures/mock-artifact.txt"
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
+      }
+      pipeline = {
+        path          = "tests/fixtures/mock-artifact.txt"
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
+      }
+      layer = {
+        path          = "tests/fixtures/mock-artifact.txt"
+        sha256_hex    = "19688284c4266ed2805347de8445d203fede7a35412ac593d2ab077c0316a82f"
+        sha256_base64 = "GWiChMQmbtKAU0fehEXSA/7eejVBKsWT0qsHfAMWqC8="
+      }
+    }
+
+    github_app_id            = "123456"
+    github_private_key       = "mock-private-key"
+    github_webhook_secret    = "mock-webhook-secret-long-value"
+    deepseek_api_key         = "mock-provider-key"
+    pipeline_capacity_policy = "repo_daily=999999999999999999999999999999999999999;global_daily=100"
+  }
+
+  expect_failures = [var.pipeline_capacity_policy]
 }

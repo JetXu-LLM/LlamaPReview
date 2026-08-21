@@ -45,10 +45,18 @@ The hosted service allocates a finite personally funded budget, so admission
 charges a per-repository daily bound and a global circuit breaker before Route,
 which is the first paid call. Deterministic skips are charged nothing, so a
 repository whose traffic is mostly skipped keeps its capacity for the reviews
-that would actually run. Counters are sentinel items in the existing table, not
-a new store, and the bounds are code-owned defaults that one environment string
-can retune. Self-hosted deployments fund their own provider account and normally
-disable them.
+that would actually run. One UTC-day sentinel in the existing table owns both
+counters and the admitted run identities. A single conditional update checks
+both limits, increments both counters, and records the exact repository, pull
+request, run, head, and successor-derived admission identity. Retrying that run
+within the same UTC day reuses its daily admission; a retry after rollover is
+charged against the new day's quota. Code-owned repository and global maxima of
+512 reject unsafe numeric configurations, while the global bound keeps the
+single item's admission IDs, repository counters, and notice owners below the
+DynamoDB item limit. A global rejection cannot partially consume repository
+capacity. The day's one repository notice is bound to the exact blocked
+admission that owns it. The self-hosted Terraform reference disables these
+hosted bounds by default.
 
 ### Lifecycle disposition and bounded succession
 

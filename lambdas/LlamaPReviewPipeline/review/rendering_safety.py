@@ -46,6 +46,12 @@ RE_AND = re.compile(r'^\s*and\b.*$', re.IGNORECASE)
 RE_NOTE_MULTI_START = re.compile(r'^\s*note\s+(over|left|right|of)\b(?!.*:).*$', re.IGNORECASE)
 RE_NOTE_MULTI_END = re.compile(r'^\s*end\s+note\s*$', re.IGNORECASE)
 RE_NOTE_SINGLE = re.compile(r'^\s*note\s+(over|left|right|of)\b.*?:.*$', re.IGNORECASE)
+RE_VALID_NOTE_PARTICIPANTS = re.compile(
+    r'^\s*note\s+(?:(over)\s+([^:]+?)|(left|right)\s+of\s+([^:]+?))'
+    r'(?:\s*:|$)',
+    re.IGNORECASE,
+)
+MERMAID_RESERVED_PARTICIPANT_IDS = {"actor"}
 
 # The arrow token is authoritative: an unanchored character class lets ordinary
 # prose backtrack into a fake message (``extract`` -> ``e`` -x-> ``tract``), which
@@ -93,6 +99,40 @@ def _strip_quotes(s: str) -> str:
     if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
         return s[1:-1]
     return s
+
+
+def _split_unquoted_commas(value: str) -> List[str]:
+    parts: List[str] = []
+    current: List[str] = []
+    in_quotes = False
+    for character in value:
+        if character == '"':
+            in_quotes = not in_quotes
+        if character == "," and not in_quotes:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(character)
+    parts.append("".join(current).strip())
+    return parts
+
+
+def _note_participant_operands(line: str) -> Tuple[str, List[str]]:
+    match = RE_VALID_NOTE_PARTICIPANTS.match(line)
+    if not match:
+        return "", []
+    mode = (match.group(1) or match.group(3)).lower()
+    raw = (match.group(2) or match.group(4)).strip()
+    return mode, _split_unquoted_commas(raw)
+
+
+def _is_reserved_participant_id(value: str) -> bool:
+    raw = value.strip()
+    quoted = len(raw) >= 2 and raw[0] == '"' and raw[-1] == '"'
+    return (
+        not quoted
+        and _strip_quotes(raw).casefold() in MERMAID_RESERVED_PARTICIPANT_IDS
+    )
 
 def _inside_block(stack: List[Dict[str, Any]], types: Set[str]) -> bool:
     for b in reversed(stack):
@@ -216,10 +256,39 @@ def validate_sequence_mermaid_offline(
             res["errors"].append(f"Line {idx}: unexpected code fence ``` outside note.")
             continue
 
-        if RE_NOTE_SINGLE.match(stripped):
+        is_note_single = bool(RE_NOTE_SINGLE.match(stripped))
+        is_note_multi_start = bool(RE_NOTE_MULTI_START.match(stripped))
+        if is_note_single or is_note_multi_start:
+            note_mode, note_participants = _note_participant_operands(stripped)
+            if not note_mode:
+                res["errors"].append(
+                    f"Line {idx}: note must use 'over', 'left of', or 'right of'."
+                )
+            if note_mode and (
+                not note_participants
+                or any(not actor for actor in note_participants)
+            ):
+                res["errors"].append(
+                    f"Line {idx}: note participant operands must be nonempty."
+                )
+            if note_mode == "over" and not (1 <= len(note_participants) <= 2):
+                res["errors"].append(
+                    f"Line {idx}: 'Note over' accepts one or two participants."
+                )
+            if note_mode in {"left", "right"} and len(note_participants) != 1:
+                res["errors"].append(
+                    f"Line {idx}: 'Note {note_mode} of' accepts one participant."
+                )
+            for actor in note_participants:
+                if _is_reserved_participant_id(actor):
+                    res["errors"].append(
+                        f"Line {idx}: participant ID '{_strip_quotes(actor)}' is reserved by Mermaid."
+                    )
+
+        if is_note_single:
             _mark_content(block_stack)
             continue
-        if RE_NOTE_MULTI_START.match(stripped):
+        if is_note_multi_start:
             in_multiline_note = True
             multiline_note_start = idx
             _mark_content(block_stack)
@@ -238,11 +307,18 @@ def validate_sequence_mermaid_offline(
                 left_clean = _strip_quotes(left_raw)
                 alias_clean = _strip_quotes(alias_raw)
                 if left_quoted and not alias_quoted:
+                    pid_raw = alias_raw
                     pid = alias_clean
                 else:
+                    pid_raw = left_raw
                     pid = left_clean
             else:
+                pid_raw = left_raw
                 pid = _strip_quotes(left_raw)
+            if _is_reserved_participant_id(pid_raw):
+                res["errors"].append(
+                    f"Line {idx}: participant ID '{pid}' is reserved by Mermaid."
+                )
             participants[pid] = participants.get(pid, 0) + 1
             continue
 
@@ -328,7 +404,12 @@ def validate_sequence_mermaid_offline(
                 continue
 
         if (m := RE_ACTIVATE.match(stripped)):
-            actor = _strip_quotes(m.group(1))
+            actor_raw = m.group(1)
+            actor = _strip_quotes(actor_raw)
+            if _is_reserved_participant_id(actor_raw):
+                res["errors"].append(
+                    f"Line {idx}: participant ID '{actor}' is reserved by Mermaid."
+                )
             activation_stack.append(actor)
             if actor not in participants:
                 if require_explicit_participants:
@@ -339,7 +420,12 @@ def validate_sequence_mermaid_offline(
             continue
 
         if (m := RE_DEACTIVATE.match(stripped)):
-            actor = _strip_quotes(m.group(1))
+            actor_raw = m.group(1)
+            actor = _strip_quotes(actor_raw)
+            if _is_reserved_participant_id(actor_raw):
+                res["errors"].append(
+                    f"Line {idx}: participant ID '{actor}' is reserved by Mermaid."
+                )
             if actor not in activation_stack:
                 if strict:
                     res["warnings"].append(f"Line {idx}: deactivate '{actor}' not active.")
@@ -352,7 +438,12 @@ def validate_sequence_mermaid_offline(
             continue
 
         if (m := RE_CREATE.match(stripped)):
-            actor = _strip_quotes(m.group(1))
+            actor_raw = m.group(1)
+            actor = _strip_quotes(actor_raw)
+            if _is_reserved_participant_id(actor_raw):
+                res["errors"].append(
+                    f"Line {idx}: participant ID '{actor}' is reserved by Mermaid."
+                )
             if actor in created and strict:
                 res["warnings"].append(f"Line {idx}: duplicate create '{actor}'.")
             created.add(actor)
@@ -360,7 +451,12 @@ def validate_sequence_mermaid_offline(
             continue
 
         if (m := RE_DESTROY.match(stripped)):
-            actor = _strip_quotes(m.group(1))
+            actor_raw = m.group(1)
+            actor = _strip_quotes(actor_raw)
+            if _is_reserved_participant_id(actor_raw):
+                res["errors"].append(
+                    f"Line {idx}: participant ID '{actor}' is reserved by Mermaid."
+                )
             if actor in destroyed and strict:
                 res["warnings"].append(f"Line {idx}: duplicate destroy '{actor}'.")
             destroyed.add(actor)
@@ -369,10 +465,16 @@ def validate_sequence_mermaid_offline(
 
         m_msg = RE_MESSAGE.match(stripped)
         if m_msg:
-            src = _strip_quotes(m_msg.group(1))
-            dst = _strip_quotes(m_msg.group(3))
+            src_raw = m_msg.group(1)
+            dst_raw = m_msg.group(3)
+            src = _strip_quotes(src_raw)
+            dst = _strip_quotes(dst_raw)
             _mark_content(block_stack)
-            for actor in (src, dst):
+            for actor, actor_raw in ((src, src_raw), (dst, dst_raw)):
+                if _is_reserved_participant_id(actor_raw):
+                    res["errors"].append(
+                        f"Line {idx}: participant ID '{actor}' is reserved by Mermaid."
+                    )
                 if actor not in participants:
                     if require_explicit_participants:
                         res["errors"].append(f"Line {idx}: participant '{actor}' not declared.")

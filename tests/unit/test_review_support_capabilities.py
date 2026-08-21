@@ -210,5 +210,199 @@ class MermaidArrowLookalikeTests(unittest.TestCase):
         self.assertEqual(result["details"]["implicit_participants"], [])
 
 
+class MermaidParserParityRegressionTests(unittest.TestCase):
+    def test_supported_note_placements_remain_renderable(self):
+        placements = (
+            "Note over A: one operand",
+            "Note over A,B: two operands",
+            "Note left of A: one operand",
+            "Note right of B: one operand",
+        )
+        for note in placements:
+            with self.subTest(note=note):
+                diagram = (
+                    "sequenceDiagram\n"
+                    "participant A\n"
+                    "participant B\n"
+                    f"{note}\n"
+                    "A->>B: call"
+                )
+
+                result = validate_sequence_mermaid_offline(
+                    diagram,
+                    treat_unknown_as_error=True,
+                )
+
+                self.assertTrue(result["is_valid"])
+                self.assertIn(note, format_mermaid(diagram))
+
+        for note in (
+            "Note over A",
+            "Note over A,B",
+            "Note left of A",
+            "Note right of B",
+        ):
+            with self.subTest(multiline_note=note):
+                diagram = (
+                    "sequenceDiagram\n"
+                    "participant A\n"
+                    "participant B\n"
+                    f"{note}\n"
+                    "multiline content\n"
+                    "end note\n"
+                    "A->>B: call"
+                )
+
+                result = validate_sequence_mermaid_offline(
+                    diagram,
+                    treat_unknown_as_error=True,
+                )
+
+                self.assertTrue(result["is_valid"])
+                self.assertTrue(format_mermaid(diagram))
+
+    def test_bare_note_placements_are_rejected(self):
+        for note in (
+            "Note left A: missing of",
+            "Note right A: missing of",
+            "Note of A: standalone of",
+        ):
+            with self.subTest(note=note):
+                diagram = (
+                    "sequenceDiagram\n"
+                    "participant A\n"
+                    f"{note}\n"
+                    "A->>A: call"
+                )
+                result = validate_sequence_mermaid_offline(
+                    diagram,
+                    treat_unknown_as_error=True,
+                )
+
+                self.assertFalse(result["is_valid"])
+                self.assertTrue(
+                    any("note must use" in error for error in result["errors"])
+                )
+                self.assertEqual(format_mermaid(diagram), "")
+
+        for note in ("Note left A", "Note right A", "Note of A"):
+            with self.subTest(multiline_note=note):
+                diagram = (
+                    "sequenceDiagram\n"
+                    "participant A\n"
+                    f"{note}\n"
+                    "multiline content\n"
+                    "end note\n"
+                    "A->>A: call"
+                )
+                result = validate_sequence_mermaid_offline(
+                    diagram,
+                    treat_unknown_as_error=True,
+                )
+
+                self.assertFalse(result["is_valid"])
+                self.assertTrue(
+                    any("note must use" in error for error in result["errors"])
+                )
+                self.assertEqual(format_mermaid(diagram), "")
+
+    def test_note_over_rejects_more_than_two_participants(self):
+        for participants in ("U,A,B", "A,B,L"):
+            with self.subTest(participants=participants):
+                diagram = (
+                    "sequenceDiagram\n"
+                    "participant U\n"
+                    "participant A\n"
+                    "participant B\n"
+                    "participant L\n"
+                    f"Note over {participants}: retained production shape\n"
+                    "U->>A: call"
+                )
+                result = validate_sequence_mermaid_offline(
+                    diagram,
+                    treat_unknown_as_error=True,
+                )
+
+                self.assertFalse(result["is_valid"])
+                self.assertTrue(
+                    any("one or two participants" in error for error in result["errors"])
+                )
+                self.assertEqual(format_mermaid(diagram), "")
+
+    def test_actor_is_a_case_insensitive_reserved_participant_id(self):
+        for participant_id in ("Actor", "aCtOr"):
+            with self.subTest(participant_id=participant_id):
+                diagram = (
+                    "sequenceDiagram\n"
+                    "participant Poll\n"
+                    f"participant {participant_id}\n"
+                    f"Poll->>{participant_id}: wait"
+                )
+                result = validate_sequence_mermaid_offline(
+                    diagram,
+                    treat_unknown_as_error=True,
+                )
+
+                self.assertFalse(result["is_valid"])
+                self.assertTrue(
+                    any("reserved by Mermaid" in error for error in result["errors"])
+                )
+                self.assertEqual(format_mermaid(diagram), "")
+
+    def test_note_right_of_unquoted_actor_is_rejected(self):
+        diagram = (
+            "sequenceDiagram\n"
+            "participant Poll\n"
+            "Note right of Actor: blocked token\n"
+            "Poll->>Poll: wait"
+        )
+
+        result = validate_sequence_mermaid_offline(
+            diagram,
+            treat_unknown_as_error=True,
+        )
+
+        self.assertFalse(result["is_valid"])
+        self.assertTrue(
+            any("reserved by Mermaid" in error for error in result["errors"])
+        )
+        self.assertEqual(format_mermaid(diagram), "")
+
+    def test_note_left_of_unquoted_actor_is_rejected(self):
+        diagram = (
+            "sequenceDiagram\n"
+            "participant Poll\n"
+            "Note left of Actor: blocked token\n"
+            "Poll->>Poll: wait"
+        )
+
+        result = validate_sequence_mermaid_offline(
+            diagram,
+            treat_unknown_as_error=True,
+        )
+
+        self.assertFalse(result["is_valid"])
+        self.assertTrue(
+            any("reserved by Mermaid" in error for error in result["errors"])
+        )
+        self.assertEqual(format_mermaid(diagram), "")
+
+    def test_quoted_actor_participant_id_remains_renderable(self):
+        diagram = (
+            "sequenceDiagram\n"
+            'participant "Actor"\n'
+            "participant B\n"
+            '"Actor"->>B: allowed quoted ID'
+        )
+
+        result = validate_sequence_mermaid_offline(
+            diagram,
+            treat_unknown_as_error=True,
+        )
+
+        self.assertTrue(result["is_valid"])
+        self.assertIn('participant "Actor"', format_mermaid(diagram))
+
+
 if __name__ == "__main__":
     unittest.main()

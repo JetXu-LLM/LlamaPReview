@@ -192,6 +192,25 @@ class FakeTable:
             call_name = names.get("#call", "#call")
             if item.get(call_name) != values.get(":dispatching_record"):
                 raise FakeClientError("ConditionalCheckFailedException")
+        if condition and "NOT contains(#admission_ids, :admission_id)" in condition:
+            admission_ids = item.get(
+                names.get("#admission_ids", "capacity_admission_ids"),
+                set(),
+            )
+            if values.get(":admission_id") in admission_ids:
+                raise FakeClientError("ConditionalCheckFailedException")
+        for count_name, limit_name in (
+            ("#repo_count", ":repo_limit"),
+            ("#global_count", ":global_limit"),
+        ):
+            if condition and f"{count_name} < {limit_name}" in condition:
+                current = item.get(names.get(count_name, count_name))
+                if current is not None and current >= values.get(limit_name):
+                    raise FakeClientError("ConditionalCheckFailedException")
+        if condition and "#notice_owner = :admission_id" in condition:
+            owner = item.get(names.get("#notice_owner", "#notice_owner"))
+            if owner is not None and owner != values.get(":admission_id"):
+                raise FakeClientError("ConditionalCheckFailedException")
         if condition:
             rotation = re.fullmatch(
                 r"attribute_not_exists\((\w+)\) OR \1 <> (:\w+)",
@@ -211,7 +230,11 @@ class FakeTable:
                     continue
                 raw_attr, value_key = pieces
                 attr = names.get(raw_attr, raw_attr)
-                item[attr] = item.get(attr, 0) + values.get(value_key, 0)
+                increment = values.get(value_key, 0)
+                if isinstance(increment, set):
+                    item[attr] = set(item.get(attr, set())) | increment
+                else:
+                    item[attr] = item.get(attr, 0) + increment
                 updated[attr] = item[attr]
             if set_suffix:
                 update = "SET " + set_suffix

@@ -11,20 +11,29 @@ do not appear as project versions.
 
 ## [Unreleased]
 
-## [0.1.4] - 2026-08-19
+## [0.1.4] - 2026-08-22
 
 ### Added
 
 - A bounded daily review capacity per repository, with a global circuit
   breaker, charged after the deterministic skip gates and before the first paid
   call. `PIPELINE_CAPACITY_POLICY` retunes or disables both bounds, and a
-  self-hosted deployment that funds its own provider account can turn them off.
+  self-hosted deployment that funds its own provider account turns them off by
+  default. Exact run admission is atomic and retry-idempotent on one daily
+  sentinel, so a global rejection cannot consume repository capacity and one
+  run cannot be charged twice within the same UTC day. Code-owned maxima of 512
+  repository and global admissions reject unsafe numeric configurations, while
+  the global bound keeps that sentinel below DynamoDB's item limit. Unsafe
+  explicit policies fail closed.
 
 ### Changed
 
 - The code-owned open-source footer keeps a fixed opening sentence and now
   offers one invitation chosen from the reviewed head, so different pull
   requests surface different entry points while retry and recovery stay stable.
+- Timeout values are unchanged in this release. New budget-invariant tests prove
+  that the existing phase, provider, and invocation deadlines still compose
+  inside the deployed Lambda timeout.
 
 ### Fixed
 
@@ -32,8 +41,15 @@ do not appear as project versions.
   An unanchored arrow pattern let backtracking split words such as `extract`
   into a participant, an arrow, and a second participant, so diagrams GitHub
   cannot render were published instead of degrading locally.
+- Sequence diagrams with more than two `Note over` participants or an unquoted,
+  case-insensitive reserved participant ID `Actor` now degrade locally instead
+  of publishing syntax Mermaid 11.17.0 cannot parse. Quoted `"Actor"` IDs remain
+  valid. Notes accept only `over`, `left of`, or `right of` placement; bare
+  `left`, `right`, and `of` forms are rejected.
 - A single-line `Note` followed by a bare continuation line is folded into the
   note instead of failing the whole diagram.
+- `successor=off` now controls the actual one-time head-succession boundary,
+  and capacity sentinel records cannot dispatch Pipeline work.
 
 ## [0.1.3] - 2026-08-17
 

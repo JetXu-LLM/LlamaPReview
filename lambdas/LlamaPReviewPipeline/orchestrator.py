@@ -760,6 +760,33 @@ def run_context_phase(
                 table=table,
             )
             return
+        if (
+            int(item_for_context.get("head_successor_count") or 0) > 0
+            and not pipeline_capacity.successor_enabled()
+            and not isinstance(item_for_context.get("publication_intent"), dict)
+            and not any(
+                str(record.get("status") or "") == "dispatching"
+                for record in persistence.provider_call_records(item_for_context)
+            )
+        ):
+            head_sha = str(
+                pipeline_admission.require_item_field(
+                    item_for_context,
+                    "head_sha",
+                )
+            )
+            persistence.mark_superseded(
+                repo,
+                pr_number,
+                "PENDING",
+                expected_head_sha=head_sha,
+                actual_head_sha=head_sha,
+                stage="context.start",
+                superseded_kind="head_successor_disabled",
+                phase_claim=phase_claim,
+                table=table,
+            )
+            return
         installation_id = int(pipeline_admission.require_item_field(item_for_context, "installation_id"))
         head_sha = str(pipeline_admission.require_item_field(item_for_context, "head_sha"))
         default_branch = item_for_context.get("default_branch") or item_for_context.get("base_ref") or "main"
@@ -865,8 +892,10 @@ def run_context_phase(
                 is pipeline_admission.PRDispositionKind.OPEN_NEW_HEAD
             ):
                 requeued = False
-                if allow_successor and str(
-                    phase_claim.get("stream_event_id") or ""
+                if (
+                    allow_successor
+                    and pipeline_capacity.successor_enabled()
+                    and str(phase_claim.get("stream_event_id") or "")
                 ):
                     requeued = persistence.requeue_head_successor(
                         repo,
@@ -1064,8 +1093,13 @@ def run_context_phase(
         # keeps its capacity for the reviews that would actually run.
         capacity_decision = pipeline_capacity.consume(
             repo,
+            pr_number,
+            run_id,
+            head_sha,
             table=table,
-            is_successor=int(item.get("head_successor_count") or 0) > 0,
+            is_successor=(
+                int(item_for_context.get("head_successor_count") or 0) > 0
+            ),
         )
         _emit_pipeline_metric(
             "capacity_admission",

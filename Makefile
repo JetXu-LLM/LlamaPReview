@@ -6,7 +6,7 @@ SDK_WHEEL ?=
 RELEASE_DIR ?= dist/release
 
 .PHONY: test replay compile lint format-check manifest public-contract scan-source \
-	audit-dependencies verify package-functions release verify-release
+	audit-dependencies terraform verify package-functions release verify-release
 
 test:
 	$(PYTHON) -m unittest discover -s tests/unit -p 'test_*.py'
@@ -45,6 +45,12 @@ scan-source:
 
 audit-dependencies:
 	$(PYTHON) -m pip_audit --requirement lambdas/LlamaPReviewPipeline/requirements-layer.lock --disable-pip
+
+terraform:
+	terraform fmt -check -recursive infra/terraform
+	terraform -chdir=infra/terraform init -backend=false -input=false
+	terraform -chdir=infra/terraform validate -no-color
+	terraform -chdir=infra/terraform test -no-color
 
 verify: compile lint format-check test replay manifest public-contract scan-source
 
