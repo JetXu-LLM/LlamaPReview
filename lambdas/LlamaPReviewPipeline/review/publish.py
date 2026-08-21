@@ -20,13 +20,53 @@ MULTILINE_MIN_LINES = 2
 MULTILINE_MAX_LINES = 10
 STRICT_MULTILINE_REQUIRE_ALL_LINES_IN_DIFF = True
 
-PUBLIC_FOOTER = (
-    "\n\n---\n"
-    "*LlamaPReview reviewed this pull request at its exact head commit. "
-    "[Inspect the source](https://github.com/JetXu-LLM/LlamaPReview) or "
-    "[share feedback](https://github.com/JetXu-LLM/LlamaPReview/discussions).*"
+PUBLIC_FOOTER_MARKER = "LlamaPReview is an open-source pull request reviewer"
+
+# The footer is the only place the project speaks for itself inside someone
+# else's repository. It leads with the one fact a reader cannot infer from the
+# review itself — that the reviewer is open source — and then opens exactly one
+# door. The opening sentence never varies because publication matches on it.
+_PUBLIC_FOOTER_LEAD = "*LlamaPReview is an open-source pull request reviewer."
+
+# Which door is offered is chosen from the reviewed head, so a retry, a
+# recovery, and a rebuild of the same review all produce the same footer, while
+# different pull requests surface different entry points over time.
+PUBLIC_FOOTER_INVITATIONS = (
+    "[Read the exact code that produced this review](https://github.com/JetXu-LLM/LlamaPReview).*",
+    "[See how a review is built, from signed webhook to publication](https://github.com/JetXu-LLM/LlamaPReview/blob/main/docs/ARCHITECTURE.md).*",
+    "[Run the same reviewer on your own account](https://github.com/JetXu-LLM/LlamaPReview/blob/main/docs/HOSTING.md).*",
+    "[See exactly what it will and will not publish](https://github.com/JetXu-LLM/LlamaPReview/blob/main/docs/REVIEW_OUTPUT.md).*",
+    "[Tell the maintainers where this review got it wrong](https://github.com/JetXu-LLM/LlamaPReview/discussions).*",
 )
-PUBLIC_FOOTER_MARKER = "LlamaPReview reviewed this pull request"
+
+PUBLIC_FOOTER_VARIANTS = tuple(
+    "\n\n---\n" + _PUBLIC_FOOTER_LEAD + " " + invitation
+    for invitation in PUBLIC_FOOTER_INVITATIONS
+)
+
+# Callers without a reviewed head, and every test that asserts on a literal
+# block, get the first variant.
+PUBLIC_FOOTER = PUBLIC_FOOTER_VARIANTS[0]
+
+
+def public_footer(seed: str = "") -> str:
+    """Return the one code-owned footer block for this reviewed head."""
+
+    if not seed:
+        return PUBLIC_FOOTER_VARIANTS[0]
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    index = int.from_bytes(digest, "big") % len(PUBLIC_FOOTER_VARIANTS)
+    return PUBLIC_FOOTER_VARIANTS[index]
+
+
+def strip_public_footer(body: str) -> str:
+    """Remove any code-owned footer block a presented body already carries."""
+
+    for variant in PUBLIC_FOOTER_VARIANTS:
+        body = body.replace(variant, "")
+    return body
+
+
 GITHUB_REVIEW_COMMENT_FIELDS = (
     "path",
     "body",
@@ -726,7 +766,12 @@ def _format_fallback_comment(comment_data: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def build_main_comment(final_json: Dict[str, Any], fallback_comments: Optional[List[Dict[str, Any]]] = None) -> str:
+def build_main_comment(
+    final_json: Dict[str, Any],
+    fallback_comments: Optional[List[Dict[str, Any]]] = None,
+    *,
+    invitation_seed: str = "",
+) -> str:
     raw_body = final_json.get("pr_review_comment")
     final_body = raw_body.strip() if isinstance(raw_body, str) else ""
     if not final_body:
@@ -760,8 +805,9 @@ def build_main_comment(final_json: Dict[str, Any], fallback_comments: Optional[L
     # Recovery reuses the immutable prepared request, but this helper remains
     # deterministic if an already prepared body is presented again. Match the
     # complete code-owned block, not a marker phrase that model prose could
-    # coincidentally contain.
-    return final_body.replace(PUBLIC_FOOTER, "").rstrip() + PUBLIC_FOOTER
+    # coincidentally contain. Every block this code can emit is stripped, so a
+    # body prepared under a different reviewed head still ends with exactly one.
+    return strip_public_footer(final_body).rstrip() + public_footer(invitation_seed)
 
 
 def prepare_main_comment_publication(
@@ -861,6 +907,7 @@ def prepare_review_publication(
         main_body = build_main_comment(
             projected,
             placement_result["fallback_comments"],
+            invitation_seed=head_sha,
         )
         published_placements: List[Dict[str, Any]] = []
         required_disposition = "merged_same_head"
@@ -872,6 +919,7 @@ def prepare_review_publication(
         main_body = build_main_comment(
             final_json,
             placement_result["fallback_comments"],
+            invitation_seed=head_sha,
         )
         published_placements = placement_result["inline_comments"]
         required_disposition = "open_same_head"

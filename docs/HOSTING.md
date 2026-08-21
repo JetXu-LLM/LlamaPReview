@@ -12,7 +12,7 @@ Private-repository events are acknowledged and discarded at the signed Webhook b
 
 ## Self-hosted AWS deployment
 
-The reference Terraform deploys the same two active Lambdas and one dependency Layer. It is intentionally public-repository-only as shipped; there is no hidden private-repository mode, legacy handler, shadow router, or repository allowlist.
+The reference Terraform deploys the same two active Lambdas and one dependency Layer. It is intentionally public-repository-only as shipped; there is no hidden private-repository mode, legacy handler, shadow router, or repository allowlist. Its `pipeline_capacity_policy` defaults to `off`, so a self-hoster paying for its own provider account does not inherit the personally funded hosted-service bounds.
 
 Self-hosters provide and pay for their own AWS, GitHub App, and DeepSeek accounts. They also become responsible for:
 

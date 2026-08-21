@@ -40,6 +40,54 @@ The principal model controls are:
 
 Context size, tool rounds, provider timeouts, and phase deadlines are bounded by the variables in [`config.py`](../lambdas/LlamaPReviewPipeline/config.py). Treat those defaults as a coherent tested profile. A larger value can raise Lambda duration, provider cost, DynamoDB/S3 pressure, and the probability that a head changes before publication.
 
+## Free review capacity
+
+The hosted service is free for public repositories and funded personally, so a
+daily bound keeps one high-velocity repository from consuming the shared budget.
+Capacity is charged after the deterministic skip gates and before Route, so an
+over-capacity pull request costs no model call, and traffic that would have been
+skipped for free never consumes capacity.
+
+`PIPELINE_CAPACITY_POLICY` is a single compact `key=value;key=value` string
+rather than one variable per bound, because Lambda's 4KB environment budget is
+already nearly consumed:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `repo_daily` | `3` | Admitted paid runs per repository per UTC day. It must be `0`–`512`; `0` removes only the repository bound while the global bound remains active. |
+| `global_daily` | `100` | Circuit breaker across all repositories per UTC day. It must be `1`–`512` for an enabled policy. |
+| `successor` | `on` | `off` disables one-time head succession after an immutable configuration version is published and its alias is advanced with CAS. |
+
+An empty value keeps these hosted defaults; the literal `off` disables both
+bounds without disabling normal one-time head succession. The public Terraform
+variable `pipeline_capacity_policy` defaults to `off`, because self-hosted
+deployments fund their own provider account. Set a bounded policy explicitly
+only when the self-hoster wants one.
+
+The code-owned maximum of `512` applies to both daily bounds. The global maximum
+bounds the admission-ID set and the per-repository counter/notice attributes on
+the single daily DynamoDB sentinel; the repository maximum also rejects huge
+integers before boto3 can attempt DynamoDB decimal serialization. An enabled
+policy with `global_daily=0`, either value above `512`, an unknown or duplicate
+key, or an invalid value is rejected rather than silently creating unsafe state.
+Use the literal `off` when both quotas should be disabled.
+
+The Pipeline rereads `successor=off` after claiming context work. A successor
+that was already queued stops silently before source retrieval, capacity
+admission, or new paid work. Retained terminal predecessor-call ledgers remain
+on that item. A publication intent or unresolved provider dispatch continues
+through its existing fail-closed recovery path instead of being discarded by
+the operator switch.
+
+Each UTC day uses one reserved sentinel in the existing table at
+`pr_number = -1`, so it cannot collide with a pull request or with the repository
+fact sheet at `pr_number = 0`. One atomic conditional update records the exact
+run admission and charges both active counters. A retry of the same repository,
+pull request, run ID, head, and successor disposition reuses that day's
+admission rather than consuming capacity again within the same UTC day. A retry
+after the UTC boundary is admitted against the new day's quota. Capacity sentinel stream records are
+filtered before Lambda invocation and also rejected by the handler boundary.
+
 ## Tracing
 
 `DEEPSEEK_TRACE_MODE` accepts:

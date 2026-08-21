@@ -58,6 +58,7 @@ The first plan must retain the safe defaults:
 ```hcl
 pipeline_stream_enabled = false
 pipeline_dry_run        = true
+pipeline_capacity_policy = "off"
 ```
 
 These defaults are inert because the ESM is disabled. If it is later enabled
@@ -87,6 +88,10 @@ Before enabling traffic, verify:
 - Webhook uses Python 3.12/x86_64, 180 seconds, and 128 MB;
 - Pipeline uses Python 3.12/x86_64, 900 seconds, and the configured memory;
 - the ESM is disabled and targets the Pipeline `LIVE` alias;
+- the ESM filter admits only `PENDING` and `CONTEXT_READY` items, so capacity
+  sentinels never invoke the Pipeline;
+- `PIPELINE_CAPACITY_POLICY=off` unless this self-hoster deliberately chose its
+  own bounded policy;
 - DynamoDB TTL/PITR, S3 public blocks/encryption/versioning/lifecycle, log retention, alarms, and IAM match the plan;
 - the secret environment values were preserved without appearing in output or logs.
 

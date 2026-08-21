@@ -39,6 +39,25 @@ The Webhook verifies the signature, reads event type and repository visibility, 
 
 The queued head SHA is not treated as sufficient proof. The Pipeline rereads the pull request lifecycle and head before context work, before the first expensive PFR Reconcile, before Final presentation, and before publication. Repository reads are pinned to that head where GitHub supports an exact ref. Evidence records carry provenance and coverage rather than silently promoting search hints to facts.
 
+### Bounded free capacity
+
+The hosted service allocates a finite personally funded budget, so admission
+charges a per-repository daily bound and a global circuit breaker before Route,
+which is the first paid call. Deterministic skips are charged nothing, so a
+repository whose traffic is mostly skipped keeps its capacity for the reviews
+that would actually run. One UTC-day sentinel in the existing table owns both
+counters and the admitted run identities. A single conditional update checks
+both limits, increments both counters, and records the exact repository, pull
+request, run, head, and successor-derived admission identity. Retrying that run
+within the same UTC day reuses its daily admission; a retry after rollover is
+charged against the new day's quota. Code-owned repository and global maxima of
+512 reject unsafe numeric configurations, while the global bound keeps the
+single item's admission IDs, repository counters, and notice owners below the
+DynamoDB item limit. A global rejection cannot partially consume repository
+capacity. The day's one repository notice is bound to the exact blocked
+admission that owns it. The self-hosted Terraform reference disables these
+hosted bounds by default.
+
 ### Lifecycle disposition and bounded succession
 
 Admission owns one typed description of the current pull request state relative

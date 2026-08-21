@@ -7,9 +7,10 @@ from typing import Any, Dict, List, Set, Tuple
 
 __all__ = ["format_mermaid", "validate_sequence_mermaid_offline"]
 
+# Exactly the sequence-message arrows GitHub's Mermaid grammar accepts. This set
+# gates admission, so an entry Mermaid cannot parse would publish a broken diagram.
 ALLOWED_ARROWS_SUPERSET = {
-    "->", "-->", "->>", "-->>", "-x", "--x",
-    "-)", "--)", ")-", ")--", "-o", "--o", "o-", "o--"
+    "->", "-->", "->>", "-->>", "-x", "--x", "-)", "--)",
 }
 
 RE_COMMENT_FULL = re.compile(r'^\s*%%(?!\{).*')
@@ -29,10 +30,13 @@ RE_DEACTIVATE = re.compile(r'^\s*deactivate\s+(".*?"|[A-Za-z0-9_]+)\s*$', re.IGN
 RE_CREATE = re.compile(r'^\s*create\s+(".*?"|[A-Za-z0-9_]+)\s*$', re.IGNORECASE)
 RE_DESTROY = re.compile(r'^\s*destroy\s+(".*?"|[A-Za-z0-9_]+)\s*$', re.IGNORECASE)
 
-RE_BLOCK_START = re.compile(r'^\s*(alt|opt|loop|par|critical|break|rect|box)\b.*$', re.IGNORECASE)
+# ``box`` is omitted: Mermaid only allows participant declarations inside it, so
+# treating it as a generic block admits unrenderable output and also swallows
+# ordinary prose that happens to start with the word.
+RE_BLOCK_START = re.compile(r'^\s*(alt|opt|loop|par|critical|break|rect)\b.*$', re.IGNORECASE)
 RE_BLOCK_END = re.compile(r'^\s*end\s*$', re.IGNORECASE)
 RE_SINGLE_UNCLOSED_BLOCK = re.compile(
-    r"^Unclosed block '(?:alt|opt|loop|par|critical|break|rect|box)' "
+    r"^Unclosed block '(?:alt|opt|loop|par|critical|break|rect)' "
     r"\(line \d+\)\.$",
     re.IGNORECASE,
 )
@@ -42,10 +46,26 @@ RE_AND = re.compile(r'^\s*and\b.*$', re.IGNORECASE)
 RE_NOTE_MULTI_START = re.compile(r'^\s*note\s+(over|left|right|of)\b(?!.*:).*$', re.IGNORECASE)
 RE_NOTE_MULTI_END = re.compile(r'^\s*end\s+note\s*$', re.IGNORECASE)
 RE_NOTE_SINGLE = re.compile(r'^\s*note\s+(over|left|right|of)\b.*?:.*$', re.IGNORECASE)
+RE_VALID_NOTE_PARTICIPANTS = re.compile(
+    r'^\s*note\s+(?:(over)\s+([^:]+?)|(left|right)\s+of\s+([^:]+?))'
+    r'(?:\s*:|$)',
+    re.IGNORECASE,
+)
+MERMAID_RESERVED_PARTICIPANT_IDS = {"actor"}
+
+# The arrow token is authoritative: an unanchored character class lets ordinary
+# prose backtrack into a fake message (``extract`` -> ``e`` -x-> ``tract``), which
+# silently admits an unrenderable diagram. Longest-first alternation matches only
+# real arrows and still finds the correct split when a participant name ends in an
+# arrow character.
+_ARROW_ALTERNATION = "|".join(
+    re.escape(arrow)
+    for arrow in sorted(ALLOWED_ARROWS_SUPERSET, key=lambda a: (-len(a), a))
+)
 
 RE_MESSAGE = re.compile(
-    # r'^\s*(".*?"|[A-Za-z0-9_]+)\s*([\-o>x\)]+)\s*(".*?"|[A-Za-z0-9_]+)\s*(?::\s*(.*))?$'
-    r'^\s*(".*?"|[A-Za-z0-9_]+)\s*([\-o>x\)]+)\s*(".*?"|[A-Za-z0-9_]+)\s*(?::\s*)?(.*)$'
+    r'^\s*(".*?"|[A-Za-z0-9_]+)\s*(' + _ARROW_ALTERNATION + r')'
+    r'\s*(".*?"|[A-Za-z0-9_]+)\s*(?::\s*)?(.*)$'
 )
 
 # Mermaid treats semicolons as statement separators, even inside sequence
@@ -79,6 +99,40 @@ def _strip_quotes(s: str) -> str:
     if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
         return s[1:-1]
     return s
+
+
+def _split_unquoted_commas(value: str) -> List[str]:
+    parts: List[str] = []
+    current: List[str] = []
+    in_quotes = False
+    for character in value:
+        if character == '"':
+            in_quotes = not in_quotes
+        if character == "," and not in_quotes:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(character)
+    parts.append("".join(current).strip())
+    return parts
+
+
+def _note_participant_operands(line: str) -> Tuple[str, List[str]]:
+    match = RE_VALID_NOTE_PARTICIPANTS.match(line)
+    if not match:
+        return "", []
+    mode = (match.group(1) or match.group(3)).lower()
+    raw = (match.group(2) or match.group(4)).strip()
+    return mode, _split_unquoted_commas(raw)
+
+
+def _is_reserved_participant_id(value: str) -> bool:
+    raw = value.strip()
+    quoted = len(raw) >= 2 and raw[0] == '"' and raw[-1] == '"'
+    return (
+        not quoted
+        and _strip_quotes(raw).casefold() in MERMAID_RESERVED_PARTICIPANT_IDS
+    )
 
 def _inside_block(stack: List[Dict[str, Any]], types: Set[str]) -> bool:
     for b in reversed(stack):
@@ -202,10 +256,39 @@ def validate_sequence_mermaid_offline(
             res["errors"].append(f"Line {idx}: unexpected code fence ``` outside note.")
             continue
 
-        if RE_NOTE_SINGLE.match(stripped):
+        is_note_single = bool(RE_NOTE_SINGLE.match(stripped))
+        is_note_multi_start = bool(RE_NOTE_MULTI_START.match(stripped))
+        if is_note_single or is_note_multi_start:
+            note_mode, note_participants = _note_participant_operands(stripped)
+            if not note_mode:
+                res["errors"].append(
+                    f"Line {idx}: note must use 'over', 'left of', or 'right of'."
+                )
+            if note_mode and (
+                not note_participants
+                or any(not actor for actor in note_participants)
+            ):
+                res["errors"].append(
+                    f"Line {idx}: note participant operands must be nonempty."
+                )
+            if note_mode == "over" and not (1 <= len(note_participants) <= 2):
+                res["errors"].append(
+                    f"Line {idx}: 'Note over' accepts one or two participants."
+                )
+            if note_mode in {"left", "right"} and len(note_participants) != 1:
+                res["errors"].append(
+                    f"Line {idx}: 'Note {note_mode} of' accepts one participant."
+                )
+            for actor in note_participants:
+                if _is_reserved_participant_id(actor):
+                    res["errors"].append(
+                        f"Line {idx}: participant ID '{_strip_quotes(actor)}' is reserved by Mermaid."
+                    )
+
+        if is_note_single:
             _mark_content(block_stack)
             continue
-        if RE_NOTE_MULTI_START.match(stripped):
+        if is_note_multi_start:
             in_multiline_note = True
             multiline_note_start = idx
             _mark_content(block_stack)
@@ -224,11 +307,18 @@ def validate_sequence_mermaid_offline(
                 left_clean = _strip_quotes(left_raw)
                 alias_clean = _strip_quotes(alias_raw)
                 if left_quoted and not alias_quoted:
+                    pid_raw = alias_raw
                     pid = alias_clean
                 else:
+                    pid_raw = left_raw
                     pid = left_clean
             else:
+                pid_raw = left_raw
                 pid = _strip_quotes(left_raw)
+            if _is_reserved_participant_id(pid_raw):
+                res["errors"].append(
+                    f"Line {idx}: participant ID '{pid}' is reserved by Mermaid."
+                )
             participants[pid] = participants.get(pid, 0) + 1
             continue
 
@@ -314,7 +404,12 @@ def validate_sequence_mermaid_offline(
                 continue
 
         if (m := RE_ACTIVATE.match(stripped)):
-            actor = _strip_quotes(m.group(1))
+            actor_raw = m.group(1)
+            actor = _strip_quotes(actor_raw)
+            if _is_reserved_participant_id(actor_raw):
+                res["errors"].append(
+                    f"Line {idx}: participant ID '{actor}' is reserved by Mermaid."
+                )
             activation_stack.append(actor)
             if actor not in participants:
                 if require_explicit_participants:
@@ -325,7 +420,12 @@ def validate_sequence_mermaid_offline(
             continue
 
         if (m := RE_DEACTIVATE.match(stripped)):
-            actor = _strip_quotes(m.group(1))
+            actor_raw = m.group(1)
+            actor = _strip_quotes(actor_raw)
+            if _is_reserved_participant_id(actor_raw):
+                res["errors"].append(
+                    f"Line {idx}: participant ID '{actor}' is reserved by Mermaid."
+                )
             if actor not in activation_stack:
                 if strict:
                     res["warnings"].append(f"Line {idx}: deactivate '{actor}' not active.")
@@ -338,7 +438,12 @@ def validate_sequence_mermaid_offline(
             continue
 
         if (m := RE_CREATE.match(stripped)):
-            actor = _strip_quotes(m.group(1))
+            actor_raw = m.group(1)
+            actor = _strip_quotes(actor_raw)
+            if _is_reserved_participant_id(actor_raw):
+                res["errors"].append(
+                    f"Line {idx}: participant ID '{actor}' is reserved by Mermaid."
+                )
             if actor in created and strict:
                 res["warnings"].append(f"Line {idx}: duplicate create '{actor}'.")
             created.add(actor)
@@ -346,7 +451,12 @@ def validate_sequence_mermaid_offline(
             continue
 
         if (m := RE_DESTROY.match(stripped)):
-            actor = _strip_quotes(m.group(1))
+            actor_raw = m.group(1)
+            actor = _strip_quotes(actor_raw)
+            if _is_reserved_participant_id(actor_raw):
+                res["errors"].append(
+                    f"Line {idx}: participant ID '{actor}' is reserved by Mermaid."
+                )
             if actor in destroyed and strict:
                 res["warnings"].append(f"Line {idx}: duplicate destroy '{actor}'.")
             destroyed.add(actor)
@@ -355,13 +465,16 @@ def validate_sequence_mermaid_offline(
 
         m_msg = RE_MESSAGE.match(stripped)
         if m_msg:
-            src = _strip_quotes(m_msg.group(1))
-            arrow = m_msg.group(2)
-            dst = _strip_quotes(m_msg.group(3))
+            src_raw = m_msg.group(1)
+            dst_raw = m_msg.group(3)
+            src = _strip_quotes(src_raw)
+            dst = _strip_quotes(dst_raw)
             _mark_content(block_stack)
-            if arrow not in ALLOWED_ARROWS_SUPERSET and strict:
-                res["warnings"].append(f"Line {idx}: arrow '{arrow}' not in superset (tolerated).")
-            for actor in (src, dst):
+            for actor, actor_raw in ((src, src_raw), (dst, dst_raw)):
+                if _is_reserved_participant_id(actor_raw):
+                    res["errors"].append(
+                        f"Line {idx}: participant ID '{actor}' is reserved by Mermaid."
+                    )
                 if actor not in participants:
                     if require_explicit_participants:
                         res["errors"].append(f"Line {idx}: participant '{actor}' not declared.")
@@ -541,6 +654,43 @@ def _repair_bare_impact_note(lines: List[str]) -> List[str]:
     return repaired
 
 
+def _is_known_statement(stripped: str) -> bool:
+    """Report whether a line is any Mermaid sequence statement the validator accepts."""
+
+    if not stripped or stripped.startswith("```"):
+        return True
+    for pattern in (
+        RE_COMMENT_FULL, RE_DIRECTIVE, RE_SEQUENCE_START, RE_PARTICIPANT,
+        RE_AUTONUM, RE_TITLE, RE_ACTIVATE, RE_DEACTIVATE, RE_CREATE, RE_DESTROY,
+        RE_BLOCK_START, RE_BLOCK_END, RE_ELSE, RE_AND,
+        RE_NOTE_SINGLE, RE_NOTE_MULTI_START, RE_NOTE_MULTI_END, RE_MESSAGE,
+    ):
+        if pattern.match(stripped):
+            return True
+    return False
+
+
+def _fold_note_continuations(lines: List[str]) -> List[str]:
+    """Rejoin a note whose text the model wrapped onto the following line.
+
+    Mermaid requires a note to occupy one physical line, and the prompt says so,
+    but Final still wraps long note text.  The orphaned remainder is not a valid
+    statement, so folding it back is the only reading that preserves the authored
+    text; anything that could be a real statement is left for the validator.
+    """
+
+    folded: List[str] = []
+    target = -1
+    for line in lines:
+        stripped = line.strip()
+        if target >= 0 and stripped and not _is_known_statement(stripped):
+            folded[target] = f"{folded[target].rstrip()}<br/>{stripped}"
+            continue
+        folded.append(line)
+        target = len(folded) - 1 if RE_NOTE_SINGLE.match(stripped) else -1
+    return folded
+
+
 def _remove_empty_groups(lines: List[str]) -> List[str]:
     """Omit matched Mermaid groups with no visible statement.
 
@@ -664,6 +814,10 @@ def format_mermaid(
         # A standalone ``Impact — ...`` line is clearly note content, not a
         # message or a new claim.  Restore only the missing Mermaid prefix.
         lines = _repair_bare_impact_note(lines)
+
+        # Mermaid notes must occupy one physical line; rejoin the remainder of a
+        # note the model wrapped before anything classifies it as a statement.
+        lines = _fold_note_continuations(lines)
 
         # A matched control group with no visible statement has no semantic
         # content and renders as a label-only sliver in GitHub. Remove only

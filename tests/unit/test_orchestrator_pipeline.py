@@ -28,6 +28,7 @@ from lambdas.LlamaPReviewPipeline import (
     orchestrator,
     persistence,
     pipeline_accounting,
+    pipeline_capacity,
     pipeline_ci,
 )
 from lambdas.LlamaPReviewPipeline.errors import (
@@ -1306,6 +1307,220 @@ class TestOrchestratorPipeline(unittest.TestCase):
             current["provider_call_ledger_terminal_fallback"]["call_id"],
             "c" * 64,
         )
+
+    def test_capacity_bound_stops_the_run_before_any_paid_call(self):
+        item = self._pending_item()
+        runtime = _Runtime(_pr_content())
+        with patch.object(
+            orchestrator.pipeline_capacity.config,
+            "PIPELINE_CAPACITY_POLICY",
+            "repo_daily=1",
+        ):
+            orchestrator.pipeline_capacity.consume(
+                "owner/repo",
+                99,
+                "quota-fill",
+                "f" * 40,
+                table=self.table,
+            )
+            with patch.object(orchestrator.config, "DRY_RUN", True), patch.object(
+                orchestrator.pipeline_admission,
+                "installation_token",
+                return_value="token",
+            ), patch.object(orchestrator, "analyze_pr_complexity") as analyzer:
+                orchestrator.run_context_phase(
+                    item, table=self.table, runtime=runtime
+                )
+
+        analyzer.assert_not_called()
+        current = self.table.get_item(Key={"repo": "owner/repo", "pr_number": 7})["Item"]
+        self.assertEqual(current["review_mode"], "skip")
+        self.assertEqual(
+            current["skip_reason"],
+            orchestrator.pipeline_capacity.BLOCK_REPO_DAILY,
+        )
+        artifact = persistence.load_review_artifact_from_item(current)
+        self.assertIn("free review capacity", artifact["main_comment"])
+        self.assertIn("Self-hosting", artifact["main_comment"])
+
+    def test_disabled_successor_retains_predecessor_ledger_and_stops_before_work(self):
+        call_id = "a" * 64
+        provider_record = {
+            "schema_version": 2,
+            "call_id": call_id,
+            "status": "completed",
+            "pipeline_phase": "context",
+            "pipeline_attempt": 1,
+            "usage_state": "reported",
+            "usage": {"total_tokens": 42},
+        }
+        item = self._pending_item(
+            head_successor_count=1,
+            run_id="head_successor_v1_queued",
+            head_predecessor_receipt={
+                "schema_version": 1,
+                "provider_call_ids": [call_id],
+                "provider_calls_retained_on_item": True,
+                "provider_calls_terminal": True,
+            },
+            **{persistence._provider_call_attr(call_id): provider_record},
+        )
+        with patch.object(
+            orchestrator.pipeline_capacity.config,
+            "PIPELINE_CAPACITY_POLICY",
+            "repo_daily=3;global_daily=100;successor=off",
+        ), patch.object(
+            orchestrator.pipeline_admission,
+            "installation_token",
+        ) as installation_token, patch.object(
+            orchestrator,
+            "prepare_provider_source",
+        ) as provider_source, patch.object(
+            orchestrator.pipeline_capacity,
+            "consume",
+        ) as consume, patch.object(
+            orchestrator,
+            "analyze_pr_complexity",
+        ) as route:
+            orchestrator.run_context_phase(
+                item,
+                table=self.table,
+                stream_event_id="queued-successor",
+            )
+
+        installation_token.assert_not_called()
+        provider_source.assert_not_called()
+        consume.assert_not_called()
+        route.assert_not_called()
+        current = self.table.get_item(
+            Key={"repo": "owner/repo", "pr_number": 7}
+        )["Item"]
+        self.assertEqual(current["status"], "SUPERSEDED")
+        self.assertEqual(
+            current["superseded_kind"],
+            "head_successor_disabled",
+        )
+        self.assertEqual(current["superseded_stage"], "context.start")
+        self.assertEqual(
+            current[persistence._provider_call_attr(call_id)],
+            provider_record,
+        )
+        self.assertEqual(
+            current["head_predecessor_receipt"]["provider_call_ids"],
+            [call_id],
+        )
+
+    def test_context_retries_reuse_one_capacity_admission_before_route(self):
+        item = self._pending_item(run_id="durable-capacity-run")
+        runtime = _Runtime(_pr_content())
+        inventory = orchestrator.RepoInventory(
+            repository="owner/repo",
+            requested_sha="abcdef123456",
+            status="complete",
+            items=[{"path": "src/app.py", "type": "blob", "size": 20}],
+            discoverable_files={"src/app.py"},
+            readable_files={"src/app.py"},
+        )
+        retry_failure = HeadVerificationUnavailable(
+            "inventory unavailable before Route",
+            stage="context.inventory",
+        )
+        with patch.object(
+            orchestrator.config,
+            "DRY_RUN",
+            True,
+        ), patch.object(
+            orchestrator.pipeline_capacity.config,
+            "PIPELINE_CAPACITY_POLICY",
+            "repo_daily=3;global_daily=100",
+        ), patch.object(
+            orchestrator.pipeline_admission,
+            "installation_token",
+            return_value="token",
+        ), patch.object(
+            orchestrator,
+            "fetch_repo_inventory",
+            side_effect=[retry_failure, retry_failure, inventory],
+        ) as fetch_inventory, patch.object(
+            orchestrator,
+            "analyze_pr_complexity",
+            return_value={
+                "complexity": "skip",
+                "reason": "bounded retry proof",
+                "pr_type": "test",
+                "verification_plan": [],
+            },
+        ) as route:
+            for retry_number in (1, 2):
+                with self.subTest(retry=retry_number), self.assertRaises(
+                    HeadVerificationUnavailable
+                ):
+                    orchestrator.run_context_phase(
+                        item,
+                        table=self.table,
+                        runtime=runtime,
+                        stream_event_id="same-durable-delivery",
+                    )
+                route.assert_not_called()
+
+            orchestrator.run_context_phase(
+                item,
+                table=self.table,
+                runtime=runtime,
+                stream_event_id="same-durable-delivery",
+            )
+
+        self.assertEqual(fetch_inventory.call_count, 3)
+        route.assert_called_once()
+        window = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        sentinel = self.table.get_item(
+            Key=pipeline_capacity._sentinel_key(window)
+        )["Item"]
+        admission_ids = sentinel["capacity_admission_ids"]
+        self.assertEqual(len(admission_ids), 1)
+        self.assertEqual(
+            sentinel[pipeline_capacity._repo_counter_attribute("owner/repo")],
+            1,
+        )
+        self.assertEqual(sentinel["capacity_global_count"], 1)
+        current = self.table.get_item(
+            Key={"repo": "owner/repo", "pr_number": 7}
+        )["Item"]
+        self.assertEqual(current["status"], "PROCESSED_DRYRUN")
+        self.assertEqual(current["context_attempt"], 3)
+
+    def test_a_blocked_successor_stops_silently_without_publishing(self):
+        item = self._pending_item(head_successor_count=1)
+        runtime = _Runtime(_pr_content())
+        with patch.object(
+            orchestrator.pipeline_capacity.config,
+            "PIPELINE_CAPACITY_POLICY",
+            "repo_daily=1",
+        ):
+            orchestrator.pipeline_capacity.consume(
+                "owner/repo",
+                99,
+                "quota-fill",
+                "f" * 40,
+                table=self.table,
+            )
+            with patch.object(orchestrator.config, "DRY_RUN", True), patch.object(
+                orchestrator.pipeline_admission,
+                "installation_token",
+                return_value="token",
+            ), patch.object(orchestrator, "analyze_pr_complexity") as analyzer:
+                orchestrator.run_context_phase(
+                    item, table=self.table, runtime=runtime
+                )
+
+        analyzer.assert_not_called()
+        current = self.table.get_item(Key={"repo": "owner/repo", "pr_number": 7})["Item"]
+        self.assertEqual(current["status"], "SUPERSEDED")
+        self.assertEqual(
+            current["superseded_kind"],
+            orchestrator.pipeline_capacity.BLOCK_REPO_DAILY,
+        )
+        self.assertNotIn("review_artifact", current)
 
     def test_context_phase_publishes_docs_only_skip_result_after_pr_ingest(self):
         item = self._pending_item()

@@ -15,6 +15,15 @@ A substantive review has one model-derived body projected into deterministic Mar
 
 The footer appears only in a trustworthy substantive main review body. It is never model-generated, never appended to individual inline comments, and is not added to empty, skipped, failed, or other nonpublishable terminal messages.
 
+Its opening sentence never varies and states that the reviewer is open source,
+because that is the one thing a reader cannot infer from the review itself. The
+single invitation that follows is chosen from the reviewed head SHA out of a
+fixed code-owned set, so a retry, a recovery, and a rebuild of the same review
+always produce the same footer, while different pull requests surface different
+entry points into the project. Rendering strips every footer the code can emit
+before appending one, so a body prepared under one head and rebuilt under
+another still ends with exactly one. The footer carries no tracking parameters.
+
 An ordinary review is published only while the pull request is open on the
 reviewed exact head. If a publishable Final finishes after that same head was
 merged, deterministic Projection turns it into a post-merge follow-up:
@@ -56,6 +65,11 @@ native `COMMENT` review and stop the remaining model work:
 
 This pull request was merged before the review finished, so LlamaPReview stopped the remaining model work. No code-review verdict was produced.
 ```
+
+A repository that has used its free daily capacity receives one skip notice for
+the first affected pull request in that UTC day. Later pull requests in the same
+day stop silently rather than repeating it, and a head successor never publishes
+a capacity notice because that pull request already had its review.
 
 The closed form changes only `merged` to `closed`. A cancellation contains no
 footer, inline comment, Mermaid diagram, finding, verdict, or model-authored

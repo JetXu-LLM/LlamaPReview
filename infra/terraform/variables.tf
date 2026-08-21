@@ -166,6 +166,55 @@ variable "pipeline_dry_run" {
   default     = true
 }
 
+variable "pipeline_capacity_policy" {
+  description = "Compact bounded capacity policy. Use literal off to disable both quotas; repo_daily must be 0..512 and enabled policies require global_daily 1..512."
+  type        = string
+  default     = "off"
+
+  validation {
+    condition = (
+      length(var.pipeline_capacity_policy) <= 256 &&
+      !strcontains(var.pipeline_capacity_policy, "\n") &&
+      !strcontains(var.pipeline_capacity_policy, "\r") &&
+      (
+        trimspace(var.pipeline_capacity_policy) == "" ||
+        lower(trimspace(var.pipeline_capacity_policy)) == "off" ||
+        (
+          can(regex(
+            "^(repo_daily=[0-9]+|global_daily=[0-9]+|successor=(on|off|true|false|1|0|yes|no))(;(repo_daily=[0-9]+|global_daily=[0-9]+|successor=(on|off|true|false|1|0|yes|no)))*$",
+            trimspace(var.pipeline_capacity_policy)
+          )) &&
+          length(regexall("(^|;)repo_daily=", trimspace(var.pipeline_capacity_policy))) <= 1 &&
+          length(regexall("(^|;)global_daily=", trimspace(var.pipeline_capacity_policy))) <= 1 &&
+          length(regexall("(^|;)successor=", trimspace(var.pipeline_capacity_policy))) <= 1 &&
+          try(
+            tonumber(regex(
+              "(^|;)repo_daily=([0-9]+)($|;)",
+              trimspace(var.pipeline_capacity_policy)
+            )[1]),
+            3
+          ) <= 512 &&
+          try(
+            tonumber(regex(
+              "(^|;)global_daily=([0-9]+)($|;)",
+              trimspace(var.pipeline_capacity_policy)
+            )[1]),
+            100
+          ) >= 1 &&
+          try(
+            tonumber(regex(
+              "(^|;)global_daily=([0-9]+)($|;)",
+              trimspace(var.pipeline_capacity_policy)
+            )[1]),
+            100
+          ) <= 512
+        )
+      )
+    )
+    error_message = "pipeline_capacity_policy must be off, empty, or unique compact keys with repo_daily 0..512 and global_daily 1..512."
+  }
+}
+
 variable "pipeline_stream_enabled" {
   description = "Whether the DynamoDB Stream invokes the immutable Pipeline LIVE alias. Enable only after safe smoke validation."
   type        = bool

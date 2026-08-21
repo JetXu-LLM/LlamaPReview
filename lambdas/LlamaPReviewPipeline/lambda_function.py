@@ -35,6 +35,8 @@ def _decode_attr(attr: Dict[str, Any]) -> Any:
         return {key: _decode_attr(value) for key, value in attr["M"].items()}
     if "L" in attr:
         return [_decode_attr(value) for value in attr["L"]]
+    if "SS" in attr:
+        return set(attr["SS"])
     return next(iter(attr.values())) if attr else None
 
 
@@ -49,6 +51,11 @@ def process_record(record: Dict[str, Any], *, lambda_context=None) -> None:
     old_image = record.get("dynamodb", {}).get("OldImage", {})
     item = from_dynamodb_image(new_image)
     old = from_dynamodb_image(old_image)
+    try:
+        if int(item.get("pr_number") or 0) < 1:
+            return
+    except (TypeError, ValueError):
+        return
     status = item.get("status")
     if status == old.get("status"):
         if not persistence.is_valid_head_successor_transition(old, item):

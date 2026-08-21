@@ -149,3 +149,8 @@ PERSIST_REVIEW_ARTIFACT = env_bool("PERSIST_REVIEW_ARTIFACT", True)
 
 TTL_DAYS = env_int("PIPELINE_TTL_DAYS", 30)
 MAX_ATTEMPTS = env_int("PIPELINE_MAX_ATTEMPTS", 3)
+
+# One compact ``key=value;key=value`` string rather than a variable per bound,
+# because Lambda's 4KB environment budget is already nearly consumed. Empty
+# keeps the reviewed defaults; ``off`` disables the bounds entirely.
+PIPELINE_CAPACITY_POLICY = env("PIPELINE_CAPACITY_POLICY", "")
