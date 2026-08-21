@@ -2,13 +2,11 @@
 
 # LlamaPReview
 
-**Pull request review that reads the exact code you are about to merge.**
+**Open-source pull request review that reads the exact code you are about to merge.**
 
-An evidence-first reviewer—not a chatbot wearing a review costume.
+The hosted GitHub App is free for public repositories — and this repository is the code it runs.
 
-[![Visit LlamaPReview](https://img.shields.io/badge/Visit-LlamaPReview-20293a?style=for-the-badge)](https://jetxu-llm.github.io/LlamaPReview-site/)
-
-[Install the GitHub App](https://github.com/apps/llamapreview) · [View source](https://github.com/JetXu-LLM/LlamaPReview)
+[**Install the GitHub App**](https://github.com/apps/llamapreview) · [**Read the source**](https://github.com/JetXu-LLM/LlamaPReview/tree/main/lambdas) · [**Website**](https://jetxu-llm.github.io/LlamaPReview-site/) · [**Self-host it**](docs/HOSTING.md)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/JetXu-LLM/LlamaPReview/ci.yml?branch=main&label=CI)](https://github.com/JetXu-LLM/LlamaPReview/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/github/license/JetXu-LLM/LlamaPReview)](LICENSE)
@@ -17,17 +15,33 @@ An evidence-first reviewer—not a chatbot wearing a review costume.
 
 </div>
 
-![LlamaPReview architecture: signed public-only admission, exact-head evidence and judgment, deterministic projection, durable recovery and accounting, and exactly-once GitHub publication](docs/assets/architecture.svg)
+There is no separate reviewer hidden behind the hosted service. The Webhook and Pipeline in this repository **are** the production source, released under Apache-2.0, and every review the App publishes comes from code on this page.
 
-The Webhook and Pipeline source in this repository is the source used by the official hosted service. There is no separate reviewer hidden behind it.
+![How LlamaPReview turns a public pull request into a published review: a signed public GitHub event, exact-head admission and bounded evidence, DeepSeek engineering judgment, deterministic projection and publication, and a public review from source you can run](docs/assets/architecture.svg)
 
-LlamaPReview is an Apache-2.0 GitHub pull-request reviewer. Its hosted GitHub App reviews **public repositories only**. It differs from a generic review bot in where it draws the line between model judgment and code-owned guarantees:
+*The model supplies engineering judgment. Everything around it — evidence boundaries, output schema, sanitation, placement, and publication identity — is deterministic code you can read.*
 
-- It retrieves **bounded evidence from the exact pull-request head**, with provenance and honest coverage gaps.
-- The model performs **engineering judgment**: causal risk, severity, uncertainty, and merge posture.
-- Deterministic code owns **projection, sanitation, inline placement, Mermaid safety, accounting, recovery, and publication identity**.
+## What a review actually looks like
+
+Reviews are evidence-led and say so when evidence is missing. From a [real published review](https://github.com/Texarkanine/SumMem/pull/10#pullrequestreview-4978442337):
+
+> ### LlamaPReview — Blocking issues found
+>
+> Do not merge until the nap instruction names the runnable driver path, matching the activation scheme this PR ships; currently the printed instruction tells agents to run `summem`, not `.summem/summem`.
+>
+> Exact-head CI remains unresolved (1 pending); no CI-dependent merge-safety claim is made.
+
+Note the second paragraph. When the evidence does not support a claim, the review declines to make it rather than guessing. Here is [another public review](https://github.com/mmayasaurus/heddle/pull/66#pullrequestreview-4977897488), and the full [output contract](docs/REVIEW_OUTPUT.md) states exactly what will and will not be published.
+
+## Why it differs from a generic review bot
+
+- Evidence is retrieved from the **exact pull-request head**, with provenance and honest coverage gaps — not from a stale branch snapshot.
+- The model performs **engineering judgment only**: causal risk, severity, uncertainty, and merge posture.
+- Deterministic code owns **projection, sanitation, inline placement, Mermaid safety, accounting, recovery, and publication identity**, so an unsafe or unrenderable surface degrades locally instead of reaching your pull request.
+- Empty, skipped, failed, and stale-head outcomes **never** acquire a synthetic "looks good" verdict.
 
 ## How a review is built
+
 
 1. **Verify the signed webhook.** No event is admitted before its GitHub signature is valid.
 2. **Apply the hosted public-only boundary.** A private event is generically acknowledged after minimum visibility parsing, then stops before durable product state, provider work, or GitHub product API calls.
@@ -61,25 +75,11 @@ The reference stack has no automatic production deployment, paid secret-manageme
 
 Repository evidence is retrieved through [llama-github](https://github.com/JetXu-LLM/llama-github), an independently released SDK from the same author that you can use on its own.
 
-If this reviewer caught something worth catching, a star helps other maintainers find it.
-
 ## Privacy and security
 
-For eligible public pull requests, selected public GitHub evidence, prompts, and generated output are sent to DeepSeek for engineering judgment. Official AWS product infrastructure runs in Singapore; model requests leave AWS for DeepSeek processing. DeepSeek documents default on-disk API context caching normally cleared within hours to days once unused, but its public Open Platform terms do not provide a categorical no-training assurance or one fixed overall API retention period.
+For eligible public pull requests, selected public GitHub evidence, prompts, and generated output are sent to DeepSeek for engineering judgment. New private-repository events are discarded at the early hosted boundary, before any durable state, provider call, or GitHub product API call.
 
-Current official-service retention is explicit:
-
-| Data | Retention |
-|---|---:|
-| DynamoDB public-run records | 30-day TTL; deletion is asynchronous |
-| S3 public-run artifacts | 30 days |
-| Full provider trace objects | 7 days |
-| Webhook logs | 30 days |
-| Pipeline logs | 90 days |
-
-New private-repository events are discarded at the early hosted boundary. Historical private records were left untouched. See [privacy and retention](docs/PRIVACY.md) and the [security model](docs/SECURITY.md) for the full boundaries.
-
-Runtime secret values stay in Lambda environment configuration, protected by AWS encryption at rest and strict IAM. Terraform state is secret-bearing and must remain encrypted, versioned, and private. Public CI has no official production credentials or deployment permission.
+Official-service retention is explicit and bounded: public-run records and artifacts expire in 30 days, full provider traces in 7. The exact table, the DeepSeek terms this depends on, and the credential boundaries are documented in [privacy and retention](docs/PRIVACY.md) and the [security model](docs/SECURITY.md).
 
 ## Repository map
 

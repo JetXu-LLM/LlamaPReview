@@ -1,106 +1,79 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 860" role="img" aria-labelledby="title desc">
-  <title id="title">LlamaPReview production architecture</title>
-  <desc id="desc">A verified GitHub webhook rejects private repository events before storage or provider work. Public pull requests follow exact-head admission, bounded evidence retrieval, model judgment, deterministic projection, durable recovery and accounting, and exactly-once GitHub publication.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 830" width="900" height="830" role="img" aria-labelledby="t d">
+  <title id="t">How LlamaPReview turns a public pull request into a published review</title>
+  <desc id="d">A signed public GitHub event is admitted at an exact head commit. Code gathers bounded public evidence, DeepSeek supplies engineering judgment, and deterministic code owns projection, placement and exactly-once publication. The result is a public review anyone can inspect, from source anyone can run.</desc>
+
   <defs>
-    <linearGradient id="page" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f8fbff"/>
-      <stop offset="1" stop-color="#f7f5ff"/>
-    </linearGradient>
-    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#eef5ff"/>
-      <stop offset="1" stop-color="#f4efff"/>
-    </linearGradient>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#566076"/>
-    </marker>
     <style>
-      .heading { font: 700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172033; }
-      .subheading { font: 400 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #59647a; }
-      .label { font: 700 19px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #202a40; }
-      .body { font: 400 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #526078; }
-      .inverse-label { font: 700 19px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #ffffff; }
-      .inverse-body { font: 400 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #dce5f4; }
-      .micro { font: 600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: .08em; fill: #667085; }
-      .line { fill: none; stroke: #566076; stroke-width: 2.5; marker-end: url(#arrow); }
-      .soft-line { fill: none; stroke: #7b8497; stroke-width: 2; stroke-dasharray: 7 7; marker-end: url(#arrow); }
-      .card { fill: #ffffff; stroke: #cdd5e3; stroke-width: 1.5; }
+      .h    { font: 700 30px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; fill: #0f172a; }
+      .sub  { font: 400 20px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; fill: #475569; }
+      .name { font: 700 25px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; fill: #0f172a; }
+      .det  { font: 400 19px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; fill: #52607a; }
+      .tag  { font: 700 15px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: .1em; }
+      .num  { font: 700 20px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; fill: #ffffff; }
+      .flow { fill: none; stroke: #94a3b8; stroke-width: 3; marker-end: url(#a); }
     </style>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+    </marker>
   </defs>
 
-  <rect width="1440" height="860" rx="28" fill="url(#page)"/>
-  <text x="70" y="68" class="heading">One exact-head path from webhook to review</text>
-  <text x="70" y="100" class="subheading">Model judgment is evidence-led. Privacy, payload safety, recovery, and publication identity are code-owned.</text>
+  <rect width="900" height="830" rx="20" fill="#ffffff"/>
+  <rect x="1" y="1" width="898" height="828" rx="19" fill="none" stroke="#e2e8f0" stroke-width="2"/>
 
-  <rect x="50" y="128" width="1340" height="420" rx="24" fill="#ffffff" stroke="#d6dce8" stroke-width="1.5"/>
-  <text x="78" y="164" class="micro">OFFICIAL HOSTED SERVICE · PUBLIC REPOSITORIES ONLY</text>
+  <text x="48" y="62" class="h">From a public pull request to a review you can audit</text>
+  <text x="48" y="94" class="sub">The model judges the engineering. Code owns every boundary and published byte.</text>
 
-  <rect x="80" y="208" width="200" height="128" rx="18" class="card"/>
-  <circle cx="116" cy="244" r="17" fill="#202a40"/>
-  <path d="M108 244h16M116 236v16" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
-  <text x="145" y="248" class="label">GitHub</text>
-  <text x="105" y="282" class="body">Signed pull request</text>
-  <text x="105" y="307" class="body">webhook delivery</text>
+  <rect x="48" y="118" width="16" height="16" rx="4" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+  <text x="74" y="132" class="tag" fill="#475569">CODE-OWNED</text>
+  <rect x="232" y="118" width="16" height="16" rx="4" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="258" y="132" class="tag" fill="#6d28d9">MODEL-OWNED</text>
 
-  <path d="M280 272 H338" class="line"/>
+  <g>
+    <rect x="48" y="158" width="804" height="100" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+    <rect x="48" y="158" width="6" height="100" rx="3" fill="#64748b"/>
+    <circle cx="96" cy="208" r="20" fill="#64748b"/>
+    <text x="96" y="215" class="num" text-anchor="middle">1</text>
+    <text x="136" y="200" class="name">Signed public GitHub event</text>
+    <text x="136" y="230" class="det">Signature verified first. Private-repository events stop here.</text>
+  </g>
+  <path d="M450 258 V286" class="flow"/>
 
-  <rect x="340" y="190" width="254" height="164" rx="18" fill="#f4f8ff" stroke="#9bb8e8" stroke-width="1.5"/>
-  <text x="368" y="227" class="label">Webhook admission</text>
-  <text x="368" y="260" class="body">1 · Verify signature</text>
-  <text x="368" y="286" class="body">2 · Read event + visibility</text>
-  <text x="368" y="312" class="body">3 · Admit exact public head</text>
-  <text x="368" y="338" class="micro">MINIMUM PAYLOAD PARSING</text>
+  <g>
+    <rect x="48" y="290" width="804" height="100" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+    <rect x="48" y="290" width="6" height="100" rx="3" fill="#64748b"/>
+    <circle cx="96" cy="340" r="20" fill="#64748b"/>
+    <text x="96" y="347" class="num" text-anchor="middle">2</text>
+    <text x="136" y="332" class="name">Exact-head admission and bounded evidence</text>
+    <text x="136" y="362" class="det">Pinned to one commit, with provenance and honest coverage gaps.</text>
+  </g>
+  <path d="M450 390 V418" class="flow"/>
 
-  <path d="M466 354 V396" class="line"/>
-  <rect x="340" y="398" width="254" height="106" rx="18" fill="#fff4f2" stroke="#e9a397" stroke-width="1.5"/>
-  <text x="368" y="431" class="label" fill="#8a2d21">Private event stops here</text>
-  <text x="368" y="460" class="body">Generic acknowledgement</text>
-  <text x="368" y="484" class="body">No identity, state, provider, or GitHub API</text>
+  <g>
+    <rect x="48" y="422" width="804" height="100" rx="14" fill="#f5f3ff" stroke="#a78bfa" stroke-width="2"/>
+    <rect x="48" y="422" width="6" height="100" rx="3" fill="#7c3aed"/>
+    <circle cx="96" cy="472" r="20" fill="#7c3aed"/>
+    <text x="96" y="479" class="num" text-anchor="middle">3</text>
+    <text x="136" y="464" class="name">DeepSeek supplies engineering judgment</text>
+    <text x="136" y="494" class="det">Causal risk, severity, uncertainty, merge posture — nothing else.</text>
+  </g>
+  <path d="M450 522 V550" class="flow"/>
 
-  <path d="M594 272 H650" class="line"/>
+  <g>
+    <rect x="48" y="554" width="804" height="100" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+    <rect x="48" y="554" width="6" height="100" rx="3" fill="#64748b"/>
+    <circle cx="96" cy="604" r="20" fill="#64748b"/>
+    <text x="96" y="611" class="num" text-anchor="middle">4</text>
+    <text x="136" y="596" class="name">Deterministic projection and publication</text>
+    <text x="136" y="626" class="det">Schema, caps, sanitation, placement, exactly-once on the same head.</text>
+  </g>
+  <path d="M450 654 V682" class="flow"/>
 
-  <rect x="652" y="190" width="448" height="164" rx="18" fill="url(#core)" stroke="#a89bd9" stroke-width="1.5"/>
-  <text x="680" y="226" class="micro">EVIDENCE + JUDGMENT</text>
-  <text x="680" y="263" class="label">Route → bounded retrieval / PFR</text>
-  <text x="680" y="292" class="body">Exact-head repository facts, provenance, coverage, honest gaps</text>
-  <line x1="680" y1="314" x2="1072" y2="314" stroke="#d2caec"/>
-  <text x="680" y="339" class="body">Deep engineering judgment → Final owner-action presentation</text>
-
-  <path d="M1100 272 H1156" class="line"/>
-
-  <rect x="1158" y="190" width="202" height="164" rx="18" fill="#f1fbf6" stroke="#83c5a3" stroke-width="1.5"/>
-  <text x="1186" y="227" class="label">Projection</text>
-  <text x="1186" y="260" class="body">Deterministic schema</text>
-  <text x="1186" y="286" class="body">sanitation + caps</text>
-  <text x="1186" y="312" class="body">inline + Mermaid</text>
-  <text x="1186" y="338" class="micro">LOCAL DEGRADATION</text>
-
-  <path d="M1259 354 V418" class="line"/>
-  <rect x="1110" y="420" width="275" height="84" rx="18" fill="#202a40" stroke="#202a40" stroke-width="1.5"/>
-  <text x="1134" y="454" class="inverse-label">Exactly-once publication</text>
-  <text x="1134" y="481" class="inverse-body">Same verified GitHub head</text>
-
-  <rect x="50" y="578" width="1340" height="228" rx="24" fill="#f6f8fc" stroke="#d6dce8" stroke-width="1.5" stroke-dasharray="9 7"/>
-  <text x="78" y="614" class="micro">DURABLE RECOVERY + ACCOUNTING BOUNDARY</text>
-
-  <rect x="82" y="650" width="346" height="104" rx="18" class="card"/>
-  <text x="110" y="687" class="label">DynamoDB lifecycle state</text>
-  <text x="110" y="716" class="body">Exact-head claims, attempts, intent, receipt</text>
-  <text x="110" y="741" class="body">TTL-bound public review records</text>
-
-  <rect x="482" y="650" width="346" height="104" rx="18" class="card"/>
-  <text x="510" y="687" class="label">Private S3 artifacts</text>
-  <text x="510" y="716" class="body">Recovery payloads and bounded traces</text>
-  <text x="510" y="741" class="body">Lifecycle expiry and public access blocked</text>
-
-  <rect x="882" y="650" width="474" height="104" rx="18" class="card"/>
-  <text x="910" y="687" class="label">Provider transport + accounting</text>
-  <text x="910" y="716" class="body">Dispatch fences, retries, usage, tokens, cost truth</text>
-  <text x="910" y="741" class="body">Logical and billed model identities remain distinct</text>
-
-  <path d="M790 354 C790 540 255 540 255 650" class="soft-line"/>
-  <path d="M876 354 C876 526 655 528 655 650" class="soft-line"/>
-  <path d="M962 354 C962 516 1118 524 1118 650" class="soft-line"/>
-  <path d="M1110 461 C1020 461 972 560 972 650" class="soft-line"/>
-
-  <text x="70" y="837" class="body">The orchestrator sequences these capabilities; it does not own retrieval, judgment, projection, persistence, or publication policy.</text>
+  <g>
+    <rect x="48" y="686" width="804" height="100" rx="14" fill="#f8fafc" stroke="#0f172a" stroke-width="2"/>
+    <rect x="48" y="686" width="6" height="100" rx="3" fill="#0f172a"/>
+    <circle cx="96" cy="736" r="20" fill="#0f172a"/>
+    <text x="96" y="743" class="num" text-anchor="middle">5</text>
+    <text x="136" y="728" class="name">A public review, from source you can run</text>
+    <text x="136" y="758" class="det">This repository is the code the hosted service runs. Self-host the same path.</text>
+  </g>
 </svg>

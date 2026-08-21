@@ -208,6 +208,15 @@ class PublicationFailureSafetyTests(unittest.TestCase):
                 self.assertEqual(variant.count(PUBLIC_FOOTER_MARKER), 1)
                 self.assertEqual(variant.strip().count("\n"), 1)
 
+    def test_every_footer_variant_says_the_reviewer_is_open_source(self):
+        for variant in PUBLIC_FOOTER_VARIANTS:
+            with self.subTest(variant=variant):
+                self.assertIn("open-source", variant)
+                # One door per footer, and it has to be a real link.
+                self.assertEqual(variant.count("](https://github.com/"), 1)
+                self.assertNotIn("utm_", variant)
+                self.assertNotIn("star", variant.casefold())
+
     def test_footer_choice_is_stable_and_spreads_across_heads(self):
         self.assertEqual(public_footer(HEAD), public_footer(HEAD))
         chosen = {

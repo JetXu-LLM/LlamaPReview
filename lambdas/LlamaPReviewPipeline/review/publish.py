@@ -20,25 +20,23 @@ MULTILINE_MIN_LINES = 2
 MULTILINE_MAX_LINES = 10
 STRICT_MULTILINE_REQUIRE_ALL_LINES_IN_DIFF = True
 
-PUBLIC_FOOTER_MARKER = "LlamaPReview reviewed this pull request"
+PUBLIC_FOOTER_MARKER = "LlamaPReview is an open-source pull request reviewer"
 
-# The footer is the only place the project speaks for itself in someone else's
-# repository, so it stays one line and offers one door rather than a menu. The
-# opening sentence never varies: it carries the marker other publication code
-# matches on, and it states the one fact a reader needs to trust the comment.
-_PUBLIC_FOOTER_LEAD = (
-    "*LlamaPReview reviewed this pull request at its exact head commit."
-)
+# The footer is the only place the project speaks for itself inside someone
+# else's repository. It leads with the one fact a reader cannot infer from the
+# review itself — that the reviewer is open source — and then opens exactly one
+# door. The opening sentence never varies because publication matches on it.
+_PUBLIC_FOOTER_LEAD = "*LlamaPReview is an open-source pull request reviewer."
 
 # Which door is offered is chosen from the reviewed head, so a retry, a
 # recovery, and a rebuild of the same review all produce the same footer, while
 # different pull requests surface different entry points over time.
 PUBLIC_FOOTER_INVITATIONS = (
-    "[Read the code that reviewed it](https://github.com/JetXu-LLM/LlamaPReview).*",
-    "[Tell it where it was wrong](https://github.com/JetXu-LLM/LlamaPReview/discussions).*",
-    "[See what it will and will not say](https://github.com/JetXu-LLM/LlamaPReview/blob/main/docs/REVIEW_OUTPUT.md).*",
-    "[Run it on your own account](https://github.com/JetXu-LLM/LlamaPReview/blob/main/docs/HOSTING.md).*",
-    "[Report a review bug](https://github.com/JetXu-LLM/LlamaPReview/issues).*",
+    "[Read the exact code that produced this review](https://github.com/JetXu-LLM/LlamaPReview).*",
+    "[See how a review is built, from signed webhook to publication](https://github.com/JetXu-LLM/LlamaPReview/blob/main/docs/ARCHITECTURE.md).*",
+    "[Run the same reviewer on your own account](https://github.com/JetXu-LLM/LlamaPReview/blob/main/docs/HOSTING.md).*",
+    "[See exactly what it will and will not publish](https://github.com/JetXu-LLM/LlamaPReview/blob/main/docs/REVIEW_OUTPUT.md).*",
+    "[Tell the maintainers where this review got it wrong](https://github.com/JetXu-LLM/LlamaPReview/discussions).*",
 )
 
 PUBLIC_FOOTER_VARIANTS = tuple(

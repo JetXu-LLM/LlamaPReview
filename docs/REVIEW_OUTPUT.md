@@ -15,12 +15,14 @@ A substantive review has one model-derived body projected into deterministic Mar
 
 The footer appears only in a trustworthy substantive main review body. It is never model-generated, never appended to individual inline comments, and is not added to empty, skipped, failed, or other nonpublishable terminal messages.
 
-Its opening sentence never varies. The single invitation that follows is chosen
-from the reviewed head SHA out of a fixed code-owned set, so a retry, a
-recovery, and a rebuild of the same review always produce the same footer, while
-different pull requests surface different entry points into the project.
-Rendering strips every footer the code can emit before appending one, so a body
-prepared under one head and rebuilt under another still ends with exactly one.
+Its opening sentence never varies and states that the reviewer is open source,
+because that is the one thing a reader cannot infer from the review itself. The
+single invitation that follows is chosen from the reviewed head SHA out of a
+fixed code-owned set, so a retry, a recovery, and a rebuild of the same review
+always produce the same footer, while different pull requests surface different
+entry points into the project. Rendering strips every footer the code can emit
+before appending one, so a body prepared under one head and rebuilt under
+another still ends with exactly one. The footer carries no tracking parameters.
 
 An ordinary review is published only while the pull request is open on the
 reviewed exact head. If a publishable Final finishes after that same head was
