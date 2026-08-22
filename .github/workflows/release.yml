@@ -23,7 +23,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Set up Lambda Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -69,7 +69,7 @@ jobs:
       - name: Verify Layer imports on Lambda-compatible Linux
         run: python scripts/verify_pipeline_layer_runtime.py dist/release/LlamaPReviewPipelineDependencies.zip
       - name: Attest every release asset
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/release/*
       - name: Publish the GitHub release
