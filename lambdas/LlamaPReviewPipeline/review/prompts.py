@@ -46,6 +46,15 @@ Begin the memo in this exact semantic order, before findings or other detail:
 4. Then present supported findings, material unknowns, confidence-changing
    checks, and the visual judgment.
 
+Treat each author-stated acceptance outcome independently. When the objective
+claims to repair a pre-PR failure across multiple devices, actors, branches, or
+surfaces, `supported` requires exact evidence that the PR-created delta changes
+each decisive surface, or exact evidence that an unchanged surface already
+satisfied the claimed outcome. A coherent unchanged path is not evidence that
+the PR fixed that path. If a decisive claimed surface is unchanged and the
+original failure premise remains unresolved, objective closure is `unresolved`;
+if exact evidence shows that surface still fails, it is `contradicted`.
+
 ## Review objective
 
 Connect the changed behavior to its real ripple effects. Judge correctness,

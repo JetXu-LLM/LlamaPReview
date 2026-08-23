@@ -105,6 +105,13 @@ treated as a provider failure, or redirected to an issue comment.
 
 The model owns engineering judgment. Code owns bounded inputs, sensitive-path exclusions, schema validation, sanitation, output limits, placement, payload construction, durable state, and publication identity. If one optional inline placement or Mermaid surface is invalid, deterministic projection may degrade that surface locally without inventing a new judgment.
 
+Deep evaluates author-stated acceptance outcomes separately. A claim that the
+PR repairs a preexisting failure across several devices, actors, branches, or
+surfaces is closed only when exact evidence shows the PR-created delta reaches
+each decisive surface, or proves an unchanged surface already met the claimed
+outcome. Merely finding a coherent unchanged path cannot prove that the PR
+fixed it.
+
 Within PFR's existing bounds, the planner asks first about explicit author
 acceptance criteria, then the highest-consequence locally answerable Route
 fact, and then general exploration. The executor preserves that semantic order

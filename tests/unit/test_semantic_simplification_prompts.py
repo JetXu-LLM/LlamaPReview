@@ -20,6 +20,12 @@ class TestSemanticSimplificationPrompts(unittest.TestCase):
             "`PR objective`",
             "`Objective closure: supported | contradicted | unresolved`",
             "`Merge posture`",
+            "Treat each author-stated acceptance outcome independently",
+            "claims to repair a pre-PR failure across multiple devices, actors, branches, or\n"
+            "surfaces",
+            "A coherent unchanged path is not evidence that\n"
+            "the PR fixed that path",
+            "decisive claimed surface is unchanged",
             "a nondeciding gap\n   does not prevent a clear posture",
             "benign premise",
             "PFR is\n   non-exhaustive evidence acquisition",

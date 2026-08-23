@@ -24,7 +24,9 @@ do not appear as project versions.
 
 - Deep now opens with the pull-request objective, objective closure, and merge
   posture. Final must preserve those commitments, so an ordinary nondeciding
-  unknown cannot silently rewrite the verdict.
+  unknown cannot silently rewrite the verdict. Multi-surface repair claims are
+  closed only when exact evidence covers every decisive surface; an unchanged
+  path cannot be credited as repaired merely because it remains coherent.
 - PFR spends its existing question, round, and token budgets on author-stated
   acceptance criteria first, then the highest-consequence locally answerable
   Route fact, and only then general exploration. Ordinary plan order is
