@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -34,6 +35,35 @@ from .reconcile_contract import (
 from . import evidence_execution, reconcile_contract
 
 logger = logging.getLogger(__name__)
+
+
+_ROUTE_COMMITMENT_FIELDS = (
+    "reviewable_semantic_delta",
+    "minimum_evidence_boundary",
+    "reason",
+    "complexity",
+    "pr_type",
+    "risk_domains",
+)
+
+
+def _fixed_route_commitment(route: Dict[str, Any]) -> str:
+    """Serialize only the already-validated semantic Route contract."""
+
+    commitment = {
+        key: route[key]
+        for key in _ROUTE_COMMITMENT_FIELDS
+        if key in route
+    }
+    serialized = json.dumps(
+        commitment,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    # Route values remain model-authored data. Keep them inside the fixed block
+    # even if an untrusted PR caused the model to echo delimiter-shaped text.
+    return serialized.replace("<", "\\u003c").replace(">", "\\u003e")
 
 
 def _append_pfr_sections(
@@ -174,6 +204,7 @@ def collect_context_pfr(
     pfr_plan_finish_reason = ""
     pfr_plan_elapsed_seconds = 0.0
     route = dict(route_plan or {})
+    route_commitment = _fixed_route_commitment(route)
     route_meta = (
         dict(route.get("_route_plan_meta") or {})
         if isinstance(route.get("_route_plan_meta"), dict)
@@ -236,6 +267,7 @@ def collect_context_pfr(
                     "role": "user",
                     "content": Template(PLAN_CONTINUATION_PROMPT).substitute(
                         max_questions=plan_question_cap,
+                        route_commitment=route_commitment,
                         pr_details=truncate_preserving_current_ci(
                             pr_details, 120000
                         ),
@@ -256,6 +288,7 @@ def collect_context_pfr(
                     "role": "user",
                     "content": Template(PLAN_PROMPT).substitute(
                         max_questions=plan_question_cap,
+                        route_commitment=route_commitment,
                         pr_details=truncate_preserving_current_ci(
                             pr_details, 120000
                         ),

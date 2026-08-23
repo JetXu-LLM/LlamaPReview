@@ -912,6 +912,80 @@ class PresentationCompilationTests(unittest.TestCase):
             result.review["v3_review"]["evidence_scope"],
         )
 
+    def test_verified_test_gap_can_carry_blocking_but_question_and_note_cannot(self):
+        blocking_gap = finding(
+            priority="P2",
+            category="test-gap",
+            required=["path:src/app.py"],
+            supporting=[],
+            placement="headline",
+            headline="The changed branch lacks its required regression proof",
+        )
+        blocking_gap["owner_action"] = (
+            "Add and pass the focused regression test before merge."
+        )
+        question = finding(
+            priority="P2",
+            category="question",
+            required=["path:src/app.py"],
+            supporting=[],
+            placement="collapsed",
+            headline="Confirm the optional rollout preference",
+        )
+        note = finding(
+            priority="P2",
+            category="note",
+            required=["path:src/app.py"],
+            supporting=[],
+            placement="collapsed",
+            headline="Keep the local naming convention in mind",
+        )
+
+        result = compile_presentation_v1(
+            presentation(
+                verdict="blocking",
+                findings=[blocking_gap, question, note],
+            ),
+            pr_details=PR_DETAILS,
+            context_meta=context_meta(),
+        )
+
+        self.assertTrue(result.publishable)
+        findings = result.review["v3_review"]["findings"]
+        self.assertTrue(findings[0]["blocking"])
+        self.assertEqual(findings[0]["finding_type"], "test-gap")
+        self.assertFalse(findings[1]["blocking"])
+        self.assertEqual(findings[1]["finding_type"], "question")
+        self.assertFalse(findings[2]["blocking"])
+        self.assertEqual(findings[2]["finding_type"], "note")
+        self.assertTrue(
+            result.presentation["findings"][0]["owner_action"].startswith(
+                "Before merge:"
+            )
+        )
+
+    def test_post_merge_test_gap_action_cannot_carry_blocking(self):
+        blocking_gap = finding(
+            priority="P2",
+            category="test-gap",
+            required=["path:src/app.py"],
+            supporting=[],
+            placement="headline",
+            headline="The changed branch lacks its required regression proof",
+        )
+        blocking_gap["owner_action"] = (
+            "Add this regression test in a follow-up pull request after merge."
+        )
+
+        result = compile_presentation_v1(
+            presentation(verdict="blocking", findings=[blocking_gap]),
+            pr_details=PR_DETAILS,
+            context_meta=context_meta(),
+        )
+
+        self.assertFalse(result.publishable)
+        self.assertEqual(result.failure_kind, "deciding_item_loss")
+
     def test_nonblocking_raw_diff_snippet_is_removed_locally(self):
         item = finding(placement="headline")
         item["code_snippet"] = (

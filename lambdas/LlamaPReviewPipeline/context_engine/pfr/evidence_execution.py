@@ -507,18 +507,19 @@ def _record_budget_skipped_for_steps(state, steps: List[Dict[str, Any]]) -> None
         _record_budget_skipped_verification(state, step)
 
 def _prioritize_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    order = {"read_file": 0, "search_code": 1, "list_dir": 2}
-
     def priority(step: Dict[str, Any]) -> int:
         if (
             step.get("tool") == "search_code"
             and step.get("_priority_class") == "diff_removed_symbol_floor"
         ):
             # The one reserved deleted-symbol check must execute, not merely
-            # survive plan truncation.  Put it before the read block so a soft
-            # time budget cannot consistently skip it after several slow reads.
-            return -1
-        return order.get(step.get("tool"), 9)
+            # survive plan truncation. Put it first so a soft time budget
+            # cannot consistently skip it after several slow reads.
+            return 0
+        # Preserve the model's semantic question order for every ordinary
+        # step. Reordering by tool type would undo the planner's explicit
+        # acceptance-criteria and highest-consequence priorities.
+        return 1
 
     return sorted(
         enumerate(steps), key=lambda item: (priority(item[1]), item[0])
@@ -567,8 +568,8 @@ def _cap_planned_steps(
     ):
         reserved = removal_steps[0]
         if len(kept) >= max_steps:
-            # Replace the lowest-priority tail item while retaining the normal
-            # read-first execution order of all surviving steps.
+            # Replace the lowest-priority tail item while retaining the
+            # planner's semantic order for every surviving ordinary step.
             kept.pop()
         kept.append(reserved)
         kept = [step for step in steps if step in kept]

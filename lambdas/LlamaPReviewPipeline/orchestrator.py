@@ -63,9 +63,13 @@ from .review.generate import generate_review
 from .review.placement_sources import (
     fetch_pr_files_and_contents as _fetch_pr_files_and_contents,
 )
-from .review.terminal_messages import skipped_review_notice
+from .review.terminal_messages import (
+    REVIEW_UNAVAILABLE_NOTICE,
+    skipped_review_notice,
+)
 from .review.publish import (
     build_diff_maps_from_pr_files,
+    prepare_main_comment_publication,
     prepare_review_publication,
 )
 from .review import result_artifact
@@ -1471,13 +1475,16 @@ def _persist_terminal_nonpublishable_review(
     review_json: Dict[str, Any],
     context_meta: Dict[str, Any],
     runtime: Any,
+    disposition: pipeline_admission.PRLifecycleDisposition,
+    publication_context: pipeline_publication.PublicationContext,
+    deadline: Deadline,
     table,
     phase_started: float,
     usage_accounting: Dict[str, Any],
     review_runtime_identity: Dict[str, Any],
     phase_claim: Dict[str, Any],
 ) -> bool:
-    """Persist a terminal review failure, or raise its bounded retry."""
+    """End a failed review privately or with the narrow unavailable notice."""
 
     if not result_artifact.is_nonpublishable(review_json):
         return False
@@ -1506,6 +1513,75 @@ def _persist_terminal_nonpublishable_review(
         computed_at=persistence.iso_now(),
         elapsed_seconds=time.monotonic() - phase_started,
     )
+    model_phases = [
+        phase
+        for phase in usage_accounting.get(
+            "deepseek_all_attempt_model_phases"
+        )
+        or []
+        if isinstance(phase, dict)
+    ]
+    paid_model_work_completed = bool(
+        int(
+            (
+                usage_accounting.get("deepseek_usage_total") or {}
+            ).get("total_tokens")
+            or 0
+        )
+        > 0
+        or any(
+            str(phase.get("status") or "") == "completed"
+            for phase in model_phases
+        )
+    )
+    notice_eligible = bool(
+        paid_model_work_completed
+        and projected.failure_stage == "final_presentation"
+        and disposition.kind
+        is pipeline_admission.PRDispositionKind.OPEN_SAME_HEAD
+        and disposition.locked is False
+    )
+    if notice_eligible:
+        prepared = prepare_main_comment_publication(
+            REVIEW_UNAVAILABLE_NOTICE,
+            head_sha=head_sha,
+            review_mode="failed",
+            publication_kind="ordinary_review",
+            required_disposition="open_same_head",
+        )
+        failed_notice = result_artifact.build_failed_notice_result(
+            prepared,
+            nonpublishable=projected,
+            run_id=run_id,
+            attempt=attempt,
+        )
+        stored = pipeline_publication.commit_prepared(
+            failed_notice.prepared,
+            failed_notice.terminal_attributes,
+            context=publication_context,
+            runtime=runtime,
+            deadline=deadline,
+            pre_persist_stage="review.failure_notice_pre_persist",
+            table=table,
+        )
+        if stored:
+            _emit_terminal_error_metric(
+                phase=projected.failure_stage,
+                kind=projected.failure_kind,
+            )
+        _emit_pipeline_metric(
+            "review_nonpublishable",
+            repo=repo,
+            pr_number=pr_number,
+            attempt=attempt,
+            stored=stored,
+            review_mode="failed",
+            failure_kind=projected.failure_kind,
+            failure_stage=projected.failure_stage,
+            retryable=projected.retryable,
+            unavailable_notice=True,
+        )
+        return True
     pipeline_admission.assert_current_head(
         runtime,
         repo,
@@ -2002,6 +2078,9 @@ def run_review_phase(
             review_json=review_json,
             context_meta=context_meta,
             runtime=active_runtime,
+            disposition=final_disposition,
+            publication_context=review_publication,
+            deadline=deadline,
             table=table,
             phase_started=phase_started,
             usage_accounting=usage_accounting,
@@ -2060,6 +2139,9 @@ def run_review_phase(
             review_json=review_json,
             context_meta=context_meta,
             runtime=active_runtime,
+            disposition=final_disposition,
+            publication_context=review_publication,
+            deadline=deadline,
             table=table,
             phase_started=phase_started,
             usage_accounting=usage_accounting,

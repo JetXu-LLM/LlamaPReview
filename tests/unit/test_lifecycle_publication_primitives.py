@@ -458,6 +458,37 @@ class LifecyclePublicationPrimitiveTests(unittest.TestCase):
         )
         fetch.assert_not_called()
 
+    def test_failed_ordinary_review_rechecks_open_lock_before_dispatch(self):
+        context = _context()
+        item = {"status": "PENDING"}
+        for locked, expected in (
+            (True, PRLifecycleSuperseded),
+            (None, HeadVerificationUnavailable),
+        ):
+            with self.subTest(locked=locked), patch.object(
+                pipeline_publication.persistence,
+                "get_item",
+                return_value=item,
+            ), patch.object(
+                pipeline_publication,
+                "fetch_pr_details",
+            ) as fetch:
+                check = pipeline_publication.make_pre_publish_check(
+                    context,
+                    _Runtime(locked=locked),
+                    check_duplicate=False,
+                    require_unlocked=True,
+                )
+                with self.assertRaises(expected) as raised:
+                    check()
+
+            if locked is True:
+                self.assertEqual(
+                    raised.exception.superseded_kind,
+                    "publication_unavailable_locked",
+                )
+            fetch.assert_not_called()
+
     def test_locked_ended_transition_precedes_lifecycle_mismatch(self):
         context = _context(
             kind="lifecycle_cancellation",

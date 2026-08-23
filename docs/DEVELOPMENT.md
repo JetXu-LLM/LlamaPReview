@@ -34,6 +34,18 @@ A review-behavior change should include:
 
 Do not replace model-owned engineering judgment with repository-specific keywords. Prompts and behavior must remain general across repositories and languages.
 
+Objective-closure or PFR-priority changes must prove that both continuation and
+standalone planning receive the same fixed Route commitment, ordinary steps
+retain semantic order across tool types, and no question, round, token, model,
+or provider-call cap changes. Evaluation may attribute evidence flow from the
+existing ledger and full private trace, but production code must not parse
+model prose to decide whether the objective closed.
+
+Failure-notice changes require retry and crash-recovery coverage plus the full
+open/new-head/merged/closed/locked matrix. Tests must prove one exact body-only
+`COMMENT`, zero footer/inline/Mermaid, complete accounting, no extra capacity
+charge, and no publication for an unknown provider-dispatch outcome.
+
 Lifecycle changes additionally require deterministic coverage for the full
 state matrix: same/new head crossed with open/merged/closed, plus an unverified
 snapshot. Tests must prove durable initial admission, one bounded early

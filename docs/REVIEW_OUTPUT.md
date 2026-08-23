@@ -24,6 +24,19 @@ entry points into the project. Rendering strips every footer the code can emit
 before appending one, so a body prepared under one head and rebuilt under
 another still ends with exactly one. The footer carries no tracking parameters.
 
+For a clear code judgment whose exact-head CI snapshot is still pending,
+incomplete, or unavailable, the existing `Conditional code-review clear`
+title remains. The first paragraph preserves the model's code-level reason for
+clear; a separate second paragraph states the unresolved CI fact. Code never
+turns pending or missing CI into `verification_needed`. Deep changes the
+posture only when that fact decides whether the pull-request objective is
+actually achieved.
+
+A `test-gap` is not categorically nonblocking. It may carry a blocking verdict
+only with admitted required evidence and a concrete owner action that must be
+completed before merge. A supporting-only test observation remains
+nonblocking, and `question` and `note` never carry the merge decision.
+
 An ordinary review is published only while the pull request is open on the
 reviewed exact head. If a publishable Final finishes after that same head was
 merged, deterministic Projection turns it into a post-merge follow-up:
@@ -54,6 +67,23 @@ Mermaid is optional. Eligibility and syntax are checked, unsafe content is sanit
 ## Failure and skip messages
 
 Terminal messages are code-owned and deliberately narrow. They do not claim a model judgment that was not completed. A provider error, unsafe projection, stale head, closed pull request, or policy skip cannot be transformed into a substantive “looks good” review.
+
+When paid model work has occurred, normal retries are exhausted, and Final or
+Projection still cannot produce a reliable review, an open, unlocked pull
+request on the same exact head receives one native `COMMENT` review:
+
+```markdown
+### LlamaPReview — Review unavailable
+
+LlamaPReview couldn't complete a reliable review of this pull request at this commit. No recommendation was made about whether it should be merged.
+```
+
+This message uses the ordinary exactly-once publication transaction but is not
+a normal review or quality sample. It has no footer, inline comment, Mermaid,
+error code, model identity, usage detail, owner action, or merge judgment, and
+it consumes no additional capacity. A new head, ended or locked pull request,
+quota/successor outcome, or unknown provider-dispatch outcome keeps its existing
+silent or dedicated terminal policy.
 
 A pull request already merged or closed when initial admission runs is silent.
 If the exact admitted head is merged or closed while review work is in

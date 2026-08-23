@@ -18,6 +18,15 @@ Check the existing DynamoDB stream mapping, Lambda concurrency, phase claim expi
 
 The pull request head changed, closed, or merged after admission. This is an expected fail-closed result. A later supported webhook event can admit the new exact head; do not force publication of the old payload.
 
+## Pull request shows “Review unavailable”
+
+Paid review work completed, but Final or deterministic Projection still could
+not produce a reliable review after normal retries. The message deliberately
+makes no merge recommendation. Check the private failure stage, provider
+ledger, exact-head disposition, and immutable publication receipt; do not
+replace it with model prose or manually rerun publication. It is excluded from
+ordinary review and quality metrics.
+
 ## Inline comment moved into the main body
 
 Placement degrades locally when the requested file/line/range is not a safe changed-line target. Inspect the diff mapping and suggestion shape. Do not weaken exact placement checks merely to preserve an inline surface.

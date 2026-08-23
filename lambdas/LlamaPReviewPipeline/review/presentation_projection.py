@@ -86,6 +86,24 @@ def _declares_no_owner_action(value: str) -> bool:
     return bool(_NO_ACTION_OWNER_ACTION.match(value.strip()))
 
 
+_POST_MERGE_OWNER_ACTION = re.compile(
+    r"\b(?:after|following|post[- ]?)\s*(?:the\s+)?merge\b|"
+    r"\bin (?:a|the) (?:later|follow-up) (?:pr|pull request)\b",
+    re.IGNORECASE,
+)
+
+
+def _blocking_test_gap_owner_action(value: str) -> Optional[str]:
+    """Make the pre-merge timing explicit without guessing a contrary action."""
+
+    action = value.strip()
+    if not action or _POST_MERGE_OWNER_ACTION.search(action):
+        return None
+    if re.match(r"^before (?:merge|merging)\s*:", action, re.IGNORECASE):
+        return action
+    return f"Before merge: {action}"
+
+
 def _is_single_identifier_edit(left: str, right: str) -> bool:
     """Return whether two opaque identifiers differ by one typing edit."""
 
@@ -606,7 +624,7 @@ def _normalize_finding(
     requested_placement = raw.get("placement")
     carries_blocking_decision = (
         verdict == "blocking"
-        and category not in {"test-gap", "question", "note"}
+        and category not in {"question", "note"}
     )
     representation_requirement = raw.get("representation_requirement")
     if representation_requirement is None:
@@ -672,6 +690,22 @@ def _normalize_finding(
             partial=True,
         )
         return None
+    if verdict == "blocking" and category == "test-gap":
+        pre_merge_action = _blocking_test_gap_owner_action(owner_action)
+        if pre_merge_action is None:
+            state.add_issue(
+                "test_gap_premerge_action_missing",
+                f"{location}.owner_action",
+                "blocking test-gap requires a concrete pre-merge owner action",
+                "item",
+            )
+            state.contract_blocking_decision_if_needed(location)
+            return None
+        if pre_merge_action != owner_action:
+            owner_action = pre_merge_action
+            state.normalize(
+                f"{location}.owner_action:premerge_timing_made_explicit"
+            )
     placement = (
         requested_placement if requested_placement in PLACEMENTS else "collapsed"
     )
@@ -818,6 +852,7 @@ def _normalize_finding(
         verdict == "blocking"
         and priority == "P2"
         and carries_blocking_decision
+        and category != "test-gap"
         and anchor == "post_change"
         and not required
         and supporting
@@ -1420,7 +1455,7 @@ def compile_presentation_object(
                             for item in raw_findings
                             if isinstance(item, dict)
                             and item.get("category")
-                            not in {"test-gap", "question", "note"}
+                            not in {"question", "note"}
                             and item.get("required_evidence_refs")
                             and bounded_text(item.get("headline"))
                         ),
@@ -1474,7 +1509,7 @@ def compile_presentation_object(
                     for item in raw_findings
                     if isinstance(item, dict)
                     and item.get("category")
-                    not in {"test-gap", "question", "note"}
+                    not in {"question", "note"}
                     and item.get("required_evidence_refs")
                 ]
                 is_sole_blocking_carrier = bool(
@@ -1560,11 +1595,13 @@ def compile_presentation_object(
             index
             for index, item in enumerate(normalized_findings)
             if item["priority"] in {"P0", "P1"}
+            and item["category"] not in {"question", "note"}
+            and item["required_evidence_refs"]
         }
         if not blocking_indexes:
             for index, item in enumerate(normalized_findings):
                 if (
-                    item["category"] not in {"test-gap", "question", "note"}
+                    item["category"] not in {"question", "note"}
                     and item["required_evidence_refs"]
                 ):
                     blocking_indexes.add(index)

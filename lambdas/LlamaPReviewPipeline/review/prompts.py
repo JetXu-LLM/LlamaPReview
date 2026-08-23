@@ -31,6 +31,21 @@ this pull request. Produce a self-contained, human-readable review memo for the
 Final presentation stage. Ordinary Markdown prose is appropriate; choose only
 the loose structure that makes the judgment easy to preserve.
 
+Begin the memo in this exact semantic order, before findings or other detail:
+
+1. `PR objective` — state the concrete behavior or acceptance outcome this PR
+   is trying to deliver.
+2. `Objective closure: supported | contradicted | unresolved` — choose exactly
+   one state and name the decisive exact-head evidence, or the decisive missing
+   fact. `contradicted` may block when the PR's objective is materially
+   defeated. `unresolved` requires a verification-needed posture only when the
+   missing fact decides whether the objective is achieved; a nondeciding gap
+   does not prevent a clear posture.
+3. `Merge posture` — state approve/clear, verification needed, or request
+   changes, with the finding or missing fact that actually carries it.
+4. Then present supported findings, material unknowns, confidence-changing
+   checks, and the visual judgment.
+
 ## Review objective
 
 Connect the changed behavior to its real ripple effects. Judge correctness,
@@ -147,9 +162,13 @@ before merge; do not relabel that action as a post-merge follow-up merely
 because the finding is P2. When shipping the observed reachable regression
 unchanged is unacceptable, request changes and name the P2 that carries that
 merge decision.
-Test-gap, question, and note items remain nonblocking. Use Security only for a
-directly introduced or exposed exploitable path. A finding must leave a
-concrete PR-caused risk or consequence and a useful owner action. Put positive
+A `test-gap` may carry a blocking decision only when the overall merge posture
+is blocking, its required evidence is verified, and it names a concrete owner
+action that must happen before merge. Missing coverage without those conditions
+is nonblocking. `question` and `note` items always remain nonblocking. Use
+Security only for a directly introduced or exposed exploitable path. A finding
+must leave a concrete PR-caused risk or consequence and a useful owner action.
+Put positive
 or falsified hypotheses with no remaining risk and no action in
 confidence-changing checks when they materially raise confidence; otherwise
 omit them. Cluster related P2 observations by causal theme rather than emitting
@@ -331,8 +350,11 @@ directives, internal identities, evidence IDs in visible labels, multi-line note
 syntax, or raw prose outside Mermaid statements. If the evidence cannot be
 expressed safely with this grammar, return null rather than invalid Mermaid.
 
-Preserve Deep's findings, material conclusions, severities, uncertainty,
-overall decision confidence, and merge posture. Copy `decision.confidence`
+Preserve Deep's opening `PR objective`, `Objective closure`, and `Merge posture`
+commitments as the authority for the presentation. Later ordinary unknowns or
+checks cannot rewrite those commitments. Preserve Deep's findings, material
+conclusions, severities, uncertainty, overall decision confidence, and merge
+posture. Copy `decision.confidence`
 from Deep without recalibrating it. Do not introduce a finding, fact, evidence,
 severity, confidence, or posture absent from Deep. Do not omit a material Deep conclusion
 merely to simplify it. Every output item must be traceable to Deep; evidence
@@ -369,6 +391,10 @@ merely because another unknown genuinely decides the verdict.
 When a blocking decision has no P0/P1, put the P2 that carries the merge
 decision first in `findings`; presentation code uses that consequence order for
 the first-screen proof unit.
+A `test-gap` may be that carrier only when Deep explicitly made it a pre-merge
+blocker, it has admitted required evidence, and it names the concrete owner
+action required before merge. `question` and `note` never carry a blocking
+decision.
 For a blocking decision, `decision.summary` and `decision.owner_actions` may
 mention only the findings Deep explicitly named as merge-posture carriers and
 their pre-merge actions. Keep nonblocking findings, nondeciding material

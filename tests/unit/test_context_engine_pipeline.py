@@ -646,6 +646,25 @@ class TestContextEnginePipeline(unittest.TestCase):
             "read_file",
         )
 
+        semantic_order = [
+            {
+                "question": "Verify the author's stated acceptance criterion.",
+                "tool": "search_code",
+                "args": {"query": "acceptance", "intent": "general"},
+            },
+            {
+                "question": "Inspect the highest-consequence directory.",
+                "tool": "list_dir",
+                "args": {"path": "src"},
+            },
+            {
+                "question": "Read a general follow-up file.",
+                "tool": "read_file",
+                "args": {"path": "src/general.py"},
+            },
+        ]
+        self.assertEqual(_ordered_steps(semantic_order), semantic_order)
+
     def test_generic_removed_symbol_survives_model_noise_filter(self):
         candidates, _ = postprocess_search_candidates(
             [],
