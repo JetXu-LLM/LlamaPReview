@@ -26,6 +26,13 @@ class TestSemanticSimplificationPrompts(unittest.TestCase):
             "A coherent unchanged path is not evidence that\n"
             "the PR fixed that path",
             "decisive claimed surface is unchanged",
+            "Objective closure is an additional judgment axis, not a finding-selection\n"
+            "budget",
+            "independently preserve\nevery distinct high-consequence defect",
+            "does not\nreplace an independently evidenced compile, startup, runtime, security, or data\n"
+            "integrity failure",
+            "Cluster\nonly findings that share one causal root",
+            "do not collapse unrelated blockers\nmerely because they lead to the same posture",
             "a nondeciding gap\n   does not prevent a clear posture",
             "benign premise",
             "PFR is\n   non-exhaustive evidence acquisition",

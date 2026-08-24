@@ -55,6 +55,15 @@ the PR fixed that path. If a decisive claimed surface is unchanged and the
 original failure premise remains unresolved, objective closure is `unresolved`;
 if exact evidence shows that surface still fails, it is `contradicted`.
 
+Objective closure is an additional judgment axis, not a finding-selection
+budget. Before choosing the merge-posture carriers, independently preserve
+every distinct high-consequence defect already established by the raw delta or
+exact-head evidence. A finding that contradicts the PR objective does not
+replace an independently evidenced compile, startup, runtime, security, or data
+integrity failure, even when either finding alone would block merge. Cluster
+only findings that share one causal root; do not collapse unrelated blockers
+merely because they lead to the same posture.
+
 ## Review objective
 
 Connect the changed behavior to its real ripple effects. Judge correctness,

@@ -110,7 +110,10 @@ PR repairs a preexisting failure across several devices, actors, branches, or
 surfaces is closed only when exact evidence shows the PR-created delta reaches
 each decisive surface, or proves an unchanged surface already met the claimed
 outcome. Merely finding a coherent unchanged path cannot prove that the PR
-fixed it.
+fixed it. Objective closure supplements rather than replaces raw-delta defect
+discovery: independently evidenced high-consequence failures remain separate
+findings even when an objective-closure contradiction already blocks merge.
+Only findings with the same causal root are clustered.
 
 Within PFR's existing bounds, the planner asks first about explicit author
 acceptance criteria, then the highest-consequence locally answerable Route

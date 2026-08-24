@@ -27,6 +27,9 @@ do not appear as project versions.
   unknown cannot silently rewrite the verdict. Multi-surface repair claims are
   closed only when exact evidence covers every decisive surface; an unchanged
   path cannot be credited as repaired merely because it remains coherent.
+  Objective closure supplements raw-delta discovery rather than replacing an
+  independently evidenced compile, startup, runtime, security, or data-integrity
+  failure.
 - PFR spends its existing question, round, and token budgets on author-stated
   acceptance criteria first, then the highest-consequence locally answerable
   Route fact, and only then general exploration. Ordinary plan order is
