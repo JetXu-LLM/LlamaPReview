@@ -45,7 +45,9 @@ do not appear as project versions.
 - A priority PFR follow-up can now broaden an already-read file's bounded
   symbol slice under the existing one-read soft-budget rescue. A prior slice
   no longer makes the whole path look complete, and cached source is reused
-  without another repository fetch.
+  without another repository fetch. The rescue remains bound to the earliest
+  matching Plan read even if Reconcile serializes lower-priority follow-ups
+  first.
 - Removed the category-level contradiction that made an otherwise valid,
   evidence-backed blocking `test-gap` fail deterministic Projection.
 

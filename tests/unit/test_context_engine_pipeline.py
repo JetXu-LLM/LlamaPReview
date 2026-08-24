@@ -1488,6 +1488,14 @@ class TestContextEnginePipeline(unittest.TestCase):
                     ],
                     "followups": [
                         {
+                            "question": "Inspect a lower-priority peer.",
+                            "tool": "read_file",
+                            "args": {
+                                "path": "src/peer.ts",
+                                "reason": "General exploration.",
+                            },
+                        },
+                        {
                             "question": "Continue the deciding token-contract read.",
                             "tool": "read_file",
                             "args": {
@@ -1498,14 +1506,6 @@ class TestContextEnginePipeline(unittest.TestCase):
                                     "REQUIRED_SCOPE",
                                 ],
                                 "reason": "Resolve the Route fact before general exploration.",
-                            },
-                        },
-                        {
-                            "question": "Inspect a lower-priority peer.",
-                            "tool": "read_file",
-                            "args": {
-                                "path": "src/peer.ts",
-                                "reason": "General exploration.",
                             },
                         },
                     ],

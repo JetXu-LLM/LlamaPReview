@@ -297,7 +297,7 @@ class _Pull:
             commit_id=kwargs["commit"].sha,
             body=kwargs["body"],
             user=SimpleNamespace(login="llamapreview[bot]"),
-            submitted_at=NOW,
+            submitted_at=datetime.now(timezone.utc).replace(microsecond=0),
             state="COMMENTED",
             raw_data={
                 "comments": [

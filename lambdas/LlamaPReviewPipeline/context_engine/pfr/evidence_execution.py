@@ -564,6 +564,48 @@ def _read_step_can_expand_evidence(state, args: Dict[str, Any]) -> bool:
         )
     return bool(backend_full_file_fetched)
 
+def _planned_read_priority(state, args: Dict[str, Any]) -> int:
+    """Return the stable Plan priority for a read request."""
+
+    path = str(args.get("path") or "").strip().strip("/")
+    mode = str(args.get("mode") or "content").strip() or "content"
+    requests = getattr(state, "planned_read_requests", []) or []
+    for index, request in enumerate(requests):
+        if (
+            str(request.get("path") or "").strip().strip("/") == path
+            and (str(request.get("mode") or "content").strip() or "content")
+            == mode
+        ):
+            return index
+    return len(requests)
+
+def _terminal_read_rescue_index(state, steps: List[Dict[str, Any]]) -> Optional[int]:
+    """Choose one eligible rescue by Plan priority, then remaining order."""
+
+    candidates: List[Tuple[int, int]] = []
+    for index, step in enumerate(steps):
+        if step.get("tool") != "read_file":
+            continue
+        args = step.get("args") or {}
+        path = str(args.get("path") or "").strip()
+        exact_path_rescue = (
+            str(args.get("mode") or "content") == "exact_path_existence"
+            and state.repo_inventory is not None
+            and (
+                state.repo_inventory.exact_path_state(path) in {"present", "absent"}
+                or state.repo_inventory.can_direct_probe(path)
+            )
+        )
+        if (
+            path
+            and (path in state.accessible_files or exact_path_rescue)
+            and _read_step_can_expand_evidence(state, args)
+        ):
+            candidates.append((_planned_read_priority(state, args), index))
+    if not candidates:
+        return None
+    return min(candidates)[1]
+
 def _prioritize_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def priority(step: Dict[str, Any]) -> int:
         if (
@@ -647,36 +689,26 @@ def _execute_steps(
     for index, step in enumerate(steps):
         if _soft_budget_reached(executor.state):
             _mark_soft_budget_exhausted(executor.state)
-            args = step.get("args") or {}
-            path = str(args.get("path") or "").strip()
-            exact_path_rescue = (
-                str(args.get("mode") or "content") == "exact_path_existence"
-                and executor.state.repo_inventory is not None
-                and (
-                    executor.state.repo_inventory.exact_path_state(path)
-                    in {"present", "absent"}
-                    or executor.state.repo_inventory.can_direct_probe(path)
-                )
+            remaining_steps = list(steps[index:])
+            rescue_index = (
+                _terminal_read_rescue_index(executor.state, remaining_steps)
+                if terminal_read_rescue > 0
+                else None
             )
-            if (
-                terminal_read_rescue > 0
-                and step.get("tool") == "read_file"
-                and path
-                and (
-                    path in executor.state.accessible_files
-                    or exact_path_rescue
-                )
-                and _read_step_can_expand_evidence(executor.state, args)
-            ):
-                question_id = _ensure_question_id(step, executor.state)
+            if rescue_index is not None:
+                rescue_step = remaining_steps.pop(rescue_index)
+                args = rescue_step.get("args") or {}
+                question_id = _ensure_question_id(rescue_step, executor.state)
                 executor.execute(
-                    _tool_call(step["tool"], args, step.get("id") or step["tool"]),
+                    _tool_call(
+                        rescue_step["tool"],
+                        args,
+                        rescue_step.get("id") or rescue_step["tool"],
+                    ),
                     question_id=question_id,
                 )
-                terminal_read_rescue -= 1
-                continue
             if record_skipped_verification:
-                _record_budget_skipped_for_steps(executor.state, steps[index:])
+                _record_budget_skipped_for_steps(executor.state, remaining_steps)
             break
         question_id = _ensure_question_id(step, executor.state)
         executor.execute(

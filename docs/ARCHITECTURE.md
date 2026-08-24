@@ -124,10 +124,12 @@ budget cannot erase it. If the first bounded read of a priority fact exposes
 only part of the deciding implementation, Reconcile may broaden the symbol
 slice on that same cached exact-head file. The existing one-read soft-budget
 rescue treats that broader slice as new evidence scope, without another
-repository fetch or a larger question, round, or token budget. The evidence
-ledger records each question, observation, and resolution; qualification can
-audit whether an established fact reached Deep without moving that audit into
-runtime judgment.
+repository fetch or a larger question, round, or token budget. If Reconcile
+serializes eligible follow-ups in a different order, that sole rescue remains
+bound to the earliest matching Plan read rather than the first serialized
+follow-up. The evidence ledger records each question, observation, and
+resolution; qualification can audit whether an established fact reached Deep
+without moving that audit into runtime judgment.
 
 ### Exactly-once publication
 
