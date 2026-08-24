@@ -48,6 +48,10 @@ do not appear as project versions.
   without another repository fetch. The rescue remains bound to the earliest
   matching Plan read even if Reconcile serializes lower-priority follow-ups
   first.
+- Exact symbol reads now recognize exported asynchronous TypeScript functions
+  and exported constants as their own definitions even when the installed SDK's
+  diff-context hints do not. A requested wrapper can no longer be silently
+  attributed to an earlier helper and returned without its own body.
 - Removed the category-level contradiction that made an otherwise valid,
   evidence-backed blocking `test-gap` fail deterministic Projection.
 

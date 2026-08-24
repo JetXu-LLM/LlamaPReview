@@ -1,8 +1,10 @@
 import json
 import logging
+import re
+import sys
 import time
 import unittest
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 from tests.unit.fakes import ensure_repo_root_on_path, install_fake_requests_module, set_default_env
@@ -13,7 +15,10 @@ install_fake_requests_module()
 
 from lambdas.LlamaPReviewPipeline.context_engine.state import CollectionState
 from lambdas.LlamaPReviewPipeline.context_engine.assembler import assemble_context, context_meta
-from lambdas.LlamaPReviewPipeline.context_engine.code_extractor import extract_diff_entities
+from lambdas.LlamaPReviewPipeline.context_engine.code_extractor import (
+    CodeContextExtractor,
+    extract_diff_entities,
+)
 from lambdas.LlamaPReviewPipeline.context_engine.evidence import (
     EvidenceLedger,
     stable_id,
@@ -113,6 +118,46 @@ def _pfr_pr_content():
 
 
 class TestContextEnginePipeline(unittest.TestCase):
+    def test_symbol_slice_honors_exported_async_typescript_definition(self):
+        content = """\
+export const REQUIRED_SCOPE = 'scope'
+async function mintToken() {
+  return null
+}
+
+export async function getToken(scope: string = REQUIRED_SCOPE) {
+  try {
+    return await mintToken()
+  } catch {
+    return null
+  }
+}
+"""
+        sdk_package = ModuleType("llama_github")
+        sdk_utils = ModuleType("llama_github.utils")
+        sdk_utils.DiffGenerator = SimpleNamespace(
+            _FUNC_CONTEXT_PATTERNS=[re.compile(r"^\s*(?:def|class)\s+")]
+        )
+        with patch.dict(
+            sys.modules,
+            {
+                "llama_github": sdk_package,
+                "llama_github.utils": sdk_utils,
+            },
+        ):
+            extractor = CodeContextExtractor()
+        block, start, end = extractor.extract_enclosing_block(
+            content,
+            5,
+            "getToken",
+        )
+
+        self.assertEqual(start, 6)
+        self.assertEqual(end, 12)
+        self.assertTrue(block.startswith("export async function getToken"))
+        self.assertIn("catch", block)
+        self.assertNotIn("async function mintToken", block)
+
     def test_tools_schema_has_exact_four_tools(self):
         names = [tool["function"]["name"] for tool in TOOLS]
         self.assertEqual(names, ["search_code", "read_file", "list_dir", "finish_context"])

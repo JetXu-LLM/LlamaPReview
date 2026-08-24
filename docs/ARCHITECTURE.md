@@ -131,6 +131,12 @@ follow-up. The evidence ledger records each question, observation, and
 resolution; qualification can audit whether an established fact reached Deep
 without moving that audit into runtime judgment.
 
+Literal symbol reads use runtime-owned declaration recognition in addition to
+the SDK's diff-context hints. The bounded slice therefore starts at the exact
+exported function, constant, class, or other supported declaration that was
+requested, rather than inheriting the nearest earlier definition merely because
+the dependency's context patterns do not recognize that declaration form.
+
 ### Exactly-once publication
 
 Before a GitHub write, the Pipeline stores an immutable publication candidate and an owner-bound intent. The candidate binds an explicit publication kind—ordinary review, lifecycle cancellation, or post-merge follow-up—to the exact head and required lifecycle disposition. The Pipeline revalidates that disposition and the structurally reported lock state immediately before dispatch. A prepared, undispatched lifecycle intent that becomes locked is terminalized as unavailable with zero GitHub write; a dispatching intent is still reconciled because the write outcome may already exist. After dispatch the Pipeline reconciles the payload digest, bot identity, exact commit, and returned GitHub identifiers. Retries reuse the durable candidate or receipt; they do not regenerate and blindly post a second review or fall back to an issue comment.
