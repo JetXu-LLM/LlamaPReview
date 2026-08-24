@@ -117,9 +117,14 @@ acceptance criteria, then the highest-consequence locally answerable Route
 fact, and then general exploration. The executor preserves that semantic order
 across read, search, and directory tools. The sole deterministic exception is
 the existing reserved removed-symbol check, which remains first so a soft time
-budget cannot erase it. The evidence ledger records each question, observation,
-and resolution; qualification can audit whether an established fact reached
-Deep without moving that audit into runtime judgment.
+budget cannot erase it. If the first bounded read of a priority fact exposes
+only part of the deciding implementation, Reconcile may broaden the symbol
+slice on that same cached exact-head file. The existing one-read soft-budget
+rescue treats that broader slice as new evidence scope, without another
+repository fetch or a larger question, round, or token budget. The evidence
+ledger records each question, observation, and resolution; qualification can
+audit whether an established fact reached Deep without moving that audit into
+runtime judgment.
 
 ### Exactly-once publication
 

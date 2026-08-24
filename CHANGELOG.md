@@ -39,6 +39,10 @@ do not appear as project versions.
 - Conditional clear reviews retain their model-owned code rationale before a
   separate exact-head CI-pending paragraph. Pending, missing, or unrelated CI
   no longer replaces that rationale or mechanically changes the verdict.
+- A priority PFR follow-up can now broaden an already-read file's bounded
+  symbol slice under the existing one-read soft-budget rescue. A prior slice
+  no longer makes the whole path look complete, and cached source is reused
+  without another repository fetch.
 - Removed the category-level contradiction that made an otherwise valid,
   evidence-backed blocking `test-gap` fail deterministic Projection.
 

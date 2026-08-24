@@ -506,6 +506,64 @@ def _record_budget_skipped_for_steps(state, steps: List[Dict[str, Any]]) -> None
     for step in steps:
         _record_budget_skipped_verification(state, step)
 
+def _read_step_can_expand_evidence(state, args: Dict[str, Any]) -> bool:
+    """Return whether a bounded read can add scope beyond earlier evidence.
+
+    ``read_success_paths`` proves that some content from a path was observed;
+    it does not prove that every requested symbol in that file was observed.
+    Reconcile may legitimately broaden an initial symbol slice after learning
+    that the deciding implementation is still missing.  Permit the one
+    existing soft-budget rescue for that broader request while rejecting an
+    exact repeat or a request already covered by a full-file observation.
+    """
+
+    path = str(args.get("path") or "").strip().strip("/")
+    mode = str(args.get("mode") or "content")
+    if not path or mode != "content":
+        return path not in state.read_success_paths
+    if path not in state.read_success_paths:
+        return True
+
+    prior_symbols: set[str] = set()
+    backend_full_file_fetched = False
+    full_file_observed = False
+    for event in state.tool_events:
+        if event.get("tool") != "read_file" or event.get("outcome") != "hit":
+            continue
+        prior_args = event.get("args") if isinstance(event.get("args"), dict) else {}
+        prior_path = str(prior_args.get("path") or "").strip().strip("/")
+        prior_mode = str(prior_args.get("mode") or "content")
+        if prior_path != path or prior_mode != "content":
+            continue
+        metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+        backend_full_file_fetched = bool(
+            backend_full_file_fetched
+            or metadata.get("backend_full_file_fetched") is True
+        )
+        full_file_observed = bool(
+            full_file_observed
+            or metadata.get("coverage_type") == "full_file"
+        )
+        prior_symbols.update(
+            str(symbol).strip()
+            for symbol in prior_args.get("symbols") or []
+            if isinstance(symbol, str) and symbol.strip()
+        )
+
+    if full_file_observed:
+        return False
+    requested_symbols = {
+        str(symbol).strip()
+        for symbol in args.get("symbols") or []
+        if isinstance(symbol, str) and symbol.strip()
+    }
+    if requested_symbols:
+        return bool(
+            isinstance((state.source_text_cache.get(path) or {}).get("content"), str)
+            and not requested_symbols.issubset(prior_symbols)
+        )
+    return bool(backend_full_file_fetched)
+
 def _prioritize_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def priority(step: Dict[str, Any]) -> int:
         if (
@@ -608,7 +666,7 @@ def _execute_steps(
                     path in executor.state.accessible_files
                     or exact_path_rescue
                 )
-                and path not in executor.state.read_success_paths
+                and _read_step_can_expand_evidence(executor.state, args)
             ):
                 question_id = _ensure_question_id(step, executor.state)
                 executor.execute(

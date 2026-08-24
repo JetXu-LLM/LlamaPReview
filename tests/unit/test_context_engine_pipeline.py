@@ -2,6 +2,7 @@ import json
 import logging
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tests.unit.fakes import ensure_repo_root_on_path, install_fake_requests_module, set_default_env
@@ -22,6 +23,9 @@ from lambdas.LlamaPReviewPipeline.context_engine.pfr import (
     _ordered_steps,
     _terminal_evidence_read,
     collect_context_pfr,
+)
+from lambdas.LlamaPReviewPipeline.context_engine.pfr.evidence_execution import (
+    _read_step_can_expand_evidence,
 )
 from lambdas.LlamaPReviewPipeline.context_engine.search_rag import (
     postprocess_search_args,
@@ -1442,6 +1446,176 @@ class TestContextEnginePipeline(unittest.TestCase):
             meta["pfr_reconcile"]["summary"],
         )
         self.assertEqual(meta["pfr_post_terminal_tool_call_count"], 0)
+
+    def test_pfr_soft_budget_rescues_broader_slice_from_already_read_path(self):
+        class SlowRuntime(_Runtime):
+            def get_file_content(self, repo, path, *, sha=None):
+                time.sleep(0.05)
+                return (
+                    "export const REQUIRED_SCOPE = 'scope'\n"
+                    "async function mintToken() { return null }\n"
+                    "export async function getToken() { return mintToken() }\n"
+                )
+
+        runtime = SlowRuntime()
+        client = _FakePfrClient(
+            [
+                {
+                    "complexity": "normal",
+                    "pr_type": "code",
+                    "risk_domains": ["api"],
+                    "verification_plan": [
+                        {
+                            "question": "Inspect the deciding token contract.",
+                            "why_it_matters": "It is Route's highest-consequence local fact.",
+                            "tool": "read_file",
+                            "args": {
+                                "path": "src/token.ts",
+                                "symbols": ["getToken", "REQUIRED_SCOPE"],
+                            },
+                        }
+                    ],
+                },
+                {
+                    "summary": "The wrapper body remains unresolved.",
+                    "answered": [],
+                    "unresolved_gaps": [
+                        {
+                            "question_id": "q_missing",
+                            "claim": "The helper's failure behavior is unresolved.",
+                            "how_to_check": "Read the helper body.",
+                        }
+                    ],
+                    "followups": [
+                        {
+                            "question": "Continue the deciding token-contract read.",
+                            "tool": "read_file",
+                            "args": {
+                                "path": "src/token.ts",
+                                "symbols": [
+                                    "getToken",
+                                    "mintToken",
+                                    "REQUIRED_SCOPE",
+                                ],
+                                "reason": "Resolve the Route fact before general exploration.",
+                            },
+                        },
+                        {
+                            "question": "Inspect a lower-priority peer.",
+                            "tool": "read_file",
+                            "args": {
+                                "path": "src/peer.ts",
+                                "reason": "General exploration.",
+                            },
+                        },
+                    ],
+                    "complete": False,
+                },
+                {
+                    "summary": "The broadened exact-head slice was consumed.",
+                    "answered": [],
+                    "unresolved_gaps": [],
+                    "followups": [],
+                    "complete": True,
+                },
+            ]
+        )
+
+        from lambdas.LlamaPReviewPipeline.context_engine import initialization
+
+        original = initialization.get_repo_structure_for_llm
+        initialization.get_repo_structure_for_llm = lambda *_args, **kwargs: _repo_tree(
+            "src/token.ts", "src/peer.ts"
+        )
+        try:
+            context, meta = collect_context_pfr(
+                runtime=runtime,
+                github_token="token",
+                repo_full_name="owner/repo",
+                pr_content=_pfr_pr_content(),
+                pr_details="# PR\n",
+                head_sha="abcdef123456",
+                default_branch="main",
+                client=client,
+                soft_time_budget=0.02,
+            )
+        finally:
+            initialization.get_repo_structure_for_llm = original
+
+        token_reads = [
+            event
+            for event in meta["evidence_ledger"]["evidence_events"]
+            if event["tool"] == "read_file"
+            and event["args"].get("path") == "src/token.ts"
+        ]
+        self.assertEqual(len(token_reads), 2)
+        self.assertTrue(token_reads[0]["backend_attempted"])
+        self.assertEqual(token_reads[-1]["outcome"], "hit")
+        self.assertFalse(token_reads[-1]["backend_attempted"])
+        self.assertIn("mintToken", token_reads[-1]["args"]["symbols"])
+        self.assertNotIn("src/token.ts", meta["budget_skipped_verification_paths"])
+        self.assertIn("src/peer.ts", meta["budget_skipped_verification_paths"])
+        self.assertIn("mintToken", context)
+
+    def test_soft_budget_read_rescue_requires_new_evidence_scope(self):
+        state = SimpleNamespace(
+            read_success_paths={"src/token.ts"},
+            source_text_cache={"src/token.ts": {"content": "token source"}},
+            tool_events=[
+                {
+                    "tool": "read_file",
+                    "outcome": "hit",
+                    "args": {
+                        "path": "src/token.ts",
+                        "mode": "content",
+                        "symbols": ["getToken", "REQUIRED_SCOPE"],
+                    },
+                    "metadata": {
+                        "coverage_type": "file_slice",
+                        "backend_full_file_fetched": True,
+                    },
+                }
+            ],
+        )
+
+        self.assertFalse(
+            _read_step_can_expand_evidence(
+                state,
+                {
+                    "path": "src/token.ts",
+                    "mode": "content",
+                    "symbols": ["getToken"],
+                },
+            )
+        )
+        self.assertTrue(
+            _read_step_can_expand_evidence(
+                state,
+                {
+                    "path": "src/token.ts",
+                    "mode": "content",
+                    "symbols": ["getToken", "mintToken"],
+                },
+            )
+        )
+        self.assertTrue(
+            _read_step_can_expand_evidence(
+                state,
+                {"path": "src/token.ts", "mode": "content"},
+            )
+        )
+
+        state.tool_events[0]["metadata"]["coverage_type"] = "full_file"
+        self.assertFalse(
+            _read_step_can_expand_evidence(
+                state,
+                {
+                    "path": "src/token.ts",
+                    "mode": "content",
+                    "symbols": ["mintToken"],
+                },
+            )
+        )
 
     def test_pfr_complete_no_hit_keeps_first_reconcile_terminal(self):
         runtime = _Runtime()
