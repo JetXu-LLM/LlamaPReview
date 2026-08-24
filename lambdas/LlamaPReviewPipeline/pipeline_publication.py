@@ -97,6 +97,7 @@ def _require_publication_disposition(
     runtime: Any,
     *,
     stage: str,
+    require_unlocked: bool = False,
 ) -> None:
     disposition = current_pr_disposition(
         runtime,
@@ -131,6 +132,20 @@ def _require_publication_disposition(
             current_state=disposition.current_state,
             merged=disposition.merged,
             stage=stage,
+        )
+    if require_unlocked and disposition.locked is not False:
+        if disposition.locked is None:
+            raise HeadVerificationUnavailable(
+                "GitHub did not return a structural lock state",
+                stage=stage,
+            )
+        raise PRLifecycleSuperseded(
+            context.head_sha,
+            disposition.actual_head_sha,
+            current_state=disposition.current_state,
+            merged=disposition.merged,
+            stage=stage,
+            superseded_kind="publication_unavailable_locked",
         )
     if (
         context.publication_kind
@@ -208,6 +223,7 @@ def make_pre_publish_check(
     *,
     table=None,
     check_duplicate: bool = True,
+    require_unlocked: bool = False,
 ):
     """Return the final exact-state/head check run before a live write."""
 
@@ -232,6 +248,7 @@ def make_pre_publish_check(
             context,
             runtime,
             stage="publication.pre_publish_disposition",
+            require_unlocked=require_unlocked,
         )
         latest_pr_content, _ = fetch_pr_details(
             runtime,
@@ -523,6 +540,10 @@ def recover_pending(
             runtime,
             table=table,
             check_duplicate=False,
+            require_unlocked=(
+                (candidate.get("review_artifact") or {}).get("review_mode")
+                == "failed"
+            ),
         ),
         post_write_observation=lambda candidate: (
             post_publication_observation(
@@ -593,6 +614,9 @@ def commit_prepared(
                 runtime,
                 table=table,
                 check_duplicate=False,
+                require_unlocked=(
+                    prepared.artifact.get("review_mode") == "failed"
+                ),
             ),
             phase_claim=context.phase_claim,
             post_write_observation=lambda candidate: (
@@ -628,6 +652,7 @@ def commit_prepared(
         context,
         runtime,
         stage=pre_persist_stage,
+        require_unlocked=(prepared.artifact.get("review_mode") == "failed"),
     )
     if context.publication_kind != "ordinary_review":
         latest = persistence.get_item(

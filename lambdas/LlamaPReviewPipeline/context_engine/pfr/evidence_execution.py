@@ -506,19 +506,120 @@ def _record_budget_skipped_for_steps(state, steps: List[Dict[str, Any]]) -> None
     for step in steps:
         _record_budget_skipped_verification(state, step)
 
-def _prioritize_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    order = {"read_file": 0, "search_code": 1, "list_dir": 2}
+def _read_step_can_expand_evidence(state, args: Dict[str, Any]) -> bool:
+    """Return whether a bounded read can add scope beyond earlier evidence.
 
+    ``read_success_paths`` proves that some content from a path was observed;
+    it does not prove that every requested symbol in that file was observed.
+    Reconcile may legitimately broaden an initial symbol slice after learning
+    that the deciding implementation is still missing.  Permit the one
+    existing soft-budget rescue for that broader request while rejecting an
+    exact repeat or a request already covered by a full-file observation.
+    """
+
+    path = str(args.get("path") or "").strip().strip("/")
+    mode = str(args.get("mode") or "content")
+    if not path or mode != "content":
+        return path not in state.read_success_paths
+    if path not in state.read_success_paths:
+        return True
+
+    prior_symbols: set[str] = set()
+    backend_full_file_fetched = False
+    full_file_observed = False
+    for event in state.tool_events:
+        if event.get("tool") != "read_file" or event.get("outcome") != "hit":
+            continue
+        prior_args = event.get("args") if isinstance(event.get("args"), dict) else {}
+        prior_path = str(prior_args.get("path") or "").strip().strip("/")
+        prior_mode = str(prior_args.get("mode") or "content")
+        if prior_path != path or prior_mode != "content":
+            continue
+        metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+        backend_full_file_fetched = bool(
+            backend_full_file_fetched
+            or metadata.get("backend_full_file_fetched") is True
+        )
+        full_file_observed = bool(
+            full_file_observed
+            or metadata.get("coverage_type") == "full_file"
+        )
+        prior_symbols.update(
+            str(symbol).strip()
+            for symbol in prior_args.get("symbols") or []
+            if isinstance(symbol, str) and symbol.strip()
+        )
+
+    if full_file_observed:
+        return False
+    requested_symbols = {
+        str(symbol).strip()
+        for symbol in args.get("symbols") or []
+        if isinstance(symbol, str) and symbol.strip()
+    }
+    if requested_symbols:
+        return bool(
+            isinstance((state.source_text_cache.get(path) or {}).get("content"), str)
+            and not requested_symbols.issubset(prior_symbols)
+        )
+    return bool(backend_full_file_fetched)
+
+def _planned_read_priority(state, args: Dict[str, Any]) -> int:
+    """Return the stable Plan priority for a read request."""
+
+    path = str(args.get("path") or "").strip().strip("/")
+    mode = str(args.get("mode") or "content").strip() or "content"
+    requests = getattr(state, "planned_read_requests", []) or []
+    for index, request in enumerate(requests):
+        if (
+            str(request.get("path") or "").strip().strip("/") == path
+            and (str(request.get("mode") or "content").strip() or "content")
+            == mode
+        ):
+            return index
+    return len(requests)
+
+def _terminal_read_rescue_index(state, steps: List[Dict[str, Any]]) -> Optional[int]:
+    """Choose one eligible rescue by Plan priority, then remaining order."""
+
+    candidates: List[Tuple[int, int]] = []
+    for index, step in enumerate(steps):
+        if step.get("tool") != "read_file":
+            continue
+        args = step.get("args") or {}
+        path = str(args.get("path") or "").strip()
+        exact_path_rescue = (
+            str(args.get("mode") or "content") == "exact_path_existence"
+            and state.repo_inventory is not None
+            and (
+                state.repo_inventory.exact_path_state(path) in {"present", "absent"}
+                or state.repo_inventory.can_direct_probe(path)
+            )
+        )
+        if (
+            path
+            and (path in state.accessible_files or exact_path_rescue)
+            and _read_step_can_expand_evidence(state, args)
+        ):
+            candidates.append((_planned_read_priority(state, args), index))
+    if not candidates:
+        return None
+    return min(candidates)[1]
+
+def _prioritize_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def priority(step: Dict[str, Any]) -> int:
         if (
             step.get("tool") == "search_code"
             and step.get("_priority_class") == "diff_removed_symbol_floor"
         ):
             # The one reserved deleted-symbol check must execute, not merely
-            # survive plan truncation.  Put it before the read block so a soft
-            # time budget cannot consistently skip it after several slow reads.
-            return -1
-        return order.get(step.get("tool"), 9)
+            # survive plan truncation. Put it first so a soft time budget
+            # cannot consistently skip it after several slow reads.
+            return 0
+        # Preserve the model's semantic question order for every ordinary
+        # step. Reordering by tool type would undo the planner's explicit
+        # acceptance-criteria and highest-consequence priorities.
+        return 1
 
     return sorted(
         enumerate(steps), key=lambda item: (priority(item[1]), item[0])
@@ -567,8 +668,8 @@ def _cap_planned_steps(
     ):
         reserved = removal_steps[0]
         if len(kept) >= max_steps:
-            # Replace the lowest-priority tail item while retaining the normal
-            # read-first execution order of all surviving steps.
+            # Replace the lowest-priority tail item while retaining the
+            # planner's semantic order for every surviving ordinary step.
             kept.pop()
         kept.append(reserved)
         kept = [step for step in steps if step in kept]
@@ -588,36 +689,26 @@ def _execute_steps(
     for index, step in enumerate(steps):
         if _soft_budget_reached(executor.state):
             _mark_soft_budget_exhausted(executor.state)
-            args = step.get("args") or {}
-            path = str(args.get("path") or "").strip()
-            exact_path_rescue = (
-                str(args.get("mode") or "content") == "exact_path_existence"
-                and executor.state.repo_inventory is not None
-                and (
-                    executor.state.repo_inventory.exact_path_state(path)
-                    in {"present", "absent"}
-                    or executor.state.repo_inventory.can_direct_probe(path)
-                )
+            remaining_steps = list(steps[index:])
+            rescue_index = (
+                _terminal_read_rescue_index(executor.state, remaining_steps)
+                if terminal_read_rescue > 0
+                else None
             )
-            if (
-                terminal_read_rescue > 0
-                and step.get("tool") == "read_file"
-                and path
-                and (
-                    path in executor.state.accessible_files
-                    or exact_path_rescue
-                )
-                and path not in executor.state.read_success_paths
-            ):
-                question_id = _ensure_question_id(step, executor.state)
+            if rescue_index is not None:
+                rescue_step = remaining_steps.pop(rescue_index)
+                args = rescue_step.get("args") or {}
+                question_id = _ensure_question_id(rescue_step, executor.state)
                 executor.execute(
-                    _tool_call(step["tool"], args, step.get("id") or step["tool"]),
+                    _tool_call(
+                        rescue_step["tool"],
+                        args,
+                        rescue_step.get("id") or rescue_step["tool"],
+                    ),
                     question_id=question_id,
                 )
-                terminal_read_rescue -= 1
-                continue
             if record_skipped_verification:
-                _record_budget_skipped_for_steps(executor.state, steps[index:])
+                _record_budget_skipped_for_steps(executor.state, remaining_steps)
             break
         question_id = _ensure_question_id(step, executor.state)
         executor.execute(

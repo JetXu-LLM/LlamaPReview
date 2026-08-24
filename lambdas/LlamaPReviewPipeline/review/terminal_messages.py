@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+
+REVIEW_UNAVAILABLE_NOTICE = """### LlamaPReview — Review unavailable
+
+LlamaPReview couldn't complete a reliable review of this pull request at this commit. No recommendation was made about whether it should be merged."""
+
 def skipped_review_notice(reason: str) -> str:
     """Explain a policy skip without implying an engineering judgment."""
 

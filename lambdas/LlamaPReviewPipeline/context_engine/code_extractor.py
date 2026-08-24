@@ -12,29 +12,43 @@ logger = logging.getLogger(__name__)
 
 class CodeContextExtractor:
     def __init__(self):
+        local_patterns = [
+            re.compile(r"^\s*def\s+\w+"),
+            re.compile(r"^\s*async\s+def\s+\w+"),
+            re.compile(r"^\s*class\s+\w+"),
+            re.compile(r"^\s*function\s+\w+"),
+            re.compile(r"^\s*const\s+\w+\s*="),
+            re.compile(
+                r"^\s*export\s+(?:default\s+)?"
+                r"(?:(?:async\s+)?function|const|class)\s+\w+"
+            ),
+            re.compile(r"^\s*interface\s+\w+"),
+            re.compile(r"^\s*type\s+\w+\s*="),
+            re.compile(r"^\s*enum\s+\w+"),
+            re.compile(
+                r"^\s*(?:public|private|protected|internal)\s+"
+                r"(?:static\s+)?(?:async\s+)?[\w<>\[\]]+\s+\w+\s*\("
+            ),
+            re.compile(r"^\s*func\s+(?:\(\w+\s+\*?\w+\)\s+)?\w+"),
+            re.compile(r"^\s*type\s+\w+\s+(?:struct|interface)"),
+            re.compile(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+\w+"),
+            re.compile(r"^\s*(?:pub\s+)?(?:struct|enum|trait)\s+\w+"),
+            re.compile(r"^\s*impl\s+"),
+            re.compile(
+                r"^\s*(?:public|private|internal|fileprivate)?\s*fun\s+\w+"
+            ),
+        ]
         try:
             from llama_github.utils import DiffGenerator
 
-            self._patterns = DiffGenerator._FUNC_CONTEXT_PATTERNS
+            sdk_patterns = list(DiffGenerator._FUNC_CONTEXT_PATTERNS)
         except Exception:
-            self._patterns = [
-                re.compile(r"^\s*def\s+\w+"),
-                re.compile(r"^\s*async\s+def\s+\w+"),
-                re.compile(r"^\s*class\s+\w+"),
-                re.compile(r"^\s*function\s+\w+"),
-                re.compile(r"^\s*const\s+\w+\s*="),
-                re.compile(r"^\s*export\s+(?:default\s+)?(?:function|const|class)\s+\w+"),
-                re.compile(r"^\s*interface\s+\w+"),
-                re.compile(r"^\s*type\s+\w+\s*="),
-                re.compile(r"^\s*enum\s+\w+"),
-                re.compile(r"^\s*(?:public|private|protected|internal)\s+(?:static\s+)?(?:async\s+)?[\w<>\[\]]+\s+\w+\s*\("),
-                re.compile(r"^\s*func\s+(?:\(\w+\s+\*?\w+\)\s+)?\w+"),
-                re.compile(r"^\s*type\s+\w+\s+(?:struct|interface)"),
-                re.compile(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+\w+"),
-                re.compile(r"^\s*(?:pub\s+)?(?:struct|enum|trait)\s+\w+"),
-                re.compile(r"^\s*impl\s+"),
-                re.compile(r"^\s*(?:public|private|internal|fileprivate)?\s*fun\s+\w+"),
-            ]
+            sdk_patterns = []
+        # The SDK patterns are useful diff-context hints, but they intentionally
+        # do not cover every declaration form. Keep runtime-owned declaration
+        # patterns active even when the SDK is installed so a literal symbol
+        # request cannot be attributed to an earlier definition.
+        self._patterns = [*sdk_patterns, *local_patterns]
 
     def _is_definition_start_line(self, line: str) -> bool:
         stripped = line.strip()
@@ -176,7 +190,8 @@ RESERVED_KEYWORDS = {
 IDENTIFIER_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 COMMENT_LINE_PREFIXES = ("#", "//", "/*", "*", "<!--", "--")
 STRUCTURAL_SYMBOL_PATTERN = re.compile(
-    r"^\s*(?:(?:export|public|private|protected|internal|abstract|sealed|static)\s+)*"
+    r"^\s*(?:(?:export|public|private|protected|internal|abstract|sealed|static|"
+    r"pub(?:\([^)]*\))?)\s+)*"
     r"(?:class|interface|struct|enum|type)\s+([A-Za-z_][A-Za-z0-9_]*)"
 )
 

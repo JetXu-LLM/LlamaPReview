@@ -29,6 +29,12 @@ verified GitHub webhook
 | Persistence / publication | Durable phase ownership, exact-head recovery, intent and receipt, exactly-once external effects | Workflow sequencing or model decisions |
 | Orchestrator | Deadlines, sequencing, and terminal flow | A second copy of any capability above |
 
+Deep begins its handoff with three model-owned commitments: pull-request
+objective, objective closure (`supported`, `contradicted`, or `unresolved`),
+and merge posture. Final preserves that opening instead of inferring a new
+verdict from later ordinary unknowns. These are prompt-level judgments, not a
+new public schema field or a code parser for natural language.
+
 ## Trust boundaries and invariants
 
 ### Private hosted events
@@ -99,9 +105,53 @@ treated as a provider failure, or redirected to an issue comment.
 
 The model owns engineering judgment. Code owns bounded inputs, sensitive-path exclusions, schema validation, sanitation, output limits, placement, payload construction, durable state, and publication identity. If one optional inline placement or Mermaid surface is invalid, deterministic projection may degrade that surface locally without inventing a new judgment.
 
+Deep evaluates author-stated acceptance outcomes separately. A claim that the
+PR repairs a preexisting failure across several devices, actors, branches, or
+surfaces is closed only when exact evidence shows the PR-created delta reaches
+each decisive surface, or proves an unchanged surface already met the claimed
+outcome. Merely finding a coherent unchanged path cannot prove that the PR
+fixed it. Objective closure supplements rather than replaces raw-delta defect
+discovery: independently evidenced high-consequence failures remain separate
+findings even when an objective-closure contradiction already blocks merge.
+Only findings with the same causal root are clustered.
+
+Within PFR's existing bounds, the planner asks first about explicit author
+acceptance criteria, then the highest-consequence locally answerable Route
+fact, and then general exploration. The executor preserves that semantic order
+across read, search, and directory tools. The sole deterministic exception is
+the existing reserved removed-symbol check, which remains first so a soft time
+budget cannot erase it. If the first bounded read of a priority fact exposes
+only part of the deciding implementation, Reconcile may broaden the symbol
+slice on that same cached exact-head file. The existing one-read soft-budget
+rescue treats that broader slice as new evidence scope, without another
+repository fetch or a larger question, round, or token budget. If Reconcile
+serializes eligible follow-ups in a different order, that sole rescue remains
+bound to the earliest matching Plan read rather than the first serialized
+follow-up. The evidence ledger records each question, observation, and
+resolution; qualification can audit whether an established fact reached Deep
+without moving that audit into runtime judgment.
+
+Literal symbol reads use runtime-owned declaration recognition in addition to
+the SDK's diff-context hints. The bounded slice therefore starts at the exact
+exported function, constant, class, or other supported declaration that was
+requested, rather than inheriting the nearest earlier definition merely because
+the dependency's context patterns do not recognize that declaration form.
+
+Diff-derived removed-symbol coverage includes language visibility modifiers,
+including Rust `pub` and scoped `pub(...)` declarations. Its first removed
+symbol retains the existing code-owned search floor ahead of model-selected
+exploration; this is retrieval evidence, not a deterministic compile verdict.
+
 ### Exactly-once publication
 
 Before a GitHub write, the Pipeline stores an immutable publication candidate and an owner-bound intent. The candidate binds an explicit publication kind—ordinary review, lifecycle cancellation, or post-merge follow-up—to the exact head and required lifecycle disposition. The Pipeline revalidates that disposition and the structurally reported lock state immediately before dispatch. A prepared, undispatched lifecycle intent that becomes locked is terminalized as unavailable with zero GitHub write; a dispatching intent is still reconciled because the write outcome may already exist. After dispatch the Pipeline reconciles the payload digest, bot identity, exact commit, and returned GitHub identifiers. Retries reuse the durable candidate or receipt; they do not regenerate and blindly post a second review or fall back to an issue comment.
+
+The code-owned `Review unavailable` body is also an `ordinary_review`
+candidate. It enters this same transaction only after paid work and bounded
+generation retries, while the PR is proven open, unlocked, and on the same
+head. Its private artifact retains failure and accounting evidence but marks
+generation failed and quality unscoreable. No alternate publication kind,
+second Final call, or fallback write path exists.
 
 ### Accounting truth
 

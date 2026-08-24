@@ -201,9 +201,23 @@ def _template_artifact_lint(text: str) -> bool:
     return False
 
 
-def _is_mechanical_pass_fragment(value: str) -> bool:
-    """Recognize only Final's observed ``Check: Passes.`` fragment shape."""
+_MECHANICAL_PASS_PHRASES = (
+    "all checks passed",
+    "ci checks pass",
+    "ci pipeline passes",
+    "every completed gate passed",
+    "passed all test jobs",
+    "the build is green",
+    "the mutation check and all test matrices pass",
+)
 
+
+def _is_mechanical_pass_fragment(value: str) -> bool:
+    """Recognize only Final's observed mechanical pass fragment shapes."""
+
+    normalized = _text(value).rstrip(".!?").casefold()
+    if normalized in _MECHANICAL_PASS_PHRASES:
+        return True
     head, separator, result = _text(value).rpartition(":")
     return bool(
         separator
@@ -211,6 +225,22 @@ def _is_mechanical_pass_fragment(value: str) -> bool:
         and result.strip().rstrip(".!?").casefold()
         in {"pass", "passes", "passed"}
     )
+
+
+def _without_mechanical_pass_claim(value: str) -> str:
+    """Remove a contradictory CI-pass clause while retaining code rationale."""
+
+    cleaned = _text(value)
+    for phrase in _MECHANICAL_PASS_PHRASES:
+        cleaned = re.sub(
+            rf"(?:\s*[,;—-]?\s*(?:and|while|with)\s+)?{re.escape(phrase)}",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+    cleaned = re.sub(r"\s+([,;.!?])", r"\1", cleaned)
+    cleaned = re.sub(r"(?:,|;|—|-|\band\b)\s*$", "", cleaned).strip()
+    return cleaned
 
 
 def _ci_public_state(review: Dict[str, Any]) -> Dict[str, Any]:
@@ -305,6 +335,8 @@ def _highest_value_nonblocking_finding(
 def _clear_first_screen_lines(
     review: Dict[str, Any],
     model_sentence: str,
+    *,
+    suppress_mechanical_pass_claims: bool = False,
 ) -> Tuple[list[str], str]:
     """Compose the clear fold: causal proof, then retained-finding trace.
 
@@ -323,6 +355,8 @@ def _clear_first_screen_lines(
     lines: list[str] = []
     source = ""
     model_proof = _first_sentence(model_sentence)
+    if suppress_mechanical_pass_claims:
+        model_proof = _without_mechanical_pass_claim(model_proof)
     if _is_mechanical_pass_fragment(model_proof):
         model_proof = ""
     model_proof = _bounded_first_screen_explanation(model_proof)
@@ -538,21 +572,19 @@ def render_v3_markdown(review: Dict[str, Any]) -> str:
     fold_lines: list[str] = []
     clear_projection_source = ""
     if visible_verdict == "clear" and ci_unresolved:
-        fold_lines = [_ci_fact_sentence(ci_state)]
-        clear_projection_source = "structured_ci"
-        findings = [
-            item
-            for item in review.get("findings") or []
-            if isinstance(item, dict)
+        clear_lines, clear_projection_source = _clear_first_screen_lines(
+            review,
+            public_sentence,
+            suppress_mechanical_pass_claims=True,
+        )
+        # Keep the model-owned code rationale first. Exact-head CI is a
+        # separate second paragraph and never replaces or upgrades that
+        # judgment; any retained finding count follows both.
+        fold_lines = [
+            clear_lines[0],
+            _ci_fact_sentence(ci_state),
+            *clear_lines[1:],
         ]
-        if findings:
-            top = _highest_value_nonblocking_finding(review)
-            count = len(findings)
-            plural = "" if count == 1 else "s"
-            fold_lines.append(
-                f"{count} non-blocking finding{plural} retained — highest: "
-                f"{_text((top or {}).get('headline')).rstrip('.')}."
-            )
     elif visible_verdict == "clear":
         fold_lines, clear_projection_source = _clear_first_screen_lines(
             review,

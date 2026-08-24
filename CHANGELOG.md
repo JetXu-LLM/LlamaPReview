@@ -11,6 +11,54 @@ do not appear as project versions.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-24
+
+### Added
+
+- A short, code-owned `Review unavailable` native review when paid model work
+  completed but bounded retries still could not produce a reliable Final or
+  Projection. It is exact-head, idempotent, score-excluded, footer-free, and
+  suppressed for stale, ended, locked, quota, successor, and uncertain
+  provider-dispatch outcomes.
+### Changed
+
+- Deep now opens with the pull-request objective, objective closure, and merge
+  posture. Final must preserve those commitments, so an ordinary nondeciding
+  unknown cannot silently rewrite the verdict. Multi-surface repair claims are
+  closed only when exact evidence covers every decisive surface; an unchanged
+  path cannot be credited as repaired merely because it remains coherent.
+  Objective closure supplements raw-delta discovery rather than replacing an
+  independently evidenced compile, startup, runtime, security, or data-integrity
+  failure.
+- PFR spends its existing question, round, and token budgets on author-stated
+  acceptance criteria first, then the highest-consequence locally answerable
+  Route fact, and only then general exploration. Ordinary plan order is
+  preserved across tool types.
+- A verified `test-gap` may carry a blocking decision only when the overall
+  verdict is blocking and it names a concrete pre-merge owner action.
+
+### Fixed
+
+- Conditional clear reviews retain their model-owned code rationale before a
+  separate exact-head CI-pending paragraph. Pending, missing, or unrelated CI
+  no longer replaces that rationale or mechanically changes the verdict.
+- A priority PFR follow-up can now broaden an already-read file's bounded
+  symbol slice under the existing one-read soft-budget rescue. A prior slice
+  no longer makes the whole path look complete, and cached source is reused
+  without another repository fetch. The rescue remains bound to the earliest
+  matching Plan read even if Reconcile serializes lower-priority follow-ups
+  first.
+- Exact symbol reads now recognize exported asynchronous TypeScript functions
+  and exported constants as their own definitions even when the installed SDK's
+  diff-context hints do not. A requested wrapper can no longer be silently
+  attributed to an earlier helper and returned without its own body.
+- Removed-symbol extraction now recognizes public and scoped-public Rust
+  declarations. Deleting a `pub struct`, `pub(crate) type`, or equivalent
+  declaration therefore keeps its reserved exact usage search, so surviving
+  impls and constructors reach judgment as compile-risk evidence.
+- Removed the category-level contradiction that made an otherwise valid,
+  evidence-backed blocking `test-gap` fail deterministic Projection.
+
 ## [0.1.4] - 2026-08-22
 
 ### Added
@@ -126,7 +174,8 @@ do not appear as project versions.
 - Legacy Handler and Advanced Handler runtimes, rollout lists, shadow/canary
   routing, and private operational history from the public active product.
 
-[Unreleased]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.1...v0.1.2

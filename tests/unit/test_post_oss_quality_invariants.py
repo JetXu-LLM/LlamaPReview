@@ -242,6 +242,36 @@ class StructuredCIPresentationTests(unittest.TestCase):
         self.assertIn("outside this change", rendered)
         self.assertIn("Conditional code-review clear", rendered)
 
+    def test_conditional_clear_keeps_code_rationale_before_ci(self):
+        review = self._review("unresolved", {"pending": 1})
+        review["decision"]["public_sentence"] = (
+            "No review blocker found. The changed fallback preserves the "
+            "existing error contract."
+        )
+
+        rendered = render_v3_markdown(review)
+
+        rationale = "The changed fallback preserves the existing error contract."
+        ci_fact = "Exact-head CI remains unresolved"
+        self.assertLess(rendered.index(rationale), rendered.index(ci_fact))
+        self.assertIn("Conditional code-review clear", rendered)
+
+    def test_conditional_clear_removes_only_mixed_mechanical_ci_claim(self):
+        review = self._review("unresolved", {"failure": 1})
+        review["decision"]["public_sentence"] = (
+            "The changed fallback preserves the error contract, and all "
+            "checks passed."
+        )
+
+        rendered = render_v3_markdown(review)
+
+        self.assertIn("The changed fallback preserves the error contract.", rendered)
+        self.assertNotIn("all checks passed", rendered.casefold())
+        self.assertLess(
+            rendered.index("preserves the error contract"),
+            rendered.index("Exact-head CI remains unresolved"),
+        )
+
     def test_no_ci_surface_cannot_be_rendered_as_all_green(self):
         rendered = render_v3_markdown(
             self._review("not_observed", {}, retrieval="no_hit")

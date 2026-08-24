@@ -737,10 +737,7 @@ def validate_findings(state: V3ValidationState) -> None:
                 )
             )
         if finding.get("blocking") is True:
-            if finding.get("finding_type") in {
-                "test-gap",
-                "question",
-            }:
+            if finding.get("finding_type") == "question":
                 violations.append(
                     violation(
                         "cross_field_invariant",

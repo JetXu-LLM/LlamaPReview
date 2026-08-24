@@ -51,6 +51,7 @@ class PfrEvidenceContractTest(unittest.TestCase):
         provider_contract = "\n".join(
             (PLAN_METHOD_PROMPT, PLAN_PROMPT, RECONCILE_SYSTEM_PROMPT)
         ).casefold()
+        normalized_contract = " ".join(provider_contract.split())
 
         self.assertIn('"unresolved_gaps"', provider_contract)
         self.assertNotIn("material_unknowns", provider_contract)
@@ -61,6 +62,18 @@ class PfrEvidenceContractTest(unittest.TestCase):
         self.assertIn("callback payload shape", provider_contract)
         self.assertIn("returned lifecycle or control handle", provider_contract)
         self.assertIn("do not hand the owner a lookup", provider_contract)
+        self.assertIn(
+            "first verify concrete acceptance criteria explicitly stated",
+            normalized_contract,
+        )
+        self.assertIn(
+            "second verify the highest-consequence locally answerable fact",
+            normalized_contract,
+        )
+        self.assertIn(
+            "only then use remaining capacity for general exploration",
+            normalized_contract,
+        )
 
     def test_plan_uses_plain_questions_and_author_criteria(self):
         accepted, diagnostics = validate_verification_plan(

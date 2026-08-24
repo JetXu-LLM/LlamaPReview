@@ -233,6 +233,72 @@ def build_nonpublishable_result(
     )
 
 
+def build_failed_notice_result(
+    prepared: PreparedGitHubReview,
+    *,
+    nonpublishable: NonpublishableReviewArtifact,
+    run_id: str,
+    attempt: int,
+) -> PublishableReviewArtifact:
+    """Bind one code-owned unavailable notice to the failed private evidence.
+
+    The model result remains nonpublishable and score-excluded. Only the exact
+    deterministic notice becomes a GitHub publication candidate, through the
+    same immutable ordinary-review transaction used by a normal review.
+    """
+
+    artifact = deepcopy(nonpublishable.artifact)
+    artifact.update(
+        {
+            "main_comment": prepared.main_body,
+            "inline_comments": [],
+            "fallback_comments": [],
+            "head_sha": prepared.head_sha,
+            "computed_at": prepared.artifact.get("computed_at"),
+            "review_mode": "failed",
+            "review_generation_status": "failed",
+            "review_fallback_used": False,
+            "quality_scoreable": False,
+            "quality_exclusion_reasons": ["review_generation_failed"],
+            "run_id": run_id,
+            "pipeline_attempt": int(attempt),
+            "publication_kind": prepared.publication_kind,
+            "required_disposition": prepared.required_disposition,
+            "publication_status": "not_published",
+        }
+    )
+    terminal_attributes = {
+        **deepcopy(nonpublishable.terminal_attributes),
+        **{
+            key: deepcopy(artifact[key])
+            for key in GITHUB_PUBLICATION_FIELDS
+            if key in artifact
+        },
+        "run_id": run_id,
+        "pipeline_attempt": int(attempt),
+        "review_mode": "failed",
+        "review_generation_status": "failed",
+        "review_fallback_used": False,
+        "quality_scoreable": False,
+        "quality_exclusion_reasons": ["review_generation_failed"],
+        "publication_kind": prepared.publication_kind,
+        "required_disposition": prepared.required_disposition,
+    }
+    bound = PreparedGitHubReview(
+        head_sha=prepared.head_sha,
+        main_body=prepared.main_body,
+        comments=(),
+        artifact=artifact,
+        publication_kind=prepared.publication_kind,
+        required_disposition=prepared.required_disposition,
+    )
+    return PublishableReviewArtifact(
+        prepared=bound,
+        generation_fields=generation_fields(artifact),
+        terminal_attributes=terminal_attributes,
+    )
+
+
 def build_publishable_result(
     prepared: PreparedGitHubReview,
     *,
