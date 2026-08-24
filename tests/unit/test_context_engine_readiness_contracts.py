@@ -1215,6 +1215,37 @@ class ContextEngineReadinessContractsTest(unittest.TestCase):
             ["dispatch", "dispatch timeout"],
         )
 
+    def test_removed_public_rust_struct_gets_reserved_usage_search(self):
+        content = {
+            "file_changes": [
+                {
+                    "file_path": "src/directory.rs",
+                    "diff": (
+                        "-pub struct LegacyDirectory {\n"
+                        "-    client: Client,\n"
+                        "+pub(crate) struct NewDirectory {\n"
+                        "+    client: Client,\n"
+                        " impl LegacyDirectory {\n"
+                    ),
+                }
+            ]
+        }
+
+        entities = extract_diff_entities(content)
+        queries, _debug = postprocess_search_args(
+            [],
+            entities=entities,
+            pr_content=content,
+            max_total=1,
+        )
+
+        self.assertIn("LegacyDirectory", entities["removed_symbols"])
+        self.assertIn("NewDirectory", entities["added_symbols"])
+        self.assertEqual(
+            [item["query"] for item in queries],
+            ["LegacyDirectory"],
+        )
+
     def test_section_packing_preserves_required_contract_and_cap(self):
         packed = pack_sections(
             [

@@ -190,7 +190,8 @@ RESERVED_KEYWORDS = {
 IDENTIFIER_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 COMMENT_LINE_PREFIXES = ("#", "//", "/*", "*", "<!--", "--")
 STRUCTURAL_SYMBOL_PATTERN = re.compile(
-    r"^\s*(?:(?:export|public|private|protected|internal|abstract|sealed|static)\s+)*"
+    r"^\s*(?:(?:export|public|private|protected|internal|abstract|sealed|static|"
+    r"pub(?:\([^)]*\))?)\s+)*"
     r"(?:class|interface|struct|enum|type)\s+([A-Za-z_][A-Za-z0-9_]*)"
 )
 

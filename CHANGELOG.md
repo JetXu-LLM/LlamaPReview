@@ -52,6 +52,10 @@ do not appear as project versions.
   and exported constants as their own definitions even when the installed SDK's
   diff-context hints do not. A requested wrapper can no longer be silently
   attributed to an earlier helper and returned without its own body.
+- Removed-symbol extraction now recognizes public and scoped-public Rust
+  declarations. Deleting a `pub struct`, `pub(crate) type`, or equivalent
+  declaration therefore keeps its reserved exact usage search, so surviving
+  impls and constructors reach judgment as compile-risk evidence.
 - Removed the category-level contradiction that made an otherwise valid,
   evidence-backed blocking `test-gap` fail deterministic Projection.
 
