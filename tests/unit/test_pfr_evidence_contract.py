@@ -144,6 +144,35 @@ class PfrEvidenceContractTest(unittest.TestCase):
             [{"criterion": "The migration test must pass before merge."}],
         )
 
+    def test_author_criteria_normalize_equivalent_string_items(self):
+        plan = {
+            "author_acceptance_criteria": [
+                "The runner must discover the new test before merge.",
+                {"criterion": "The migration test must pass before merge."},
+            ]
+        }
+
+        diagnostics = _normalize_author_acceptance_criteria(
+            plan,
+            max_items=8,
+        )
+
+        self.assertEqual(
+            plan["author_acceptance_criteria"],
+            [
+                {
+                    "criterion": (
+                        "The runner must discover the new test before merge."
+                    )
+                },
+                {"criterion": "The migration test must pass before merge."},
+            ],
+        )
+        self.assertEqual(
+            diagnostics,
+            ["author_acceptance_criteria[0]:string_normalized"],
+        )
+
     def test_removed_reconcile_roots_are_ignored(self):
         projected, normalizations = _strip_reconcile_extra_fields(
             {

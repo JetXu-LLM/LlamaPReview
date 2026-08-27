@@ -53,6 +53,14 @@ and suggestion shape separately. An evidenced finding may remain in the main
 body after its snippet and inline surface are removed; a finding whose deciding
 evidence failed must not be rescued by moving its prose.
 
+## PFR reports a symbol miss for a runner or workflow
+
+If the exact-head file was already fetched completely and is within the
+full-file evidence cap, a missed optional symbol anchor now admits that bounded
+full file instead of manufacturing an unknown. A large, truncated, absent,
+binary, or policy-excluded file still requires its existing typed recovery or
+remains unavailable; do not relabel partial content as full-file evidence.
+
 ## Review degraded after an evidence reference changed
 
 Projection may remove an invalid supporting reference, one invalid required

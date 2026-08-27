@@ -1083,7 +1083,11 @@ class ToolExecutor:
             if not block:
                 block, start, end = self.extractor.build_line_window(content, line_index)
             blocks.append((symbol, block, start, end))
-        if not blocks and model_observed_full_file:
+        symbol_fallback_full_file = bool(
+            not blocks and symbols and backend_full_file_fetched
+        )
+        if not blocks and (model_observed_full_file or symbol_fallback_full_file):
+            model_observed_full_file = True
             blocks = [
                 (
                     "",
@@ -1144,6 +1148,7 @@ class ToolExecutor:
                     "full_file" if model_observed_full_file else "file_slice"
                 ),
                 "backend_full_file_fetched": backend_full_file_fetched,
+                "symbol_fallback_full_file": symbol_fallback_full_file,
                 "exact_path_state": "present",
                 "observed_state": "content_observed",
             },

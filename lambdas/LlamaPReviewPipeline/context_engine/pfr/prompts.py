@@ -91,9 +91,14 @@ PLAN_CONSTRUCTION_RULES = """Plan construction rules:
 - Explicitly scan the PR details for concrete pre-merge acceptance conditions
   about behavior changed by this PR, covering the PR description and any
   explicitly linked issue or acceptance material already supplied there. Do
-  not infer acceptance content from a bare link. Return each condition in
-  `author_acceptance_criteria`; return `[]` when none are stated. Omission is
-  not equivalent to a completed scan.
+  not infer acceptance content from a bare link. Return each condition as an
+  object with exactly one `criterion` string in `author_acceptance_criteria`;
+  return `[]` when none are stated. Omission is not equivalent to a completed
+  scan.
+- For an authoritative runner, discovery, workflow, or entrypoint read, do not
+  invent symbol anchors. When no exact literal is already known to occur in
+  that file, omit `symbols`; a bounded small file can then be admitted as exact
+  full-file evidence.
 - Rank questions by expected information value for the later review, then
   apply the cap, while preserving the acceptance-criteria and Route-risk
   priority above. Fewer well-grounded lookups are better than speculative ones.

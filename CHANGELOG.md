@@ -32,8 +32,12 @@ do not appear as project versions.
   criteria first; authoritative validation wiring when the pull request changes
   tests, CI, or validation infrastructure second; Route's highest-consequence
   locally answerable fact third; and general exploration only with remaining
-  capacity. The reserved removed-symbol check remains the sole deterministic
-  ordering exception.
+  capacity. Equivalent string-form acceptance criteria are normalized into the
+  internal criterion shape instead of being discarded. When a small exact-head
+  file was already fetched in full but optional symbol anchors miss, the full
+  bounded file remains usable evidence rather than becoming a false unknown.
+  The reserved removed-symbol check remains the sole deterministic ordering
+  exception.
 - Public successor configuration is explicit: an empty
   `PIPELINE_CAPACITY_POLICY` and the literal policy `off` both keep one-time
   head succession enabled; the literal `off` disables only quota counters.

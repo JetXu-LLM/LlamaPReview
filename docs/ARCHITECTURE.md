@@ -155,6 +155,14 @@ records each question, observation, and resolution; qualification can audit
 whether an established fact reached Deep without moving that audit into
 runtime judgment.
 
+The planner requests one canonical object shape for each acceptance criterion,
+but deterministic normalization also accepts the equivalent nonempty string
+form so provider formatting drift cannot erase author-stated conditions. For a
+small exact-head file already fetched completely within the full-file evidence
+cap, a missed optional symbol anchor falls back to that exact full file. Large
+or truncated files still require a real bounded symbol hit; no fuzzy anchor or
+partial payload is promoted to full-file evidence.
+
 Literal symbol reads use runtime-owned declaration recognition in addition to
 the SDK's diff-context hints. The bounded slice therefore starts at the exact
 exported function, constant, class, or other supported declaration that was

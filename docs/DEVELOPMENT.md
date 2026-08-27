@@ -45,6 +45,12 @@ may attribute evidence flow from the existing ledger and full private trace,
 but production code must not parse model prose to decide whether the objective
 closed.
 
+PFR contract tests must tolerate only representation-equivalent acceptance
+criteria: the canonical `{criterion: ...}` object and a nonempty string that
+normalizes to that object. Retrieval tests must also prove that a missed symbol
+can expose an already complete small exact-head file, while large or truncated
+files still fail closed without a real bounded symbol hit.
+
 Projection changes require adversarial cases that distinguish evidence truth
 from placement. Cover mixed valid/invalid required references, removable
 supporting references, invalid and deleted-region snippets, unplaceable inline

@@ -149,6 +149,34 @@ class BoundedRetrievalContractsTest(unittest.TestCase):
         self.assertTrue(result.metadata["backend_full_file_fetched"])
         self.assertIn("second", state.collected_snippets[0]["code"])
 
+    def test_small_file_with_missing_symbols_falls_back_to_exact_full_file(self):
+        content = "export const discovered = ['new-suite'];\n"
+        runtime = _BoundedRuntime(
+            {
+                "scripts/runner.ts": {
+                    "outcome": "success",
+                    "content": content,
+                    "source_size_bytes": len(content.encode()),
+                    "bytes_read": len(content.encode()),
+                    "max_bytes": 2 * 1024 * 1024,
+                }
+            }
+        )
+        state = _state(runtime, "scripts/runner.ts")
+
+        result = ToolExecutor(state).read_file(
+            {
+                "path": "scripts/runner.ts",
+                "symbols": ["invented-anchor"],
+            }
+        )
+
+        self.assertEqual(result.outcome, "hit")
+        self.assertEqual(result.metadata["coverage_type"], "full_file")
+        self.assertTrue(result.metadata["symbol_fallback_full_file"])
+        self.assertEqual(state.collected_files["scripts/runner.ts"], content)
+        self.assertIn("new-suite", result.text)
+
     def test_truncated_small_payload_is_never_labeled_full_file(self):
         content = "def run():\n    return 1\n"
         runtime = _BoundedRuntime(
