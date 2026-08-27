@@ -39,7 +39,11 @@ do not appear as project versions.
   When repository inventory exposes both a validation runner and its separate
   discovery or configuration candidate, PFR plans both bounded reads up front
   instead of treating the thin wrapper as complete or relying only on a later
-  Reconcile follow-up.
+  Reconcile follow-up. When author acceptance material also claims the changed
+  validation executes in CI, the same bounded plan follows the chain through
+  the workflow or CI invocation that supplies its command and environment;
+  missing exact workflow paths are located with one bounded search or directory
+  listing, displacing lower-value exploration without increasing any budget.
   The reserved removed-symbol check remains the sole deterministic ordering
   exception.
 - Public successor configuration is explicit: an empty

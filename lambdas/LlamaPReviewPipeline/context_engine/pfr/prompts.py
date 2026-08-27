@@ -105,6 +105,15 @@ PLAN_CONSTRUCTION_RULES = """Plan construction rules:
   candidate, reserve bounded questions for both in the initial plan. Treat the
   paths as weak candidates until their contents establish the delegation; do
   not defer the locally visible selection surface solely to Reconcile.
+- Validation execution may span a runner or entrypoint, a separate discovery or
+  configuration selector, and the workflow or CI invocation that supplies its
+  required environment and command. When the PR's acceptance material claims
+  that changed validation executes in CI, reserve initial-plan capacity for
+  every locally visible layer needed to establish that chain; one layer cannot
+  prove another. If the workflow path is not yet exact, use one bounded
+  repository-grounded search or workflow-directory listing to locate it. This
+  chain-closure priority displaces lower-value general exploration when the
+  question cap applies.
 - Rank questions by expected information value for the later review, then
   apply the cap, while preserving the acceptance-criteria and Route-risk
   priority above. Fewer well-grounded lookups are better than speculative ones.

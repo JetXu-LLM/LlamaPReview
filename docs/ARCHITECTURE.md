@@ -152,6 +152,15 @@ proves the delegation. This avoids treating a thin wrapper as proof that a new
 test is selected, without adding a question, round, token, or provider-call
 budget.
 
+When author acceptance material also claims that the validation executes in
+CI, the chain extends through the workflow or CI invocation that supplies the
+command and required environment. PFR reserves existing initial-plan capacity
+for each locally visible layer; an exact runner does not prove discovery, and
+discovery does not prove CI invocation. If no exact workflow path is available,
+one bounded repository-grounded search or workflow-directory listing may locate
+it. This priority displaces lower-value exploration rather than increasing any
+budget.
+
 If the first bounded read of a priority fact exposes only part of the deciding
 implementation, Reconcile may broaden the symbol slice on that same cached
 exact-head file. The existing one-read soft-budget rescue treats that broader

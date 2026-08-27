@@ -51,6 +51,15 @@ exact discovery or configuration candidate. The planner should reserve bounded
 initial questions for both and let fetched content prove the relationship;
 Reconcile is not the sole path to a locally visible selector.
 
+If author acceptance material claims that changed validation executes in CI,
+the same contract must reserve existing initial-plan capacity for the locally
+visible runner or entrypoint, discovery or configuration selector, and workflow
+or CI invocation needed to establish that chain. With no exact workflow path,
+the plan may spend one bounded repository-grounded search or workflow-directory
+listing to locate it. No layer proves another, and this priority displaces
+general exploration instead of changing a question, round, token, model, or
+provider-call cap.
+
 PFR contract tests must tolerate only representation-equivalent acceptance
 criteria: the canonical `{criterion: ...}` object and a nonempty string that
 normalizes to that object. Retrieval tests must also prove that a missed symbol

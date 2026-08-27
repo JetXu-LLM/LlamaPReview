@@ -83,6 +83,26 @@ class PfrEvidenceContractTest(unittest.TestCase):
             "reconcile",
             normalized,
         )
+        self.assertIn(
+            "validation execution may span a runner or entrypoint, a separate "
+            "discovery or configuration selector, and the workflow or ci "
+            "invocation",
+            normalized,
+        )
+        self.assertIn(
+            "reserve initial-plan capacity for every locally visible layer "
+            "needed to establish that chain",
+            normalized,
+        )
+        self.assertIn(
+            "use one bounded repository-grounded search or workflow-directory "
+            "listing to locate it",
+            normalized,
+        )
+        self.assertIn(
+            "chain-closure priority displaces lower-value general exploration",
+            normalized,
+        )
 
     def test_standalone_plan_prompt_preserves_priority_order(self):
         self._assert_plan_priority_order(PLAN_PROMPT)
