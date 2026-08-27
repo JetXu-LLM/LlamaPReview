@@ -25,6 +25,7 @@ from lambdas.LlamaPReviewPipeline.errors import (
     HeadSuperseded,
     PublicationIdentityUnavailable,
     PublicationIntegrityFailure,
+    PublicationPreDispatchAbort,
 )
 
 
@@ -78,6 +79,10 @@ class _CapturePull:
         self,
         *,
         error=None,
+        head_sha="abc123",
+        state="open",
+        merged=False,
+        locked=False,
         returned_review_id=1,
         returned_commit_id="abc123",
         returned_inline_comment_ids=None,
@@ -87,6 +92,10 @@ class _CapturePull:
         self.returned_review_id = returned_review_id
         self.returned_commit_id = returned_commit_id
         self.returned_inline_comment_ids = returned_inline_comment_ids
+        self.head = SimpleNamespace(sha=head_sha)
+        self.state = state
+        self.merged = merged
+        self.locked = locked
 
     def create_review(self, **kwargs):
         self.calls.append(kwargs)
@@ -113,12 +122,20 @@ class _CaptureRepo:
         *,
         error=None,
         resolved_sha="abc123",
+        pull_head_sha="abc123",
+        pull_state="open",
+        pull_merged=False,
+        pull_locked=False,
         returned_review_id=1,
         returned_commit_id="abc123",
         returned_inline_comment_ids=None,
     ):
         self.pull = _CapturePull(
             error=error,
+            head_sha=pull_head_sha,
+            state=pull_state,
+            merged=pull_merged,
+            locked=pull_locked,
             returned_review_id=returned_review_id,
             returned_commit_id=returned_commit_id,
             returned_inline_comment_ids=returned_inline_comment_ids,
@@ -449,6 +466,59 @@ class GitHubReviewPayloadBoundaryTest(unittest.TestCase):
         self.assertIs(repo.pull.calls[0]["commit"], repo.commit)
         self.assertEqual(artifact["publication_status"], "not_published")
         self.assertIsNone(effect)
+
+    def test_fresh_closed_or_changed_pull_aborts_before_github_post(self):
+        prepared = prepare_main_comment_publication(
+            "Summary",
+            head_sha="abc123",
+            review_mode="failed",
+        )
+        cases = (
+            (
+                "closed",
+                _CaptureRepo(pull_state="closed", pull_merged=False),
+                "pr_closed",
+            ),
+            (
+                "new_head",
+                _CaptureRepo(pull_head_sha="def456"),
+                "head_changed",
+            ),
+            (
+                "locked_failed_notice",
+                _CaptureRepo(pull_locked=True),
+                "publication_unavailable_locked",
+            ),
+        )
+
+        for label, repo, reason in cases:
+            with self.subTest(label=label), self.assertRaises(
+                PublicationPreDispatchAbort
+            ) as raised:
+                _dispatch_exact_review(repo, 1, prepared)
+            self.assertEqual(raised.exception.abort_reason, reason)
+            self.assertEqual(repo.pull.calls, [])
+
+    def test_post_merge_follow_up_requires_and_accepts_fresh_merged_head(self):
+        prepared = prepare_main_comment_publication(
+            "Summary",
+            head_sha="abc123",
+            review_mode="cancelled",
+            publication_kind="post_merge_follow_up",
+            required_disposition="merged_same_head",
+        )
+        merged = _CaptureRepo(pull_state="closed", pull_merged=True)
+        _dispatch_exact_review(merged, 1, prepared)
+        self.assertEqual(len(merged.pull.calls), 1)
+
+        reopened = _CaptureRepo(pull_state="open", pull_merged=False)
+        with self.assertRaises(PublicationPreDispatchAbort) as raised:
+            _dispatch_exact_review(reopened, 1, prepared)
+        self.assertEqual(
+            raised.exception.abort_reason,
+            "merged_disposition_changed",
+        )
+        self.assertEqual(reopened.pull.calls, [])
 
     def test_commit_resolution_or_review_identity_mismatch_fails_closed(self):
         prepared = prepare_main_comment_publication(

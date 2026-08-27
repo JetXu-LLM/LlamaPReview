@@ -122,6 +122,10 @@ def _content():
 class _Pull:
     def __init__(self):
         self.reviews = []
+        self.head = SimpleNamespace(sha=HEAD)
+        self.state = "open"
+        self.merged = False
+        self.locked = False
 
     def get_files(self):
         return []

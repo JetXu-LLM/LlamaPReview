@@ -13,6 +13,7 @@ from lambdas.LlamaPReviewPipeline.context_engine.assembler import (
     assemble_review_context,
 )
 from lambdas.LlamaPReviewPipeline.context_engine.pfr import (
+    PLAN_CONTINUATION_PROMPT,
     PLAN_METHOD_PROMPT,
     PLAN_PROMPT,
     RECONCILE_SYSTEM_PROMPT,
@@ -47,9 +48,42 @@ def _pr_content(*, diff='+path = "example_files/asset.json"\n'):
 
 
 class PfrEvidenceContractTest(unittest.TestCase):
+    def _assert_plan_priority_order(self, prompt):
+        normalized = " ".join(prompt.casefold().split())
+        priority_fragments = (
+            "first verify concrete author acceptance criteria from the pr "
+            "description or explicitly linked issue or acceptance material "
+            "already supplied in the pr details",
+            "second, when the pr changes tests, ci, or validation "
+            "infrastructure, verify the authoritative runner, discovery "
+            "configuration, workflow, or entrypoint",
+            "third verify the highest-consequence locally answerable fact "
+            "identified by route",
+            "only then use remaining capacity for general exploration",
+        )
+
+        positions = [normalized.index(fragment) for fragment in priority_fragments]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn(
+            "covering the pr description and any explicitly linked issue or "
+            "acceptance material already supplied there",
+            normalized,
+        )
+
+    def test_standalone_plan_prompt_preserves_priority_order(self):
+        self._assert_plan_priority_order(PLAN_PROMPT)
+
+    def test_continuation_plan_prompt_preserves_priority_order(self):
+        self._assert_plan_priority_order(PLAN_CONTINUATION_PROMPT)
+
     def test_provider_contract_ranks_evidence_without_merge_materiality_cues(self):
         provider_contract = "\n".join(
-            (PLAN_METHOD_PROMPT, PLAN_PROMPT, RECONCILE_SYSTEM_PROMPT)
+            (
+                PLAN_METHOD_PROMPT,
+                PLAN_PROMPT,
+                PLAN_CONTINUATION_PROMPT,
+                RECONCILE_SYSTEM_PROMPT,
+            )
         ).casefold()
         normalized_contract = " ".join(provider_contract.split())
 
@@ -63,11 +97,15 @@ class PfrEvidenceContractTest(unittest.TestCase):
         self.assertIn("returned lifecycle or control handle", provider_contract)
         self.assertIn("do not hand the owner a lookup", provider_contract)
         self.assertIn(
-            "first verify concrete acceptance criteria explicitly stated",
+            "first verify concrete author acceptance criteria",
             normalized_contract,
         )
         self.assertIn(
-            "second verify the highest-consequence locally answerable fact",
+            "second, when the pr changes tests, ci, or validation infrastructure",
+            normalized_contract,
+        )
+        self.assertIn(
+            "third verify the highest-consequence locally answerable fact",
             normalized_contract,
         )
         self.assertIn(

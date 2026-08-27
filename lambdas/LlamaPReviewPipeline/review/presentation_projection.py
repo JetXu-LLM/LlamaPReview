@@ -328,6 +328,7 @@ class _CompileState:
         location: str,
         supporting: bool = False,
         optional_surface: bool = False,
+        allow_partial_required: bool = False,
     ) -> Optional[list[str]]:
         """Admit exact catalog refs without judging the model's prose."""
 
@@ -340,6 +341,7 @@ class _CompileState:
             )
             return None
         retained: list[str] = []
+        missing_required: list[tuple[int, str]] = []
         for index, raw_ref in enumerate(value):
             if not isinstance(raw_ref, str) or not raw_ref.strip():
                 self.add_issue(
@@ -368,6 +370,9 @@ class _CompileState:
             if not admission.known:
                 if supporting:
                     self.normalize(f"{location}:optional_ref_removed", partial=True)
+                    continue
+                if allow_partial_required:
+                    missing_required.append((index, ref))
                     continue
                 if optional_surface:
                     self.add_issue(
@@ -404,6 +409,21 @@ class _CompileState:
                 )
                 return None
             retained.append(ref)
+        if missing_required:
+            if not retained:
+                index, _ref = missing_required[0]
+                self.add_issue(
+                    "evidence_ref_out_of_catalog",
+                    f"{location}[{index}]",
+                    "model cited evidence outside the supplied catalog",
+                    "surface" if optional_surface else "truth",
+                )
+                return None
+            self.normalize(
+                f"{location}:partial_unknown_refs_removed:"
+                f"surviving={','.join(retained)}",
+                partial=True,
+            )
         return retained
 
 
@@ -734,6 +754,7 @@ def _normalize_finding(
         raw.get("required_evidence_refs"),
         location=f"{location}.required_evidence_refs",
         optional_surface=optional_p2,
+        allow_partial_required=True,
     )
     supporting = state.admit_refs(
         raw.get("supporting_evidence_refs"),
@@ -761,6 +782,7 @@ def _normalize_finding(
             partial=True,
         )
     anchor = classify_changed_region_anchor(path, snippet, pr_details)
+    invalid_snippet_removed = False
     if anchor == "invalid" and snippet.strip():
         resolved = uniquely_resolve_changed_region_anchor(
             path,
@@ -776,6 +798,7 @@ def _normalize_finding(
             )
         else:
             snippet = ""
+            invalid_snippet_removed = True
             state.normalize(
                 f"{location}.code_snippet:invalid_optional_anchor_removed",
                 partial=True,
@@ -943,6 +966,36 @@ def _normalize_finding(
         pr_details=pr_details,
         context_meta=state.context_meta,
     )
+    if (
+        invalid_snippet_removed
+        and representation_requirement in {"exact_postimage", "exact_full_file"}
+    ):
+        degraded_projected = deepcopy(projected)
+        degraded_projected["representation_requirement"] = "semantic"
+        degraded_capability = finding_evidence_capability(
+            degraded_projected,
+            pr_details=pr_details,
+            context_meta=state.context_meta,
+        )
+        degraded_supported = (
+            degraded_capability["critical_supported"]
+            if priority in {"P0", "P1"} or carries_blocking_decision
+            else bool(
+                degraded_capability["scope_supported"]
+                and not degraded_capability["rejected_refs"]
+                and degraded_capability["usable_refs"]
+            )
+        )
+        if degraded_supported:
+            representation_requirement = "semantic"
+            normalized["representation_requirement"] = "semantic"
+            projected = degraded_projected
+            capability = degraded_capability
+            state.normalize(
+                f"{location}:invalid_exact_representation_removed:"
+                f"surviving={','.join(refs)}",
+                partial=True,
+            )
     if priority in {"P0", "P1"} and not capability["critical_supported"]:
         state.add_issue(
             "finding_evidence_capability_insufficient",
@@ -954,7 +1007,9 @@ def _normalize_finding(
             state.contract_blocking_decision_if_needed(location)
         return None
     if priority == "P2" and (
-        capability["rejected_refs"] or not capability["scope_supported"]
+        capability["rejected_refs"]
+        or not capability["scope_supported"]
+        or not capability["representation_supported"]
     ):
         if carries_blocking_decision:
             state.add_issue(
@@ -1606,16 +1661,9 @@ def compile_presentation_object(
                 ):
                     blocking_indexes.add(index)
                     break
-    if (
-        verdict == "blocking"
-        and state.blocking_decision_dependency_uncertain
-        and blocking_indexes
-    ):
+    if verdict == "blocking" and blocking_indexes:
         primary = normalized_findings[min(blocking_indexes)]
-        replacement = bounded_text(
-            "Changes are needed before merge: " + primary["headline"],
-            limit=MAX_SUMMARY,
-        )
+        replacement = bounded_text(primary["headline"], limit=MAX_SUMMARY)
         if replacement is None:
             state.add_issue(
                 "blocking_decision_contraction_failed",
@@ -1630,10 +1678,13 @@ def compile_presentation_object(
             )
         decision["summary"] = replacement
         decision["owner_actions"] = [primary["owner_action"]]
-        state.normalize(
-            "$.decision:unsupported_blocker_contracted",
-            partial=True,
-        )
+        if state.blocking_decision_dependency_uncertain:
+            state.normalize(
+                "$.decision:unsupported_blocker_contracted",
+                partial=True,
+            )
+        else:
+            state.normalize("$.decision:primary_blocker_bound")
     for index, (normalized, projected) in enumerate(
         zip(normalized_findings, v3_findings)
     ):
@@ -1678,6 +1729,31 @@ def compile_presentation_object(
         projected["id"] = f"U{len(v3_unknowns) + 1}"
         normalized_unknowns.append(normalized)
         v3_unknowns.append(projected)
+
+    if verdict == "verification_needed" and v3_unknowns:
+        retained_pairs = [
+            (normalized, projected)
+            for normalized, projected in zip(
+                normalized_findings,
+                v3_findings,
+            )
+            if projected.get("priority") not in {"P0", "P1"}
+        ]
+        removed_count = len(v3_findings) - len(retained_pairs)
+        if removed_count:
+            normalized_findings = [item[0] for item in retained_pairs]
+            v3_findings = [item[1] for item in retained_pairs]
+            for index, projected in enumerate(v3_findings, start=1):
+                projected["id"] = f"F{index}"
+            state.normalize(
+                "$.findings:verification_conflicting_critical_removed:"
+                f"count={removed_count}",
+                partial=True,
+            )
+        primary_unknown = normalized_unknowns[0]
+        decision["summary"] = primary_unknown["missing_fact"]
+        decision["owner_actions"] = [primary_unknown["owner_action"]]
+        state.normalize("$.decision:primary_unknown_bound")
 
     raw_checks = source.get("confidence_checks")
     if raw_checks is None:
@@ -1849,20 +1925,20 @@ def compile_presentation_object(
     )
     owner_actions: list[Dict[str, Any]] = []
     if deciding_ids:
-        action = next(iter(decision["owner_actions"]), "")
-        if not action:
-            action = (
-                normalized_findings[
-                    next(
-                        index
-                        for index, item in enumerate(v3_findings)
-                        if item["id"] in blocking_ids
-                    )
-                ]["owner_action"]
-                if verdict == "blocking"
-                else normalized_unknowns[0]["owner_action"]
+        if verdict == "blocking":
+            primary_index = next(
+                index
+                for index, item in enumerate(v3_findings)
+                if item["id"] in blocking_ids
             )
-        owner_actions = [{"text": action, "resolves": deciding_ids}]
+            action = normalized_findings[primary_index]["owner_action"]
+            primary_deciding_id = v3_findings[primary_index]["id"]
+        else:
+            action = normalized_unknowns[0]["owner_action"]
+            primary_deciding_id = v3_unknowns[0]["id"]
+        owner_actions = [
+            {"text": action, "resolves": [primary_deciding_id]}
+        ]
 
     if verdict == "blocking":
         reasons = [
@@ -1906,11 +1982,22 @@ def compile_presentation_object(
     pr_type = normalize_pr_type(analyzer.get("pr_type") or "code")
     if pr_type not in _PUBLIC_PR_TYPES:
         pr_type = "code"
+    if verdict == "blocking":
+        public_sentence = next(
+            item["headline"]
+            for item in v3_findings
+            if item.get("blocking") is True
+        )
+    elif verdict == "verification_needed":
+        public_sentence = v3_unknowns[0]["claim"]
+    else:
+        public_sentence = decision["summary"]
+
     raw_v3 = {
         "schema_version": 3,
         "decision": {
             "verdict": VERDICT_TO_V3[verdict],
-            "public_sentence": decision["summary"],
+            "public_sentence": public_sentence,
             "confidence": decision["confidence"].casefold(),
             "pr_type": pr_type,
             "risk_domains": [

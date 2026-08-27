@@ -127,6 +127,35 @@ class PublicationPreflightUnavailable(RetryablePipelineFailure):
     kind = "publication_preflight_unavailable"
 
 
+class PublicationPreDispatchAbort(TerminalPipelineFailure):
+    """A fresh pull snapshot proved that the GitHub POST must not start."""
+
+    kind = "publication_pre_dispatch_abort"
+
+    def __init__(
+        self,
+        expected_head_sha: str,
+        actual_head_sha: str,
+        *,
+        current_state: str,
+        merged: bool,
+        locked: Optional[bool],
+        abort_reason: str,
+        stage: str,
+    ):
+        self.expected_head_sha = str(expected_head_sha or "")
+        self.actual_head_sha = str(actual_head_sha or "")
+        self.current_state = str(current_state or "")
+        self.merged = bool(merged)
+        self.locked = locked if isinstance(locked, bool) else None
+        self.abort_reason = str(abort_reason or "lifecycle_mismatch")
+        super().__init__(
+            "Fresh pull-request state rejected the prepared GitHub write "
+            f"before POST ({self.abort_reason}).",
+            stage=stage,
+        )
+
+
 class PublicationOutcomeUnknown(TerminalPipelineFailure):
     """A dispatch may have occurred but no exact GitHub effect is observable."""
 

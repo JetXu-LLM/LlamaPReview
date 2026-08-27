@@ -12,7 +12,7 @@ Private-repository events are acknowledged and discarded at the signed Webhook b
 
 ## Self-hosted AWS deployment
 
-The reference Terraform deploys the same two active Lambdas and one dependency Layer. It is intentionally public-repository-only as shipped; there is no hidden private-repository mode, legacy handler, shadow router, or repository allowlist. Its `pipeline_capacity_policy` defaults to `off`, so a self-hoster paying for its own provider account does not inherit the personally funded hosted-service bounds.
+The reference Terraform deploys the same two active Lambdas and one dependency Layer. It is intentionally public-repository-only as shipped; there is no hidden private-repository mode, legacy handler, shadow router, or repository allowlist. Its `pipeline_capacity_policy` defaults to the whole-policy literal `off`, so a self-hoster paying for its own provider account does not inherit the personally funded hosted-service bounds. That literal disables quota counters only and leaves one-time head succession enabled; only an explicit `successor=off` key disables succession. See [configuration](CONFIGURATION.md#free-review-capacity).
 
 Self-hosters provide and pay for their own AWS, GitHub App, and DeepSeek accounts. They also become responsible for:
 
@@ -30,9 +30,9 @@ Follow [AWS deployment](AWS_DEPLOYMENT.md) rather than copying official producti
 Hosted and self-hosted deployments share the same admission, retrieval, judgment, projection, accounting, recovery, and publication code. Deployment configuration can change resource names, retention, budgets, and model routing; it should not silently change the review-output contract.
 
 That shared contract includes lifecycle rereads before consequential work,
-at most one early successor when an admitted open pull request advances to a
-new head, deterministic cancellation when an exact admitted head ends before
-review completion, and an exact-head post-merge follow-up only when Final was
-already publishable. These behaviors use the same native review publication
-and recovery transaction; they do not require a placeholder comment, a second
+at most one early successor when enabled by the public configuration,
+deterministic cancellation when an exact admitted head ends before review
+completion, and an exact-head post-merge follow-up only when Final was already
+publishable. These behaviors use the same native review publication and
+recovery transaction; they do not require a placeholder comment, a second
 publication surface, or wider GitHub App permissions.

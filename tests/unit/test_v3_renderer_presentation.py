@@ -706,7 +706,9 @@ class V3RendererPresentationTests(unittest.TestCase):
         )
 
         self.assertIn("### LlamaPReview — Blocking issues found", rendered)
-        self.assertIn("- The migration drops retained state.", rendered)
+        first_screen, details = rendered.split("<details>", 1)
+        self.assertNotIn("- The migration drops retained state.", first_screen)
+        self.assertIn("The migration drops retained state", details)
         self.assertIn(
             "Owner action: Preserve the retained state before merging.",
             rendered,

@@ -22,7 +22,6 @@ from .schema import clean_suggested_content, suggestion_presentation
 SCHEMA_VERSION = 3
 BLOCKING_PRIORITIES = {"P0", "P1"}
 MAX_OWNER_ACTIONS = 2
-MAX_HEADLINE_FINDINGS = 2
 MAX_INLINE_FINDINGS = 4
 MAX_NONBLOCKING_INLINE_FINDINGS = 1
 MAX_VISIBLE_SCOPE_ITEMS = 6
@@ -631,35 +630,6 @@ def render_v3_markdown(review: Dict[str, Any]) -> str:
         fold_norms.add(
             _normalized_fold_text(_blocked_sentence_remainder(fold_lines[0]))
         )
-    bullets: list[str] = []
-    if visible_verdict == "blocked_findings":
-        # Only finding-backed reasons may render as blocking bullets; an
-        # unknown is labeled separately below so it can never read as a
-        # confirmed blocker (the Games#62 shape). A bullet that duplicates
-        # the visible sentence is suppressed (G1).
-        finding_reasons = [
-            item
-            for item in decision.get("reasons") or []
-            if isinstance(item, dict)
-            and _text(item.get("text"))
-            and all(
-                str(ref).startswith("F")
-                for ref in item.get("refs") or []
-                if isinstance(ref, str)
-            )
-        ]
-        for item in finding_reasons:
-            text = _text(item.get("text"))
-            if _normalized_fold_text(text) in fold_norms:
-                continue
-            bullets.append(text)
-            fold_norms.add(_normalized_fold_text(text))
-            if len(bullets) >= MAX_HEADLINE_FINDINGS - 1:
-                break
-    if bullets:
-        lines.append("")
-        lines.extend(f"- {bullet}" for bullet in bullets)
-
     actions = [
         item
         for item in review.get("owner_action") or []
@@ -676,7 +646,11 @@ def render_v3_markdown(review: Dict[str, Any]) -> str:
         )
         if primary_unknown is not None:
             actions = [{"text": _text(primary_unknown.get("how_to_check"))}]
-    action_cap = 1 if visible_verdict == "unverified" else MAX_OWNER_ACTIONS
+    action_cap = (
+        1
+        if visible_verdict in {"blocked_findings", "unverified"}
+        else MAX_OWNER_ACTIONS
+    )
     action_segments: list[str] = []
     for item in actions[:action_cap]:
         text = _text(item.get("text"))
@@ -694,21 +668,17 @@ def render_v3_markdown(review: Dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"Owner action: {joined}")
 
-    if visible_verdict == "blocked_findings" and merge_unknowns:
-        claim = _bounded_first_screen_explanation(
-            _text(merge_unknowns[0].get("claim"))
-        )
-        if claim[:1].isupper() and claim[1:2].islower():
-            claim = claim[0].lower() + claim[1:]
-        if claim and not claim.endswith((".", "!", "?")):
-            claim += "."
-        lines.append("")
-        lines.append(f"Also needs verification: {claim}")
-    elif visible_verdict == "unverified" and len(merge_unknowns) > 1:
-        further = len(merge_unknowns) - 1
+    if visible_verdict in {"blocked_findings", "unverified"}:
+        findings = [
+            item
+            for item in review.get("findings") or []
+            if isinstance(item, dict)
+        ]
+        further = max(0, len(findings) + len(unknowns) - 1)
         plural = "" if further == 1 else "s"
-        lines.append("")
-        lines.append(f"{further} further check{plural} in details.")
+        if further:
+            lines.append("")
+            lines.append(f"{further} further item{plural} in details.")
 
     # G4 is a composed-surface contract, not merely a per-field check. A
     # repeated ten-word span can be harmless inside each source string yet

@@ -19,8 +19,12 @@ PLAN_METHOD_PROMPT = """Planning method:
   later code review. Plan evidence acquisition; do not make findings, decide
   merge posture, or encode a closed list of review conclusions.
 - Spend the existing question, round, and token budgets in this order: first
-  verify concrete acceptance criteria explicitly stated by the PR author;
-  second verify the highest-consequence locally answerable fact identified by
+  verify concrete author acceptance criteria from the PR description or
+  explicitly linked issue or acceptance material already supplied in the PR
+  details; second, when the PR changes tests, CI, or validation infrastructure,
+  verify the authoritative runner, discovery configuration, workflow, or
+  entrypoint that determines whether the changed validation actually executes;
+  third verify the highest-consequence locally answerable fact identified by
   Route; only then use remaining capacity for general exploration.
 - Extract distinctive structural entities already visible in the change:
   classes/types/prototypes, interfaces/base contracts, public functions or
@@ -67,7 +71,7 @@ PLAN_OUTPUT_SCHEMA = """Return exactly this JSON shape:
 {
   "author_acceptance_criteria": [
     {
-      "criterion": "A concrete pre-merge acceptance condition explicitly stated by the PR author."
+      "criterion": "A concrete pre-merge acceptance condition from the PR description or supplied linked acceptance material."
     }
   ],
   "verification_plan": [
@@ -84,8 +88,10 @@ PLAN_OUTPUT_SCHEMA = """Return exactly this JSON shape:
 PLAN_CONSTRUCTION_RULES = """Plan construction rules:
 - Ask at most $max_questions independently useful questions; fewer or none is
   valid.
-- Explicitly scan the PR author's description for concrete pre-merge
-  acceptance conditions about behavior changed by this PR. Return each one in
+- Explicitly scan the PR details for concrete pre-merge acceptance conditions
+  about behavior changed by this PR, covering the PR description and any
+  explicitly linked issue or acceptance material already supplied there. Do
+  not infer acceptance content from a bare link. Return each condition in
   `author_acceptance_criteria`; return `[]` when none are stated. Omission is
   not equivalent to a completed scan.
 - Rank questions by expected information value for the later review, then

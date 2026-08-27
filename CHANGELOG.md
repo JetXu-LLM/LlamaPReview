@@ -11,6 +11,51 @@ do not appear as project versions.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-08-27
+
+### Changed
+
+- Deterministic Projection now documents one strict local-degradation rule:
+  evidence truth and public placement are separate contracts. Invalid optional
+  supporting references, an invalid snippet/anchor, or a nondeciding item can
+  be removed locally while admitted evidence and the surviving decision remain
+  intact. A partially invalid required-reference list is retained only when at
+  least one admitted required reference still supports that item. Projection
+  fails closed when the last deciding basis is lost, truth-dependent core prose
+  remains tainted, or a fixed schema or size bound cannot be satisfied without
+  invention.
+- The first screen leads with the primary retained merge-deciding finding or
+  merge-deciding unknown and its immediate owner action. Every additional
+  finding or unknown remains in details; the first screen reports only the
+  count of further items instead of repeating their prose.
+- PFR spends the existing bounded budget on concrete author acceptance
+  criteria first; authoritative validation wiring when the pull request changes
+  tests, CI, or validation infrastructure second; Route's highest-consequence
+  locally answerable fact third; and general exploration only with remaining
+  capacity. The reserved removed-symbol check remains the sole deterministic
+  ordering exception.
+- Public successor configuration is explicit: an empty
+  `PIPELINE_CAPACITY_POLICY` and the literal policy `off` both keep one-time
+  head succession enabled; the literal `off` disables only quota counters.
+  Only an explicit `successor=off` key disables succession. The public
+  Terraform default remains `off`, so self-hosted quota bounds are disabled
+  while succession remains enabled.
+
+### Fixed
+
+- GitHub publication now distinguishes a typed
+  `publication_pre_dispatch_abort`, which records
+  `publication_post_started=false` after a fresh lifecycle mismatch prevents
+  `create_review`, from `publication_outcome_unknown`, where the POST may have
+  started and exact reconciliation is required. A durable intent may already
+  say `dispatching`; only the typed abort proves zero GitHub writes.
+- The code-owned `Review unavailable` notice now has an explicit lifecycle:
+  it is eligible only after completed paid work and exhausted Final/Projection
+  retries on the same open, unlocked head; it is revalidated and published
+  through the ordinary exact-head transaction. New-head, ended, locked,
+  quota/successor, pre-Final, and unknown-dispatch outcomes remain silent or
+  keep their existing typed terminal policy.
+
 ## [0.1.5] - 2026-08-24
 
 ### Added
@@ -174,7 +219,8 @@ do not appear as project versions.
 - Legacy Handler and Advanced Handler runtimes, rollout lists, shadow/canary
   routing, and private operational history from the public active product.
 
-[Unreleased]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/JetXu-LLM/LlamaPReview/compare/v0.1.2...v0.1.3
