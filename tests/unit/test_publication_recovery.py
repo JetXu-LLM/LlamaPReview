@@ -32,6 +32,7 @@ from lambdas.LlamaPReviewPipeline.errors import (
     PRLifecycleSuperseded,
     PublicationIntegrityFailure,
     PublicationOutcomeUnknown,
+    PublicationPreDispatchAbort,
     PublicationPreflightUnavailable,
     PublicationStateConflict,
 )
@@ -278,6 +279,10 @@ class _Pull:
         self.review_comments: object = []
         self.create_count = 0
         self.create_behavior = None
+        self.head = SimpleNamespace(sha=HEAD)
+        self.state = "open"
+        self.merged = False
+        self.locked = False
 
     def get_reviews(self):
         if len(self.review_pages) > 1:
@@ -1000,6 +1005,66 @@ class PublicationTransactionTests(unittest.TestCase):
             terminal["deepseek_usage_accounting"]["complete_numeric_usage"]
         )
 
+    def test_fresh_close_after_dispatching_mark_commits_known_zero_write_abort(self):
+        self._put_item()
+        claim = self._claim()
+        context = pipeline_publication.PublicationContext(
+            repo="owner/repo",
+            pr_number=7,
+            head_sha=HEAD,
+            expected_status="CONTEXT_READY",
+            phase="review",
+            run_id="run-7",
+            generation_attempt=1,
+            runtime_identity={"phase": "review"},
+            phase_claim=claim,
+            dry_run=False,
+        )
+        self.pull.state = "closed"
+        self.pull.merged = False
+
+        with patch.object(
+            persistence,
+            "get_s3_client",
+            return_value=self.s3,
+        ):
+            stored = publish_prepared_transaction(
+                _prepared(),
+                repo_obj=self.repo,
+                repo="owner/repo",
+                pr_number=7,
+                expected_status="CONTEXT_READY",
+                run_id="run-7",
+                phase="review",
+                generation_attempt=1,
+                runtime_identity={"phase": "review"},
+                terminal_attributes=_complete_accounting(),
+                pre_publish_check=lambda: None,
+                phase_claim=claim,
+                prepared_pre_dispatch_failure_commit=(
+                    lambda candidate, intent, exc: (
+                        pipeline_publication._commit_known_zero_write_abort(
+                            candidate,
+                            intent,
+                            exc,
+                            context=context,
+                            lifecycle_unavailable_observer=None,
+                            table=self.table,
+                        )
+                    )
+                ),
+                table=self.table,
+            )
+
+        self.assertTrue(stored)
+        self.assertEqual(self.pull.create_count, 0)
+        terminal = persistence.get_item("owner/repo", 7, table=self.table)
+        self.assertEqual(terminal["status"], "SUPERSEDED")
+        self.assertEqual(terminal["publication_status"], "aborted_before_dispatch")
+        self.assertIs(terminal["publication_post_started"], False)
+        self.assertEqual(terminal["publication_pre_dispatch_abort"], "pr_closed")
+        self.assertNotIn("publication_receipt", terminal)
+
     def test_artifact_or_intent_failure_performs_zero_github_writes(self):
         for failing_step in ("artifact", "intent"):
             with self.subTest(failing_step=failing_step):
@@ -1222,8 +1287,8 @@ class PublicationTransactionTests(unittest.TestCase):
             pipeline_publication,
             "fetch_pr_details",
             return_value=({}, []),
-        ), self.assertRaises(PRLifecycleSuperseded):
-            pipeline_publication.recover_pending(
+        ):
+            recovered = pipeline_publication.recover_pending(
                 current,
                 context=context,
                 runtime=runtime,
@@ -1231,7 +1296,13 @@ class PublicationTransactionTests(unittest.TestCase):
                 table=self.table,
             )
 
+        self.assertTrue(recovered)
         self.assertEqual(self.pull.create_count, 0)
+        terminal = persistence.get_item("owner/repo", 7, table=self.table)
+        self.assertEqual(terminal["status"], "SUPERSEDED")
+        self.assertEqual(terminal["publication_status"], "aborted_before_dispatch")
+        self.assertIs(terminal["publication_post_started"], False)
+        self.assertEqual(terminal["publication_pre_dispatch_abort"], "pr_merged")
 
     def test_locked_post_merge_prepared_recovery_aborts_before_dispatch(self):
         self._put_item()

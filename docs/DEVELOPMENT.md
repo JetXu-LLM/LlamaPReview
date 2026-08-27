@@ -35,16 +35,74 @@ A review-behavior change should include:
 Do not replace model-owned engineering judgment with repository-specific keywords. Prompts and behavior must remain general across repositories and languages.
 
 Objective-closure or PFR-priority changes must prove that both continuation and
-standalone planning receive the same fixed Route commitment, ordinary steps
-retain semantic order across tool types, and no question, round, token, model,
-or provider-call cap changes. Evaluation may attribute evidence flow from the
-existing ledger and full private trace, but production code must not parse
-model prose to decide whether the objective closed.
+standalone planning receive the same fixed Route commitment. The tested order
+is author acceptance criteria; authoritative validation wiring when tests, CI,
+or validation infrastructure change; Route's highest-consequence locally
+answerable fact; then general exploration. Ordinary steps retain that semantic
+order across tool types, with only the reserved removed-symbol check ahead of
+it. No question, round, token, model, or provider-call cap changes. Evaluation
+may attribute evidence flow from the existing ledger and full private trace,
+but production code must not parse model prose to decide whether the objective
+closed.
+
+For validation wiring, contract tests also require both planning prompts to say
+that a thin runner is not enough when the supplied inventory exposes a separate
+exact discovery or configuration candidate. The planner should reserve bounded
+initial questions for both and let fetched content prove the relationship;
+Reconcile is not the sole path to a locally visible selector.
+
+If author acceptance material claims that changed validation executes in CI,
+the same contract must reserve existing initial-plan capacity for the locally
+visible runner or entrypoint, discovery or configuration selector, and workflow
+or CI invocation needed to establish that chain. `build_repo_fact_sheet`
+therefore exposes at most twelve exact `.github/workflows/*` candidates from the
+existing accessible-file inventory; these are location hints, not execution
+proof, and the relevant candidate must still be read. With no exact workflow
+path, the plan may spend one bounded repository-grounded search or
+workflow-directory listing to locate it. No layer proves another, and this
+priority displaces general exploration instead of changing a question, round,
+token, model, or provider-call cap.
+
+PFR contract tests must tolerate only representation-equivalent acceptance
+criteria: the canonical `{criterion: ...}` object and a nonempty string that
+normalizes to that object. Retrieval tests must also prove that a missed symbol
+can expose an already complete small exact-head file, while large or truncated
+files still fail closed without a real bounded symbol hit.
+
+Projection changes require adversarial cases that distinguish evidence truth
+from placement. Cover mixed valid/invalid required references, removable
+supporting references, invalid and deleted-region snippets, unplaceable inline
+requests, nondeciding item removal, and fixed schema/size bounds. Prove that
+each bad fragment is removed locally when a complete deciding basis survives,
+that dependent first-screen prose is contracted to the primary retained
+deciding item, that the first screen contains no secondary item prose/action,
+and that loss of the last deciding basis or tainted core prose remains
+nonpublishable. When an invalid snippet carried an exact representation or
+direct replacement, prove those optional surfaces are removed before any
+semantic-only finding survives. Do not accept guessed paths, anchor rewriting,
+evidence promotion, or silent truncation as recovery.
 
 Failure-notice changes require retry and crash-recovery coverage plus the full
 open/new-head/merged/closed/locked matrix. Tests must prove one exact body-only
 `COMMENT`, zero footer/inline/Mermaid, complete accounting, no extra capacity
-charge, and no publication for an unknown provider-dispatch outcome.
+charge, and no publication for a pre-Final failure or an unknown
+provider-dispatch outcome. Cover the failed notice's pre-persist lifecycle
+reread, DRY_RUN barrier, immutable candidate/intent recovery, and quality-score
+exclusion.
+
+Provider-dispatch control changes must prove the typed boundary on both sides
+of HTTP: a pre-dispatch fence failure is retryable, makes zero HTTP calls, and
+records that dispatch did not start; an existing unresolved `dispatching`
+record is terminal, makes no second HTTP call, retains incomplete accounting,
+and cannot emit a public failure notice.
+
+GitHub publication tests must separately prove the last fresh lifecycle check.
+A confirmed mismatch after the intent becomes `dispatching` but before
+`create_review` raises `publication_pre_dispatch_abort`, makes zero GitHub POSTs,
+and stores `publication_post_started=false`. A `dispatching` intent without that
+typed terminal proof must remain outcome-unknown and enter exact
+reconciliation; intent state alone is not proof that a write did or did not
+start.
 
 Lifecycle changes additionally require deterministic coverage for the full
 state matrix: same/new head crossed with open/merged/closed, plus an unverified
@@ -55,13 +113,22 @@ unchanged ordinary open-PR output. Callback-order tests must place lifecycle
 checks before the first Reconcile and before Final without changing the normal
 number of bounded PFR rounds.
 
+Successor-configuration tests must keep public source semantics explicit: the
+empty policy and literal `off` both leave one-time succession enabled; only an
+explicit `successor=off` disables it. A queued successor disabled before work
+starts must stop before retrieval, capacity admission, and provider dispatch,
+while an existing publication intent or unresolved provider dispatch keeps its
+fail-closed recovery owner.
+
 Lifecycle publication tests must also cover a structurally locked ended PR.
 Cancellation and post-merge follow-up must make zero GitHub calls, preserve
 complete accounting, and persist `publication_unavailable_locked`; unlocked
 and unknown-lock fixtures retain the normal publication contract. Recovery
-must terminalize only a prepared, undispatched locked intent. A dispatching
-intent still uses duplicate/outcome reconciliation because its write may have
-crossed the external boundary.
+may terminalize a prepared mismatch or a typed
+`publication_pre_dispatch_abort` only when the boundary records
+`publication_post_started=false`. A `dispatching` intent without that typed
+zero-write proof still uses duplicate/outcome reconciliation because its write
+may have crossed the external boundary.
 
 Replay fixtures should exercise lifecycle transitions with synthetic public
 facts and make both cancellation and post-merge Markdown available for manual

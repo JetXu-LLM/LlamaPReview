@@ -173,6 +173,12 @@ def _normalize_author_acceptance_criteria(
                 f"author_acceptance_criteria[{source_index}]:dropped_cap"
             )
             continue
+        if isinstance(item, str) and item.strip():
+            accepted.append({"criterion": item.strip()})
+            diagnostics.append(
+                f"author_acceptance_criteria[{source_index}]:string_normalized"
+            )
+            continue
         if not isinstance(item, dict):
             diagnostics.append(
                 f"author_acceptance_criteria[{source_index}]:item_invalid"

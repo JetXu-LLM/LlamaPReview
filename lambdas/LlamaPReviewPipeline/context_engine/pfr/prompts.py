@@ -19,8 +19,12 @@ PLAN_METHOD_PROMPT = """Planning method:
   later code review. Plan evidence acquisition; do not make findings, decide
   merge posture, or encode a closed list of review conclusions.
 - Spend the existing question, round, and token budgets in this order: first
-  verify concrete acceptance criteria explicitly stated by the PR author;
-  second verify the highest-consequence locally answerable fact identified by
+  verify concrete author acceptance criteria from the PR description or
+  explicitly linked issue or acceptance material already supplied in the PR
+  details; second, when the PR changes tests, CI, or validation infrastructure,
+  verify the authoritative runner, discovery configuration, workflow, or
+  entrypoint that determines whether the changed validation actually executes;
+  third verify the highest-consequence locally answerable fact identified by
   Route; only then use remaining capacity for general exploration.
 - Extract distinctive structural entities already visible in the change:
   classes/types/prototypes, interfaces/base contracts, public functions or
@@ -67,7 +71,7 @@ PLAN_OUTPUT_SCHEMA = """Return exactly this JSON shape:
 {
   "author_acceptance_criteria": [
     {
-      "criterion": "A concrete pre-merge acceptance condition explicitly stated by the PR author."
+      "criterion": "A concrete pre-merge acceptance condition from the PR description or supplied linked acceptance material."
     }
   ],
   "verification_plan": [
@@ -84,10 +88,34 @@ PLAN_OUTPUT_SCHEMA = """Return exactly this JSON shape:
 PLAN_CONSTRUCTION_RULES = """Plan construction rules:
 - Ask at most $max_questions independently useful questions; fewer or none is
   valid.
-- Explicitly scan the PR author's description for concrete pre-merge
-  acceptance conditions about behavior changed by this PR. Return each one in
-  `author_acceptance_criteria`; return `[]` when none are stated. Omission is
-  not equivalent to a completed scan.
+- Explicitly scan the PR details for concrete pre-merge acceptance conditions
+  about behavior changed by this PR, covering the PR description and any
+  explicitly linked issue or acceptance material already supplied there. Do
+  not infer acceptance content from a bare link. Return each condition as an
+  object with exactly one `criterion` string in `author_acceptance_criteria`;
+  return `[]` when none are stated. Omission is not equivalent to a completed
+  scan.
+- For an authoritative runner, discovery, workflow, or entrypoint read, do not
+  invent symbol anchors. When no exact literal is already known to occur in
+  that file, omit `symbols`; a bounded small file can then be admitted as exact
+  full-file evidence.
+- A wrapper that delegates test or validation selection is not the complete
+  authoritative surface by itself. When supplied repository facts expose both
+  an exact runner or entrypoint and a separate exact discovery or configuration
+  candidate, reserve bounded questions for both in the initial plan. Treat the
+  paths as weak candidates until their contents establish the delegation; do
+  not defer the locally visible selection surface solely to Reconcile.
+- Validation execution may span a runner or entrypoint, a separate discovery or
+  configuration selector, and the workflow or CI invocation that supplies its
+  required environment and command. When the PR's acceptance material claims
+  that changed validation executes in CI, reserve initial-plan capacity for
+  every locally visible layer needed to establish that chain; one layer cannot
+  prove another. The repository fact sheet exposes exact GitHub workflow
+  candidates when they exist; prefer reading the relevant exact candidate to a
+  literal search whose no-hit cannot establish absence. If the workflow path is
+  still not exact, use one bounded repository-grounded search or
+  workflow-directory listing to locate it. This chain-closure priority
+  displaces lower-value general exploration when the question cap applies.
 - Rank questions by expected information value for the later review, then
   apply the cap, while preserving the acceptance-criteria and Route-risk
   priority above. Fewer well-grounded lookups are better than speculative ones.

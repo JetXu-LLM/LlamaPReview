@@ -103,7 +103,26 @@ treated as a provider failure, or redirected to an issue comment.
 
 ### Model and code boundaries
 
-The model owns engineering judgment. Code owns bounded inputs, sensitive-path exclusions, schema validation, sanitation, output limits, placement, payload construction, durable state, and publication identity. If one optional inline placement or Mermaid surface is invalid, deterministic projection may degrade that surface locally without inventing a new judgment.
+The model owns engineering judgment. Code owns bounded inputs, sensitive-path exclusions, schema validation, sanitation, output limits, placement, payload construction, durable state, and publication identity.
+
+Projection separates evidence truth from presentation placement. Required
+evidence references support an item's causal claim; a snippet only requests an
+anchor on the changed diff. Invalid supporting references may be removed, and
+unknown required references may be removed only when another admitted required
+reference for the same item survives. An invalid snippet or inline target can
+therefore degrade to a body-only finding without weakening the evidence gate.
+A malformed nondeciding item or optional Mermaid surface may be removed with
+its dependent prose. Projection fails closed when the final deciding basis is
+lost, truth-dependent core prose remains tainted, the provider envelope is
+incomplete, or fixed schema and size bounds cannot be met without guessing or
+inventing evidence.
+
+The first screen is projected from the primary retained merge-deciding item and
+its immediate owner action. A blocking finding or merge-deciding unknown leads;
+every other finding or unknown stays below the fold and contributes only to a
+count of further items. If a deciding item is removed locally, its dependent
+summary/action copy is removed too and the surface contracts to the next
+admitted deciding item.
 
 Deep evaluates author-stated acceptance outcomes separately. A claim that the
 PR repairs a preexisting failure across several devices, actors, branches, or
@@ -115,21 +134,53 @@ discovery: independently evidenced high-consequence failures remain separate
 findings even when an objective-closure contradiction already blocks merge.
 Only findings with the same causal root are clustered.
 
-Within PFR's existing bounds, the planner asks first about explicit author
-acceptance criteria, then the highest-consequence locally answerable Route
-fact, and then general exploration. The executor preserves that semantic order
-across read, search, and directory tools. The sole deterministic exception is
-the existing reserved removed-symbol check, which remains first so a soft time
-budget cannot erase it. If the first bounded read of a priority fact exposes
-only part of the deciding implementation, Reconcile may broaden the symbol
-slice on that same cached exact-head file. The existing one-read soft-budget
-rescue treats that broader slice as new evidence scope, without another
-repository fetch or a larger question, round, or token budget. If Reconcile
-serializes eligible follow-ups in a different order, that sole rescue remains
-bound to the earliest matching Plan read rather than the first serialized
-follow-up. The evidence ledger records each question, observation, and
-resolution; qualification can audit whether an established fact reached Deep
-without moving that audit into runtime judgment.
+Within PFR's existing bounds, the planner spends capacity in this order:
+concrete author acceptance criteria from the pull request or explicitly linked
+acceptance material; the authoritative runner, discovery configuration,
+workflow, or entrypoint when the change touches tests, CI, or validation
+infrastructure; the highest-consequence locally answerable Route fact; then
+general exploration. The executor preserves that semantic order across read,
+search, and directory tools. The sole deterministic exception is the existing
+reserved removed-symbol check, which remains first so a soft time budget cannot
+erase it.
+
+Validation wiring is an execution chain, not necessarily one file. When the
+bounded repository inventory exposes both an exact runner or entrypoint and a
+separate discovery or configuration candidate, PFR reserves initial-plan
+questions for both. Their paths remain location hints until fetched content
+proves the delegation. This avoids treating a thin wrapper as proof that a new
+test is selected, without adding a question, round, token, or provider-call
+budget.
+
+When author acceptance material also claims that the validation executes in
+CI, the chain extends through the workflow or CI invocation that supplies the
+command and required environment. PFR reserves existing initial-plan capacity
+for each locally visible layer; an exact runner does not prove discovery, and
+discovery does not prove CI invocation. The deterministic repository fact sheet
+exposes a bounded list of exact `.github/workflows/*` paths when present so the
+planner can read the relevant workflow rather than treating a literal-search
+no-hit as absence. If no exact workflow path is available, one bounded
+repository-grounded search or workflow-directory listing may locate it. This
+priority displaces lower-value exploration rather than increasing any budget.
+
+If the first bounded read of a priority fact exposes only part of the deciding
+implementation, Reconcile may broaden the symbol slice on that same cached
+exact-head file. The existing one-read soft-budget rescue treats that broader
+slice as new evidence scope, without another repository fetch or a larger
+question, round, or token budget. If Reconcile serializes eligible follow-ups
+in a different order, that sole rescue remains bound to the earliest matching
+Plan read rather than the first serialized follow-up. The evidence ledger
+records each question, observation, and resolution; qualification can audit
+whether an established fact reached Deep without moving that audit into
+runtime judgment.
+
+The planner requests one canonical object shape for each acceptance criterion,
+but deterministic normalization also accepts the equivalent nonempty string
+form so provider formatting drift cannot erase author-stated conditions. For a
+small exact-head file already fetched completely within the full-file evidence
+cap, a missed optional symbol anchor falls back to that exact full file. Large
+or truncated files still require a real bounded symbol hit; no fuzzy anchor or
+partial payload is promoted to full-file evidence.
 
 Literal symbol reads use runtime-owned declaration recognition in addition to
 the SDK's diff-context hints. The bounded slice therefore starts at the exact
@@ -144,18 +195,30 @@ exploration; this is retrieval evidence, not a deterministic compile verdict.
 
 ### Exactly-once publication
 
-Before a GitHub write, the Pipeline stores an immutable publication candidate and an owner-bound intent. The candidate binds an explicit publication kind—ordinary review, lifecycle cancellation, or post-merge follow-up—to the exact head and required lifecycle disposition. The Pipeline revalidates that disposition and the structurally reported lock state immediately before dispatch. A prepared, undispatched lifecycle intent that becomes locked is terminalized as unavailable with zero GitHub write; a dispatching intent is still reconciled because the write outcome may already exist. After dispatch the Pipeline reconciles the payload digest, bot identity, exact commit, and returned GitHub identifiers. Retries reuse the durable candidate or receipt; they do not regenerate and blindly post a second review or fall back to an issue comment.
+Before a GitHub write, the Pipeline stores an immutable publication candidate and an owner-bound intent. The candidate binds an explicit publication kind—ordinary review, lifecycle cancellation, or post-merge follow-up—to the exact head and required lifecycle disposition. After the intent becomes `dispatching` but immediately before `create_review`, the Pipeline fetches a fresh pull-request snapshot and revalidates head, state, merged disposition, and the failed-notice lock requirement. A confirmed mismatch raises `publication_pre_dispatch_abort` and stores `publication_post_started=false`; this typed path proves zero GitHub writes even though the intent had reached `dispatching`. Any `dispatching` intent without that typed terminal proof or an exact receipt remains `publication_outcome_unknown` and must be reconciled because the POST may already exist. After dispatch the Pipeline reconciles the payload digest, bot identity, exact commit, and returned GitHub identifiers. Retries reuse the durable candidate or receipt; they do not regenerate and blindly post a second review or fall back to an issue comment.
 
 The code-owned `Review unavailable` body is also an `ordinary_review`
-candidate. It enters this same transaction only after paid work and bounded
-generation retries, while the PR is proven open, unlocked, and on the same
-head. Its private artifact retains failure and accounting evidence but marks
-generation failed and quality unscoreable. No alternate publication kind,
-second Final call, or fallback write path exists.
+candidate. It enters this same transaction only after paid work completed and
+bounded Final/Projection retries were exhausted, while the PR is proven open,
+unlocked, and on the same head. Lifecycle is revalidated before candidate
+persistence and dispatch. New-head, ended, locked, quota/successor, pre-Final,
+and provider-outcome-unknown states remain private or retain their existing
+typed terminal outcome. Its private artifact preserves the generation failure
+and accounting evidence, marks quality unscoreable, and consumes no additional
+capacity. No alternate publication kind, second Final call, or fallback write
+path exists.
 
 ### Accounting truth
 
 Each provider HTTP attempt has a durable dispatch fence and a stable operation identity. The ledger retains logical routing identity, billed transport identity, status, token classes, and usage. A successful review cannot make a discarded or retried provider call disappear from accounting.
+
+The provider boundary exposes two different typed failures. If the durable
+fence cannot be proven before HTTP, `provider_dispatch_fence_unavailable` is a
+retryable zero-dispatch abort: the HTTP request was not made. If a durable
+`dispatching` record exists without a terminal transport result,
+`provider_dispatch_outcome_unknown` is terminal for that run: a second call is
+withheld and numeric usage remains explicitly incomplete. Error-message text
+never upgrades the latter into proof that no dispatch occurred.
 
 Lifecycle cancellation and supersession do not erase work that already
 occurred. Content-safe telemetry records each checkpoint disposition, successor

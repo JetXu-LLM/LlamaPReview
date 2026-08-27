@@ -20,6 +20,7 @@ from .errors import (
     PRLifecycleSuperseded,
     PublicationIntegrityFailure,
     PublicationOutcomeUnknown,
+    PublicationPreDispatchAbort,
     PublicationStateConflict,
 )
 from .pipeline_admission import (
@@ -316,7 +317,7 @@ def post_publication_observation(
     }
 
 
-def _commit_prepared_locked_unavailable(
+def _commit_known_zero_write_abort(
     candidate: Mapping[str, Any],
     intent: Mapping[str, Any],
     exc: BaseException,
@@ -327,10 +328,17 @@ def _commit_prepared_locked_unavailable(
     ],
     table,
 ) -> Optional[bool]:
-    if not (
-        isinstance(exc, PRLifecycleSuperseded)
-        and exc.superseded_kind == "publication_unavailable_locked"
-    ):
+    if isinstance(exc, PRLifecycleSuperseded):
+        actual_head_sha = exc.actual_head_sha
+        current_state = exc.current_state
+        merged = exc.merged
+        abort_reason = exc.superseded_kind
+    elif isinstance(exc, PublicationPreDispatchAbort):
+        actual_head_sha = exc.actual_head_sha
+        current_state = exc.current_state
+        merged = exc.merged
+        abort_reason = exc.abort_reason
+    else:
         return None
     terminal_attributes = dict(candidate.get("terminal_attributes") or {})
     accounting = {
@@ -346,8 +354,18 @@ def _commit_prepared_locked_unavailable(
         )
         if key in terminal_attributes
     }
-    lifecycle = "merged" if exc.merged else "closed"
+    lifecycle = (
+        "merged"
+        if merged
+        else "closed" if current_state == "closed" else current_state
+    )
     publication_kind = str(candidate.get("publication_kind") or "")
+    locked_unavailable = abort_reason == "publication_unavailable_locked"
+    exclusion_reason = (
+        "publication_unavailable_locked"
+        if locked_unavailable
+        else "publication_pre_dispatch_abort"
+    )
     terminal = {
         **accounting,
         "publication_key": str(intent.get("publication_key") or ""),
@@ -356,21 +374,25 @@ def _commit_prepared_locked_unavailable(
             candidate.get("required_disposition") or ""
         ),
         "publication_status": "aborted_before_dispatch",
-        "publication_unavailable_locked": True,
-        "review_lifecycle_outcome": lifecycle,
+        "publication_post_started": False,
+        "publication_pre_dispatch_abort": abort_reason,
         "quality_scoreable": False,
-        "quality_exclusion_reasons": ["publication_unavailable_locked"],
+        "quality_exclusion_reasons": [exclusion_reason],
     }
+    if locked_unavailable:
+        terminal["publication_unavailable_locked"] = True
+    if lifecycle in {"merged", "closed"}:
+        terminal["review_lifecycle_outcome"] = lifecycle
     stored = persistence.mark_superseded(
         str(candidate.get("repo") or ""),
         int(candidate.get("pr_number") or 0),
         context.expected_status,
         expected_head_sha=str(candidate.get("head_sha") or ""),
-        actual_head_sha=exc.actual_head_sha,
+        actual_head_sha=actual_head_sha,
         stage=exc.stage,
-        superseded_kind="publication_unavailable_locked",
-        current_state=exc.current_state,
-        merged=exc.merged,
+        superseded_kind=abort_reason,
+        current_state=current_state,
+        merged=merged,
         extra_attrs=terminal,
         phase_claim=context.phase_claim,
         expected_publication_intent=intent,
@@ -385,17 +407,17 @@ def _commit_prepared_locked_unavailable(
         ) or {}
         stored = bool(
             latest.get("status") == "SUPERSEDED"
-            and latest.get("superseded_kind")
-            == "publication_unavailable_locked"
-            and latest.get("publication_unavailable_locked") is True
+            and latest.get("superseded_kind") == abort_reason
+            and latest.get("publication_status")
+            == "aborted_before_dispatch"
+            and latest.get("publication_post_started") is False
             and str(latest.get("publication_key") or "")
             == str(intent.get("publication_key") or "")
         )
     if not stored:
         raise PublicationStateConflict(
-            "Locked publication terminal write lost its exact prepared "
-            "intent.",
-            stage="publication.locked_unavailable",
+            "Known-zero-write publication abort lost its exact intent.",
+            stage="publication.pre_dispatch_abort",
         )
     if lifecycle_unavailable_observer is not None:
         lifecycle_unavailable_observer(
@@ -404,12 +426,35 @@ def _commit_prepared_locked_unavailable(
                 "stage": exc.stage,
                 "publication_kind": publication_kind,
                 "lifecycle": lifecycle,
-                "reason": "locked",
+                "reason": abort_reason,
                 "stored": True,
                 **accounting,
             }
         )
     return True
+
+
+def _commit_prepared_locked_unavailable(
+    candidate: Mapping[str, Any],
+    intent: Mapping[str, Any],
+    exc: BaseException,
+    *,
+    context: PublicationContext,
+    lifecycle_unavailable_observer: Optional[
+        Callable[[Mapping[str, Any]], None]
+    ],
+    table,
+) -> Optional[bool]:
+    """Backward-compatible private alias for the broader zero-write commit."""
+
+    return _commit_known_zero_write_abort(
+        candidate,
+        intent,
+        exc,
+        context=context,
+        lifecycle_unavailable_observer=lifecycle_unavailable_observer,
+        table=table,
+    )
 
 
 def recover_pending(
@@ -513,12 +558,12 @@ def recover_pending(
             stage="publication.dry_run_suppression",
         )
 
-    def commit_prepared_locked_unavailable(
+    def commit_known_zero_write_abort(
         candidate: Mapping[str, Any],
         intent: Mapping[str, Any],
         exc: BaseException,
     ) -> Optional[bool]:
-        return _commit_prepared_locked_unavailable(
+        return _commit_known_zero_write_abort(
             candidate,
             intent,
             exc,
@@ -558,7 +603,7 @@ def recover_pending(
             commit_prepared_without_write if context.dry_run else None
         ),
         prepared_pre_dispatch_failure_commit=(
-            commit_prepared_locked_unavailable
+            commit_known_zero_write_abort
             if not context.dry_run
             else None
         ),
@@ -632,7 +677,7 @@ def commit_prepared(
             ),
             prepared_pre_dispatch_failure_commit=(
                 lambda candidate, intent, exc: (
-                    _commit_prepared_locked_unavailable(
+                    _commit_known_zero_write_abort(
                         candidate,
                         intent,
                         exc,
@@ -860,7 +905,14 @@ def failure_attributes(
     """Project publication state into a typed terminal failure."""
 
     attrs = dict(base)
-    if isinstance(exc, (HeadSuperseded, PRLifecycleSuperseded)):
+    if isinstance(
+        exc,
+        (
+            HeadSuperseded,
+            PRLifecycleSuperseded,
+            PublicationPreDispatchAbort,
+        ),
+    ):
         latest = persistence.get_item(
             repo,
             pr_number,
@@ -868,7 +920,11 @@ def failure_attributes(
             consistent_read=True,
         ) or {}
         intent = latest.get("publication_intent")
-        if isinstance(intent, Mapping) and intent.get("state") == "prepared":
+        known_zero_write = isinstance(exc, PublicationPreDispatchAbort)
+        if isinstance(intent, Mapping) and (
+            intent.get("state") == "prepared"
+            or (known_zero_write and intent.get("state") == "dispatching")
+        ):
             attrs.update(
                 {
                     "publication_status": "aborted_before_dispatch",
@@ -877,6 +933,17 @@ def failure_attributes(
                     "required_disposition": intent.get(
                         "required_disposition"
                     ),
+                }
+            )
+        if known_zero_write:
+            attrs.update(
+                {
+                    "publication_post_started": False,
+                    "publication_pre_dispatch_abort": exc.abort_reason,
+                    "quality_scoreable": False,
+                    "quality_exclusion_reasons": [
+                        "publication_pre_dispatch_abort"
+                    ],
                 }
             )
         if (

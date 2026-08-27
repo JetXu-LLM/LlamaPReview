@@ -184,10 +184,14 @@ def _dependency_bundle_content(*, status="completed", conclusion="success"):
 
 
 class _Pull:
-    def __init__(self):
+    def __init__(self, *, head_sha="abcdef123456"):
         self.reviews = []
         self.review_resources = []
         self.review_comments = []
+        self.head = SimpleNamespace(sha=head_sha)
+        self.state = "open"
+        self.merged = False
+        self.locked = False
 
     def get_files(self):
         return []
@@ -236,7 +240,7 @@ class _Runtime:
     def __init__(self, content=None, *, head_sha="abcdef123456"):
         self.content = content or _pr_content()
         self.head_sha = head_sha
-        self.pull = _Pull()
+        self.pull = _Pull(head_sha=head_sha)
 
     def get_pr_content(self, repo_full_name, pr_number, *, context_lines=10, force_update=True):
         return self.content

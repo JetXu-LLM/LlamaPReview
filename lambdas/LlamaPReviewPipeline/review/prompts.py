@@ -406,9 +406,13 @@ For `verification_needed`, keep in `material_unknowns` only facts Deep
 explicitly said decide the merge posture. Preserve other uncertainty as a
 `confidence_checks` item instead; never make a nondeciding check merge-affecting
 merely because another unknown genuinely decides the verdict.
-When a blocking decision has no P0/P1, put the P2 that carries the merge
-decision first in `findings`; presentation code uses that consequence order for
-the first-screen proof unit.
+For every blocking decision, put the single finding that most affects the
+merge posture first in `findings`; when there is no P0/P1, that first item must
+be the P2 that carries the merge decision. For `verification_needed`, put the
+single missing fact that most affects the merge posture first in
+`material_unknowns`. Presentation code reuses that first surviving deciding
+item and its own owner action for the first screen; it does not rewrite or
+aggregate a separate engineering judgment.
 A `test-gap` may be that carrier only when Deep explicitly made it a pre-merge
 blocker, it has admitted required evidence, and it names the concrete owner
 action required before merge. `question` and `note` never carry a blocking

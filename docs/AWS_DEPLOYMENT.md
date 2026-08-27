@@ -67,6 +67,12 @@ still writes the durable AWS recovery, accounting, and artifact state described
 in [configuration](CONFIGURATION.md#dry_run). Use the isolated local validation
 path when the acceptance boundary is zero AWS product writes.
 
+The whole-policy literal `pipeline_capacity_policy = "off"` disables quota
+counters only; it leaves one-time head succession enabled. To disable
+succession, use an explicit `successor=off` key in a valid compact policy and
+review the resulting capacity values as described in
+[configuration](CONFIGURATION.md#free-review-capacity).
+
 Terraform independently checks both hexadecimal and base64 SHA-256 identities before uploading each artifact.
 
 ## Apply and inspect the inert stack
@@ -91,7 +97,7 @@ Before enabling traffic, verify:
 - the ESM filter admits only `PENDING` and `CONTEXT_READY` items, so capacity
   sentinels never invoke the Pipeline;
 - `PIPELINE_CAPACITY_POLICY=off` unless this self-hoster deliberately chose its
-  own bounded policy;
+  own bounded policy; this literal leaves one-time succession enabled;
 - DynamoDB TTL/PITR, S3 public blocks/encryption/versioning/lifecycle, log retention, alarms, and IAM match the plan;
 - the secret environment values were preserved without appearing in output or logs.
 

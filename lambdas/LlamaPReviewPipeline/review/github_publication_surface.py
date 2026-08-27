@@ -20,6 +20,7 @@ from ..errors import (
     PublicationIdentityUnavailable,
     PublicationIntegrityFailure,
     PublicationOutcomeUnknown,
+    PublicationPreDispatchAbort,
     PublicationPreflightUnavailable,
     PublicationStateConflict,
 )
@@ -313,7 +314,15 @@ def _resolve_exact_review_commit(
         deadline,
         stage="review.publish.commit_resolution",
     )
-    commit = get_commit(sha=expected)
+    try:
+        commit = get_commit(sha=expected)
+    except DeadlineExceeded:
+        raise
+    except Exception as exc:
+        raise HeadVerificationUnavailable(
+            "GitHub exact-commit resolution is temporarily unavailable.",
+            stage="review.publish.commit_resolution",
+        ) from exc
     resolved = _identity(commit, "sha")
     if not resolved:
         raise HeadVerificationUnavailable(
@@ -327,6 +336,62 @@ def _resolve_exact_review_commit(
             stage="review.publish.commit_resolution",
         )
     return get_pull, commit
+
+
+def _require_fresh_dispatch_disposition(
+    pull: Any,
+    prepared: PreparedGitHubReview,
+) -> None:
+    """Reject a confirmed lifecycle mismatch before GitHub POST begins."""
+
+    expected_head = str(prepared.head_sha or "").strip()
+    head = _value(pull, "head")
+    actual_head = _identity(head, "sha") or _identity(pull, "head_sha")
+    state = _identity(pull, "state").casefold()
+    merged_raw = _value(pull, "merged")
+    locked_raw = _value(pull, "locked")
+    merged = merged_raw if isinstance(merged_raw, bool) else None
+    locked = locked_raw if isinstance(locked_raw, bool) else None
+    if not actual_head or not state:
+        raise HeadVerificationUnavailable(
+            "GitHub pull request omitted fresh head or lifecycle state.",
+            stage="review.publish.pre_dispatch_disposition",
+        )
+
+    abort_reason = ""
+    if actual_head.casefold() != expected_head.casefold():
+        abort_reason = "head_changed"
+    elif prepared.required_disposition == "open_same_head":
+        if state != "open":
+            abort_reason = "pr_merged" if merged is True else "pr_closed"
+    elif prepared.required_disposition == "merged_same_head":
+        if state != "closed" or merged is not True:
+            abort_reason = "merged_disposition_changed"
+    elif prepared.required_disposition == "closed_same_head":
+        if state != "closed" or merged is not False:
+            abort_reason = "closed_disposition_changed"
+    if (
+        not abort_reason
+        and prepared.artifact.get("review_mode") == "failed"
+    ):
+        if locked is None:
+            raise HeadVerificationUnavailable(
+                "GitHub pull request omitted the fresh lock state required "
+                "for a failed-review notice.",
+                stage="review.publish.pre_dispatch_disposition",
+            )
+        if locked:
+            abort_reason = "publication_unavailable_locked"
+    if abort_reason:
+        raise PublicationPreDispatchAbort(
+            expected_head,
+            actual_head,
+            current_state=state,
+            merged=bool(merged),
+            locked=locked,
+            abort_reason=abort_reason,
+            stage="review.publish.pre_dispatch_disposition",
+        )
 
 
 def _dispatch_exact_review(
@@ -347,7 +412,17 @@ def _dispatch_exact_review(
         deadline,
         stage="review.publish.create_review",
     )
-    pull = get_pull(int(pr_number))
+    try:
+        pull = get_pull(int(pr_number))
+    except DeadlineExceeded:
+        raise
+    except Exception as exc:
+        raise HeadVerificationUnavailable(
+            "GitHub pull request is temporarily unavailable immediately "
+            "before review dispatch.",
+            stage="review.publish.pre_dispatch_disposition",
+        ) from exc
+    _require_fresh_dispatch_disposition(pull, prepared)
     _require_surface_budget(
         deadline,
         stage="review.publish.create_review",

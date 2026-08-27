@@ -14,11 +14,15 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 from .. import persistence
-from ..deadline import Deadline
+from ..deadline import Deadline, DeadlineExceeded
 from ..errors import (
+    HeadSuperseded,
+    HeadVerificationUnavailable,
     PublicationIdentityUnavailable,
     PublicationIntegrityFailure,
     PublicationOutcomeUnknown,
+    PublicationPreDispatchAbort,
+    PublicationPreflightUnavailable,
     PublicationStateConflict,
     classify_failure,
 )
@@ -404,6 +408,17 @@ def execute_dispatching(
             deadline=deadline,
         )
         dispatched = True
+    except (
+        DeadlineExceeded,
+        HeadSuperseded,
+        HeadVerificationUnavailable,
+        PublicationPreDispatchAbort,
+        PublicationPreflightUnavailable,
+    ):
+        # These failures are raised only from reads or deterministic checks
+        # that happen before pull.create_review is called.  Reconciliation is
+        # reserved for a POST that may actually have started.
+        raise
     except PublicationIntegrityFailure:
         raise
     except Exception as error:
@@ -521,13 +536,24 @@ def publish_prepared_transaction(
         phase_claim=phase_claim,
         table=table,
     )
-    receipt = execute_dispatching(
-        repo_obj,
-        pr_number,
-        intent=intent,
-        candidate=candidate,
-        deadline=deadline,
-    )
+    try:
+        receipt = execute_dispatching(
+            repo_obj,
+            pr_number,
+            intent=intent,
+            candidate=candidate,
+            deadline=deadline,
+        )
+    except PublicationPreDispatchAbort as exc:
+        if prepared_pre_dispatch_failure_commit is not None:
+            handled = prepared_pre_dispatch_failure_commit(
+                candidate,
+                intent,
+                exc,
+            )
+            if handled is not None:
+                return handled
+        raise
     observation = (
         post_write_observation(candidate)
         if post_write_observation is not None
@@ -629,13 +655,24 @@ def recover_publication_transaction(
             phase_claim=phase_claim,
             table=table,
         )
-        receipt = execute_dispatching(
-            repo_obj,
-            int(candidate.get("pr_number") or 0),
-            intent=intent,
-            candidate=candidate,
-            deadline=deadline,
-        )
+        try:
+            receipt = execute_dispatching(
+                repo_obj,
+                int(candidate.get("pr_number") or 0),
+                intent=intent,
+                candidate=candidate,
+                deadline=deadline,
+            )
+        except PublicationPreDispatchAbort as exc:
+            if prepared_pre_dispatch_failure_commit is not None:
+                handled = prepared_pre_dispatch_failure_commit(
+                    candidate,
+                    intent,
+                    exc,
+                )
+                if handled is not None:
+                    return handled
+            raise
     elif state == "dispatching":
         repo_obj = repository_for(str(candidate.get("repo") or ""))
         effect = reconcile_dispatching(

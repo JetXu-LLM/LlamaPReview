@@ -13,12 +13,16 @@ from lambdas.LlamaPReviewPipeline.context_engine.assembler import (
     assemble_review_context,
 )
 from lambdas.LlamaPReviewPipeline.context_engine.pfr import (
+    PLAN_CONTINUATION_PROMPT,
     PLAN_METHOD_PROMPT,
     PLAN_PROMPT,
     RECONCILE_SYSTEM_PROMPT,
     _append_pfr_sections,
     _normalize_author_acceptance_criteria,
     _strip_reconcile_extra_fields,
+)
+from lambdas.LlamaPReviewPipeline.context_engine.pfr.hints import (
+    build_repo_fact_sheet,
 )
 from lambdas.LlamaPReviewPipeline.context_engine.repo_structure import (
     RepoInventory,
@@ -47,9 +51,104 @@ def _pr_content(*, diff='+path = "example_files/asset.json"\n'):
 
 
 class PfrEvidenceContractTest(unittest.TestCase):
+    def _assert_plan_priority_order(self, prompt):
+        normalized = " ".join(prompt.casefold().split())
+        priority_fragments = (
+            "first verify concrete author acceptance criteria from the pr "
+            "description or explicitly linked issue or acceptance material "
+            "already supplied in the pr details",
+            "second, when the pr changes tests, ci, or validation "
+            "infrastructure, verify the authoritative runner, discovery "
+            "configuration, workflow, or entrypoint",
+            "third verify the highest-consequence locally answerable fact "
+            "identified by route",
+            "only then use remaining capacity for general exploration",
+        )
+
+        positions = [normalized.index(fragment) for fragment in priority_fragments]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn(
+            "covering the pr description and any explicitly linked issue or "
+            "acceptance material already supplied there",
+            normalized,
+        )
+        self.assertIn(
+            "a wrapper that delegates test or validation selection is not "
+            "the complete authoritative surface by itself",
+            normalized,
+        )
+        self.assertIn(
+            "reserve bounded questions for both in the initial plan",
+            normalized,
+        )
+        self.assertIn(
+            "do not defer the locally visible selection surface solely to "
+            "reconcile",
+            normalized,
+        )
+        self.assertIn(
+            "validation execution may span a runner or entrypoint, a separate "
+            "discovery or configuration selector, and the workflow or ci "
+            "invocation",
+            normalized,
+        )
+        self.assertIn(
+            "reserve initial-plan capacity for every locally visible layer "
+            "needed to establish that chain",
+            normalized,
+        )
+        self.assertIn(
+            "the repository fact sheet exposes exact github workflow "
+            "candidates when they exist",
+            normalized,
+        )
+        self.assertIn(
+            "prefer reading the relevant exact candidate to a literal search "
+            "whose no-hit cannot establish absence",
+            normalized,
+        )
+        self.assertIn(
+            "use one bounded repository-grounded search or workflow-directory "
+            "listing to locate it",
+            normalized,
+        )
+        self.assertIn(
+            "chain-closure priority displaces lower-value general exploration",
+            normalized,
+        )
+
+    def test_standalone_plan_prompt_preserves_priority_order(self):
+        self._assert_plan_priority_order(PLAN_PROMPT)
+
+    def test_continuation_plan_prompt_preserves_priority_order(self):
+        self._assert_plan_priority_order(PLAN_CONTINUATION_PROMPT)
+
+    def test_repo_fact_sheet_exposes_bounded_exact_github_workflows(self):
+        accessible_files = {
+            ".github/workflows/database.yml",
+            ".github/workflows/quality.yaml",
+            ".github/dependabot.yml",
+            "package.json",
+            "src/app.py",
+        }
+
+        facts = build_repo_fact_sheet(accessible_files)
+
+        self.assertIn(
+            "- GitHub workflow candidates: .github/workflows/database.yml, "
+            ".github/workflows/quality.yaml",
+            facts,
+        )
+        self.assertNotIn(".github/dependabot.yml", facts)
+
     def test_provider_contract_ranks_evidence_without_merge_materiality_cues(self):
         provider_contract = "\n".join(
-            (PLAN_METHOD_PROMPT, PLAN_PROMPT, RECONCILE_SYSTEM_PROMPT)
+            (
+                PLAN_METHOD_PROMPT,
+                PLAN_PROMPT,
+                PLAN_CONTINUATION_PROMPT,
+                RECONCILE_SYSTEM_PROMPT,
+            )
         ).casefold()
         normalized_contract = " ".join(provider_contract.split())
 
@@ -63,11 +162,15 @@ class PfrEvidenceContractTest(unittest.TestCase):
         self.assertIn("returned lifecycle or control handle", provider_contract)
         self.assertIn("do not hand the owner a lookup", provider_contract)
         self.assertIn(
-            "first verify concrete acceptance criteria explicitly stated",
+            "first verify concrete author acceptance criteria",
             normalized_contract,
         )
         self.assertIn(
-            "second verify the highest-consequence locally answerable fact",
+            "second, when the pr changes tests, ci, or validation infrastructure",
+            normalized_contract,
+        )
+        self.assertIn(
+            "third verify the highest-consequence locally answerable fact",
             normalized_contract,
         )
         self.assertIn(
@@ -104,6 +207,35 @@ class PfrEvidenceContractTest(unittest.TestCase):
         self.assertEqual(
             plan["author_acceptance_criteria"],
             [{"criterion": "The migration test must pass before merge."}],
+        )
+
+    def test_author_criteria_normalize_equivalent_string_items(self):
+        plan = {
+            "author_acceptance_criteria": [
+                "The runner must discover the new test before merge.",
+                {"criterion": "The migration test must pass before merge."},
+            ]
+        }
+
+        diagnostics = _normalize_author_acceptance_criteria(
+            plan,
+            max_items=8,
+        )
+
+        self.assertEqual(
+            plan["author_acceptance_criteria"],
+            [
+                {
+                    "criterion": (
+                        "The runner must discover the new test before merge."
+                    )
+                },
+                {"criterion": "The migration test must pass before merge."},
+            ],
+        )
+        self.assertEqual(
+            diagnostics,
+            ["author_acceptance_criteria[0]:string_normalized"],
         )
 
     def test_removed_reconcile_roots_are_ignored(self):

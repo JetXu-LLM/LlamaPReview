@@ -431,6 +431,54 @@ class PresentationCompilationTests(unittest.TestCase):
             "low",
         )
 
+    def test_blocking_first_screen_binds_only_the_primary_deciding_item(self):
+        primary = finding(
+            priority="P1",
+            category="bug",
+            required=["path:src/app.py"],
+            supporting=[],
+            placement="headline",
+            headline="The changed call bypasses the required safety wrapper",
+        )
+        primary["owner_action"] = "Route the changed call through the wrapper."
+        secondary = copy.deepcopy(primary)
+        secondary["headline"] = "The fallback path can still return stale state"
+        secondary["owner_action"] = "Invalidate the fallback cache before merge."
+        raw = presentation(
+            verdict="blocking",
+            findings=[primary, secondary],
+            unknowns=[material_unknown()],
+        )
+        raw["decision"]["summary"] = (
+            "Do not merge because several independent concerns remain."
+        )
+        raw["decision"]["owner_actions"] = [
+            "Rewrite all changed behavior before merge."
+        ]
+
+        result = compile_presentation_v1(
+            raw,
+            pr_details=PR_DETAILS,
+            context_meta=context_meta(),
+        )
+
+        self.assertTrue(result.publishable)
+        first_screen, details = result.review["pr_review_comment"].split(
+            "<details>",
+            1,
+        )
+        self.assertIn(primary["headline"], first_screen)
+        self.assertIn(primary["owner_action"], first_screen)
+        self.assertIn("2 further items in details.", first_screen)
+        self.assertNotIn(secondary["headline"], first_screen)
+        self.assertNotIn(secondary["owner_action"], first_screen)
+        self.assertNotIn("active runtime binding", first_screen)
+        self.assertIn(secondary["headline"], details)
+        self.assertEqual(
+            result.review["v3_review"]["owner_action"],
+            [{"text": primary["owner_action"], "resolves": ["F1"]}],
+        )
+
     def test_finding_level_supporting_ci_is_removed_locally(self):
         raw = presentation()
         raw["findings"][0]["supporting_evidence_refs"] = ["ci:unit:1"]
@@ -695,12 +743,16 @@ class PresentationCompilationTests(unittest.TestCase):
         )
 
         self.assertTrue(initial.publishable)
-        self.assertEqual(refreshed.status, "failure")
+        self.assertTrue(refreshed.publishable)
+        self.assertEqual(len(refreshed.presentation["findings"]), 1)
         self.assertEqual(
-            refreshed.failure_kind,
-            "changed_ci_core_prose_tainted",
+            refreshed.presentation["findings"][0]["headline"],
+            "The independent code blocker must be resolved",
         )
-        self.assertIsNone(refreshed.review)
+        self.assertNotIn(
+            "Old failure path",
+            refreshed.review["pr_review_comment"],
+        )
 
     def test_required_ci_may_remain_in_its_deciding_item_prose(self):
         blocker = finding(
@@ -1008,6 +1060,91 @@ class PresentationCompilationTests(unittest.TestCase):
             any(
                 "invalid_optional_anchor_removed" in item
                 for item in result.normalizations
+            )
+        )
+
+    def test_blocking_finding_survives_bad_exact_snippet_with_exact_head_evidence(self):
+        blocker = finding(
+            priority="P1",
+            category="bug",
+            required=["path:src/app.py"],
+            supporting=[],
+            placement="inline",
+            suggestion={
+                "type": "DIRECT_REPLACEMENT",
+                "content": "value = build_safely(2)",
+            },
+            headline="The changed call bypasses the required safety wrapper",
+        )
+        blocker["code_snippet"] = "value = biuld(2)"
+        blocker["representation_requirement"] = "exact_postimage"
+
+        result = compile_presentation_v1(
+            presentation(verdict="blocking", findings=[blocker]),
+            pr_details=PR_DETAILS,
+            context_meta=context_meta(),
+        )
+
+        self.assertTrue(result.publishable)
+        self.assertTrue(result.safe_partial)
+        retained = result.review["v3_review"]["findings"][0]
+        self.assertTrue(retained["blocking"])
+        self.assertEqual(retained["code_snippet"], "")
+        self.assertEqual(retained["visibility"], "headline")
+        self.assertEqual(retained["representation_requirement"], "semantic")
+        self.assertNotIn("suggested_code", retained)
+        self.assertTrue(
+            any(
+                "invalid_exact_representation_removed" in action
+                for action in result.normalizations
+            )
+        )
+
+    def test_bad_exact_snippet_without_surviving_code_evidence_stays_closed(self):
+        blocker = finding(
+            priority="P1",
+            category="bug",
+            required=["ci:unit:1"],
+            supporting=[],
+            placement="inline",
+        )
+        blocker["code_snippet"] = "value = biuld(2)"
+        blocker["representation_requirement"] = "exact_postimage"
+
+        result = compile_presentation_v1(
+            presentation(verdict="blocking", findings=[blocker]),
+            pr_details=PR_DETAILS,
+            context_meta=context_meta(),
+        )
+
+        self.assertFalse(result.publishable)
+        self.assertEqual(result.failure_kind, "deciding_item_loss")
+
+    def test_partial_unknown_required_refs_are_removed_before_capability_check(self):
+        blocker = finding(
+            priority="P1",
+            category="bug",
+            required=["ev_missing_final_ref", "path:src/app.py"],
+            supporting=[],
+            placement="headline",
+        )
+
+        result = compile_presentation_v1(
+            presentation(verdict="blocking", findings=[blocker]),
+            pr_details=PR_DETAILS,
+            context_meta=context_meta(),
+        )
+
+        self.assertTrue(result.publishable)
+        self.assertEqual(
+            result.presentation["findings"][0]["required_evidence_refs"],
+            ["path:src/app.py"],
+        )
+        self.assertTrue(
+            any(
+                "partial_unknown_refs_removed" in action
+                and "path:src/app.py" in action
+                for action in result.normalizations
             )
         )
 
@@ -1324,7 +1461,6 @@ class PresentationCompilationTests(unittest.TestCase):
         self.assertTrue(review["findings"][0]["blocking"])
         self.assertEqual(
             result.presentation["decision"]["summary"],
-            "Changes are needed before merge: "
             "The changed command executes untrusted input",
         )
         self.assertEqual(
@@ -1921,13 +2057,25 @@ class PresentationCompilationTests(unittest.TestCase):
             context_meta=context_meta(),
         )
 
-        for result in (clear, unverified):
-            self.assertEqual(result.status, "failure")
-            self.assertEqual(
-                result.failure_kind,
-                "decision_finding_contradiction",
+        self.assertEqual(clear.status, "failure")
+        self.assertEqual(
+            clear.failure_kind,
+            "decision_finding_contradiction",
+        )
+        self.assertIsNone(clear.review)
+
+        self.assertTrue(unverified.publishable)
+        self.assertEqual(unverified.presentation["findings"], [])
+        self.assertEqual(
+            unverified.review["v3_review"]["visible_verdict"],
+            "unverified",
+        )
+        self.assertTrue(
+            any(
+                "verification_conflicting_critical_removed" in action
+                for action in unverified.normalizations
             )
-            self.assertIsNone(result.review)
+        )
 
     def test_blocking_decision_can_be_carried_by_verified_p2(self):
         for category in (
