@@ -110,10 +110,12 @@ PLAN_CONSTRUCTION_RULES = """Plan construction rules:
   required environment and command. When the PR's acceptance material claims
   that changed validation executes in CI, reserve initial-plan capacity for
   every locally visible layer needed to establish that chain; one layer cannot
-  prove another. If the workflow path is not yet exact, use one bounded
-  repository-grounded search or workflow-directory listing to locate it. This
-  chain-closure priority displaces lower-value general exploration when the
-  question cap applies.
+  prove another. The repository fact sheet exposes exact GitHub workflow
+  candidates when they exist; prefer reading the relevant exact candidate to a
+  literal search whose no-hit cannot establish absence. If the workflow path is
+  still not exact, use one bounded repository-grounded search or
+  workflow-directory listing to locate it. This chain-closure priority
+  displaces lower-value general exploration when the question cap applies.
 - Rank questions by expected information value for the later review, then
   apply the cap, while preserving the acceptance-criteria and Route-risk
   priority above. Fewer well-grounded lookups are better than speculative ones.

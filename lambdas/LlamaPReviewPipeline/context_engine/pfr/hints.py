@@ -22,6 +22,9 @@ def build_repo_fact_sheet(
     top_dirs = sorted(
         {path.split("/", 1)[0] for path in files if "/" in path}
     )[:12]
+    github_workflows = [
+        path for path in files if path.startswith(".github/workflows/")
+    ][:12]
     owner_docs = [path for path in files if path in OWNER_DOC_PATHS]
     return "\n".join(
         [
@@ -37,6 +40,12 @@ def build_repo_fact_sheet(
             + (", ".join(top_dirs) if top_dirs else "none"),
             "- Manifests: "
             + (", ".join(manifests) if manifests else "none"),
+            "- GitHub workflow candidates: "
+            + (
+                ", ".join(github_workflows)
+                if github_workflows
+                else "none"
+            ),
             "- Owner docs: "
             + (", ".join(owner_docs) if owner_docs else "none"),
         ]

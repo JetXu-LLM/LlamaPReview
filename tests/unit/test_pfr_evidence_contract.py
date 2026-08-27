@@ -21,6 +21,9 @@ from lambdas.LlamaPReviewPipeline.context_engine.pfr import (
     _normalize_author_acceptance_criteria,
     _strip_reconcile_extra_fields,
 )
+from lambdas.LlamaPReviewPipeline.context_engine.pfr.hints import (
+    build_repo_fact_sheet,
+)
 from lambdas.LlamaPReviewPipeline.context_engine.repo_structure import (
     RepoInventory,
 )
@@ -95,6 +98,16 @@ class PfrEvidenceContractTest(unittest.TestCase):
             normalized,
         )
         self.assertIn(
+            "the repository fact sheet exposes exact github workflow "
+            "candidates when they exist",
+            normalized,
+        )
+        self.assertIn(
+            "prefer reading the relevant exact candidate to a literal search "
+            "whose no-hit cannot establish absence",
+            normalized,
+        )
+        self.assertIn(
             "use one bounded repository-grounded search or workflow-directory "
             "listing to locate it",
             normalized,
@@ -109,6 +122,24 @@ class PfrEvidenceContractTest(unittest.TestCase):
 
     def test_continuation_plan_prompt_preserves_priority_order(self):
         self._assert_plan_priority_order(PLAN_CONTINUATION_PROMPT)
+
+    def test_repo_fact_sheet_exposes_bounded_exact_github_workflows(self):
+        accessible_files = {
+            ".github/workflows/database.yml",
+            ".github/workflows/quality.yaml",
+            ".github/dependabot.yml",
+            "package.json",
+            "src/app.py",
+        }
+
+        facts = build_repo_fact_sheet(accessible_files)
+
+        self.assertIn(
+            "- GitHub workflow candidates: .github/workflows/database.yml, "
+            ".github/workflows/quality.yaml",
+            facts,
+        )
+        self.assertNotIn(".github/dependabot.yml", facts)
 
     def test_provider_contract_ranks_evidence_without_merge_materiality_cues(self):
         provider_contract = "\n".join(

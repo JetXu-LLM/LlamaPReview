@@ -54,11 +54,14 @@ Reconcile is not the sole path to a locally visible selector.
 If author acceptance material claims that changed validation executes in CI,
 the same contract must reserve existing initial-plan capacity for the locally
 visible runner or entrypoint, discovery or configuration selector, and workflow
-or CI invocation needed to establish that chain. With no exact workflow path,
-the plan may spend one bounded repository-grounded search or workflow-directory
-listing to locate it. No layer proves another, and this priority displaces
-general exploration instead of changing a question, round, token, model, or
-provider-call cap.
+or CI invocation needed to establish that chain. `build_repo_fact_sheet`
+therefore exposes at most twelve exact `.github/workflows/*` candidates from the
+existing accessible-file inventory; these are location hints, not execution
+proof, and the relevant candidate must still be read. With no exact workflow
+path, the plan may spend one bounded repository-grounded search or
+workflow-directory listing to locate it. No layer proves another, and this
+priority displaces general exploration instead of changing a question, round,
+token, model, or provider-call cap.
 
 PFR contract tests must tolerate only representation-equivalent acceptance
 criteria: the canonical `{criterion: ...}` object and a nonempty string that

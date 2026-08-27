@@ -42,8 +42,11 @@ do not appear as project versions.
   Reconcile follow-up. When author acceptance material also claims the changed
   validation executes in CI, the same bounded plan follows the chain through
   the workflow or CI invocation that supplies its command and environment;
-  missing exact workflow paths are located with one bounded search or directory
-  listing, displacing lower-value exploration without increasing any budget.
+  the repository fact sheet exposes bounded exact `.github/workflows/*`
+  candidates so the planner can read the relevant workflow instead of treating
+  a literal-search no-hit as absence. Missing exact paths are located with one
+  bounded search or directory listing, displacing lower-value exploration
+  without increasing any budget.
   The reserved removed-symbol check remains the sole deterministic ordering
   exception.
 - Public successor configuration is explicit: an empty

@@ -156,10 +156,12 @@ When author acceptance material also claims that the validation executes in
 CI, the chain extends through the workflow or CI invocation that supplies the
 command and required environment. PFR reserves existing initial-plan capacity
 for each locally visible layer; an exact runner does not prove discovery, and
-discovery does not prove CI invocation. If no exact workflow path is available,
-one bounded repository-grounded search or workflow-directory listing may locate
-it. This priority displaces lower-value exploration rather than increasing any
-budget.
+discovery does not prove CI invocation. The deterministic repository fact sheet
+exposes a bounded list of exact `.github/workflows/*` paths when present so the
+planner can read the relevant workflow rather than treating a literal-search
+no-hit as absence. If no exact workflow path is available, one bounded
+repository-grounded search or workflow-directory listing may locate it. This
+priority displaces lower-value exploration rather than increasing any budget.
 
 If the first bounded read of a priority fact exposes only part of the deciding
 implementation, Reconcile may broaden the symbol slice on that same cached
