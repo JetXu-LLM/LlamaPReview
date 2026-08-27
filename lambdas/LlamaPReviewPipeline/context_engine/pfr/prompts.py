@@ -99,6 +99,12 @@ PLAN_CONSTRUCTION_RULES = """Plan construction rules:
   invent symbol anchors. When no exact literal is already known to occur in
   that file, omit `symbols`; a bounded small file can then be admitted as exact
   full-file evidence.
+- A wrapper that delegates test or validation selection is not the complete
+  authoritative surface by itself. When supplied repository facts expose both
+  an exact runner or entrypoint and a separate exact discovery or configuration
+  candidate, reserve bounded questions for both in the initial plan. Treat the
+  paths as weak candidates until their contents establish the delegation; do
+  not defer the locally visible selection surface solely to Reconcile.
 - Rank questions by expected information value for the later review, then
   apply the cap, while preserving the acceptance-criteria and Route-risk
   priority above. Fewer well-grounded lookups are better than speculative ones.

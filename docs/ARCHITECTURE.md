@@ -144,6 +144,14 @@ search, and directory tools. The sole deterministic exception is the existing
 reserved removed-symbol check, which remains first so a soft time budget cannot
 erase it.
 
+Validation wiring is an execution chain, not necessarily one file. When the
+bounded repository inventory exposes both an exact runner or entrypoint and a
+separate discovery or configuration candidate, PFR reserves initial-plan
+questions for both. Their paths remain location hints until fetched content
+proves the delegation. This avoids treating a thin wrapper as proof that a new
+test is selected, without adding a question, round, token, or provider-call
+budget.
+
 If the first bounded read of a priority fact exposes only part of the deciding
 implementation, Reconcile may broaden the symbol slice on that same cached
 exact-head file. The existing one-read soft-budget rescue treats that broader

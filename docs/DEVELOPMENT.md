@@ -45,6 +45,12 @@ may attribute evidence flow from the existing ledger and full private trace,
 but production code must not parse model prose to decide whether the objective
 closed.
 
+For validation wiring, contract tests also require both planning prompts to say
+that a thin runner is not enough when the supplied inventory exposes a separate
+exact discovery or configuration candidate. The planner should reserve bounded
+initial questions for both and let fetched content prove the relationship;
+Reconcile is not the sole path to a locally visible selector.
+
 PFR contract tests must tolerate only representation-equivalent acceptance
 criteria: the canonical `{criterion: ...}` object and a nonempty string that
 normalizes to that object. Retrieval tests must also prove that a missed symbol

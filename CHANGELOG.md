@@ -36,6 +36,10 @@ do not appear as project versions.
   internal criterion shape instead of being discarded. When a small exact-head
   file was already fetched in full but optional symbol anchors miss, the full
   bounded file remains usable evidence rather than becoming a false unknown.
+  When repository inventory exposes both a validation runner and its separate
+  discovery or configuration candidate, PFR plans both bounded reads up front
+  instead of treating the thin wrapper as complete or relying only on a later
+  Reconcile follow-up.
   The reserved removed-symbol check remains the sole deterministic ordering
   exception.
 - Public successor configuration is explicit: an empty

@@ -69,6 +69,20 @@ class PfrEvidenceContractTest(unittest.TestCase):
             "acceptance material already supplied there",
             normalized,
         )
+        self.assertIn(
+            "a wrapper that delegates test or validation selection is not "
+            "the complete authoritative surface by itself",
+            normalized,
+        )
+        self.assertIn(
+            "reserve bounded questions for both in the initial plan",
+            normalized,
+        )
+        self.assertIn(
+            "do not defer the locally visible selection surface solely to "
+            "reconcile",
+            normalized,
+        )
 
     def test_standalone_plan_prompt_preserves_priority_order(self):
         self._assert_plan_priority_order(PLAN_PROMPT)
