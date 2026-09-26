@@ -21,11 +21,20 @@ PLAN_METHOD_PROMPT = """Planning method:
 - Spend the existing question, round, and token budgets in this order: first
   verify concrete author acceptance criteria from the PR description or
   explicitly linked issue or acceptance material already supplied in the PR
-  details; second, when the PR changes tests, CI, or validation infrastructure,
-  verify the authoritative runner, discovery configuration, workflow, or
-  entrypoint that determines whether the changed validation actually executes;
-  third verify the highest-consequence locally answerable fact identified by
-  Route; only then use remaining capacity for general exploration.
+  details; second verify the highest-consequence locally answerable fact
+  identified by Route; third, when the PR changes validation execution or
+  explicitly claims a new validation path, verify its authoritative runner,
+  discovery configuration, workflow, or entrypoint; only then use remaining
+  capacity for general exploration. Ordinary test additions or a statement
+  that tests pass do not displace an unanswered runtime prerequisite.
+- Bind behavioral acceptance to the existing caller and state prerequisites,
+  not just the changed callee. For initialization, registration, or persistent
+  state, inspect the entrypoint that enables the behavior before spending
+  questions on its test wiring. A definition does not prove it is called.
+  When that path is not supplied, locate it with a visible grounded symbol
+  rather than inventing a conventional filename. Use the same rule to resolve
+  a dependency's range in the owning manifest before leaving compatibility
+  to the author.
 - Extract distinctive structural entities already visible in the change:
   classes/types/prototypes, interfaces/base contracts, public functions or
   methods, data/config objects, added or removed identifiers, and new
@@ -265,6 +274,10 @@ Rules:
   callee definition and binds its payload and returned lifecycle/control
   handle to the changed consumer. Do not hand the owner a lookup this bounded
   retrieval can still perform.
+- Apply that bounded followup to other decisive local prerequisites too:
+  initialization, registration, caller adoption, or manifest compatibility.
+  A test result that repository reads cannot establish is an external gap;
+  it should not displace an available lookup of changed runtime behavior.
 - Followup args must use the shared bounded retrieval tool contract below.
 
 PR details:

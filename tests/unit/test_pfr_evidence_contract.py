@@ -57,11 +57,11 @@ class PfrEvidenceContractTest(unittest.TestCase):
             "first verify concrete author acceptance criteria from the pr "
             "description or explicitly linked issue or acceptance material "
             "already supplied in the pr details",
-            "second, when the pr changes tests, ci, or validation "
-            "infrastructure, verify the authoritative runner, discovery "
-            "configuration, workflow, or entrypoint",
-            "third verify the highest-consequence locally answerable fact "
+            "second verify the highest-consequence locally answerable fact "
             "identified by route",
+            "third, when the pr changes validation execution or explicitly "
+            "claims a new validation path, verify its authoritative runner, "
+            "discovery configuration, workflow, or entrypoint",
             "only then use remaining capacity for general exploration",
         )
 
@@ -166,11 +166,11 @@ class PfrEvidenceContractTest(unittest.TestCase):
             normalized_contract,
         )
         self.assertIn(
-            "second, when the pr changes tests, ci, or validation infrastructure",
+            "third, when the pr changes validation execution or explicitly claims a new validation path",
             normalized_contract,
         )
         self.assertIn(
-            "third verify the highest-consequence locally answerable fact",
+            "second verify the highest-consequence locally answerable fact",
             normalized_contract,
         )
         self.assertIn(

@@ -101,9 +101,13 @@ Judge that unconditional cost from supplied reachability and consequence
 evidence; do not assume traffic frequency, deployment settings, external speed,
 or an unseen bypass. Conversely, do not infer a missing guard from one local
 handler: middleware, routing, policy, or another upstream boundary may own it.
-An unobserved security, authentication, deployment, or environment premise is a
-nonblocking question unless exact evidence establishes both reachability and
-consequence. Judge independent hypotheses independently.
+A claim that depends on unobserved security, authentication, deployment, or
+environment policy stays nonblocking. Distinguish that missing protection from
+a demonstrated defect inside the inspected boundary: when its visible contract
+admits the input and the changed transformation or state path establishes the
+consequence, an imagined upstream defense is not counterevidence. State the
+supported input and consequence without expanding it to an unproven exposure
+or exploit. Judge independent hypotheses independently.
 
 Treat mutable CI as PR evidence, not as a repository-policy proxy. A label such
 as "quality gate" or a configured threshold proves the reported metric outcome,
@@ -122,6 +126,14 @@ unknown causality into merge safety or describe unresolved exact-head CI as
 all-green.
 
 ## Quality bar
+
+Prioritize ordinary valid inputs, actual caller integration, and persisted
+behavior before malformed-producer scenarios or optional hardening. A stated
+robustness goal does not make every imaginable protocol violation a merge
+blocker. For an abnormal-input concern, establish why that input can reach this
+path and why its concrete loss warrants action before merge; otherwise keep it
+nonblocking or omit it. Do not let an elaborate rare scenario crowd out a
+directly evidenced failure on the normal path.
 
 Good is descriptive: "A timeout parameter was added and its unit test changed."
 

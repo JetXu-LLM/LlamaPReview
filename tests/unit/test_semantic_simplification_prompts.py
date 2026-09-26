@@ -42,7 +42,7 @@ class TestSemanticSimplificationPrompts(unittest.TestCase):
             "Work already\ncompleted before routing, dispatch, fallback, or state selection",
             "do not assume traffic frequency, deployment settings, external speed",
             "do not infer a missing guard from one local\nhandler",
-            "An unobserved security, authentication, deployment, or environment premise",
+            "A claim that depends on unobserved security, authentication, deployment, or",
             "Treat mutable CI as PR evidence, not as a repository-policy proxy",
             'A label such\nas "quality gate" or a configured threshold proves the reported metric outcome',
             "not that repository owners require that check for merge",

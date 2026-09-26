@@ -44,9 +44,11 @@ internal status flag.
 
 Objective-closure or PFR-priority changes must prove that both continuation and
 standalone planning receive the same fixed Route commitment. The tested order
-is author acceptance criteria; authoritative validation wiring when tests, CI,
-or validation infrastructure change; Route's highest-consequence locally
-answerable fact; then general exploration. Ordinary steps retain that semantic
+is author acceptance criteria and their runtime prerequisites; Route's
+highest-consequence locally answerable fact; authoritative validation wiring
+when validation execution changes or a new path is claimed; then general
+exploration. Ordinary test additions do not displace an unanswered caller or
+state prerequisite. Ordinary steps retain that semantic
 order across tool types, with only the reserved removed-symbol check ahead of
 it. No question, round, token, model, or provider-call cap changes. Evaluation
 may attribute evidence flow from the existing ledger and full private trace,
