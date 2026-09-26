@@ -1162,8 +1162,9 @@ def record_provider_call(
     A separate top-level attribute per stable call id avoids a read/modify/write
     list race between at-least-once Lambda invocations. A terminal record may
     replace only its exact ``dispatching`` fence; it can never attach to another
-    operation or owner. Duplicate delivery of the same terminal record is a
-    successful no-op.
+    operation. The fence already proves dispatch authority, so settlement does
+    not require the phase to remain active after the HTTP request. Duplicate
+    delivery of the same terminal record is a successful no-op.
     """
 
     table = table or get_table()
@@ -1176,17 +1177,9 @@ def record_provider_call(
         table=table,
         consistent_read=True,
     )
-    if not current or str(current.get("status") or "") != str(expected_status):
+    if not current:
         return False
     claim_binding = None
-    if phase_claim:
-        claim_binding = _provider_phase_claim_binding(
-            current,
-            record,
-            phase_claim,
-        )
-        if claim_binding is None:
-            return False
     existing = current.get(attribute)
     if isinstance(existing, Mapping):
         if (
@@ -1217,6 +1210,14 @@ def record_provider_call(
         # Compatibility for callers that have not installed the pre-dispatch
         # sink (offline tools and historical fixtures). Production binds both
         # sinks and therefore always takes the exact-fence CAS branch.
+        if str(current.get("status") or "") != str(expected_status):
+            return False
+        if phase_claim:
+            claim_binding = _provider_phase_claim_binding(
+                current, record, phase_claim
+            )
+            if claim_binding is None:
+                return False
         dispatching_record = None
     if isinstance(existing, Mapping) and str(
         existing.get("call_id") or ""
@@ -1236,20 +1237,18 @@ def record_provider_call(
             f"safe limit is {config.MAX_DYNAMODB_WIRE_BYTES}"
         )
     try:
-        names = {
-            "#s": "status",
-            "#call": attribute,
-        }
+        names = {"#call": attribute}
         values = {
-            ":expected": str(expected_status),
             ":record": safe_record,
             ":now": iso_now(),
         }
         if dispatching_record is None:
+            names["#s"] = "status"
+            values[":expected"] = str(expected_status)
             condition = "#s = :expected AND attribute_not_exists(#call)"
         else:
             values[":dispatching_record"] = dispatching_record
-            condition = "#s = :expected AND #call = :dispatching_record"
+            condition = "#call = :dispatching_record"
         if claim_binding is not None:
             phase, owner, event_id, attempt, run_id, head_sha = (
                 claim_binding
@@ -1306,7 +1305,7 @@ def record_provider_call(
             ):
                 return True
             logger.info(
-                "Provider-call ledger write lost after state advance: %s#%s call=%s",
+                "Provider-call ledger compare-and-swap lost: %s#%s call=%s",
                 repo,
                 pr_number,
                 call_id,

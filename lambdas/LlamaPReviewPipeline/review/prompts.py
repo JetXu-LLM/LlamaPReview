@@ -85,6 +85,10 @@ Use three passes:
    the supplied contracts, callers, tests, runtime behavior, and counterevidence.
    Before a clear judgment, audit every benign premise that protects a
    high-consequence changed path.
+   When a concern comes from a test, identify the helper's lexical scope and
+   actual callers before treating it as shared behavior. Distinguish a
+   deliberately broken mutant or negative control from the exercised product
+   path; a test fixture is not a production contract by itself.
 
 Apply these causal lenses when the changed mechanism calls for them: distinguish
 every upstream outcome merged into one downstream state; bind actor-selected
@@ -146,6 +150,11 @@ remains an honest gap. A search no-hit or a requested-but-unreturned symbol
 body is a coverage gap, never proof that a caller, use, implementation, or
 repository path does not exist; keep the dependent claim nonblocking or omit
 it unless complete exact-head evidence proves the absence.
+Apply the same rule to decisive repository-local facts such as a dependency
+range in a manifest, its lockfile relation, or a fixture helper's behavior.
+When the supplied evidence answers the question, give the answer instead of
+asking the author to repeat the lookup. When it does not, name the precise
+unread surface as a coverage gap; do not guess its contents.
 For a request-changes posture, keep the opening decision sentence limited to
 the findings that actually require changes and their pre-merge actions. Put
 nondeciding unknowns and checks in later sections; do not append a request to
@@ -224,6 +233,14 @@ include an `Evidence refs:` line containing only exact catalog IDs copied
 verbatim, or `none` when no catalog item supports it. A readable path, symbol,
 check name, or other prose label is explanation, never an evidence reference;
 do not invent one for Final to serialize.
+For each finding also include a `Causal refs:` line: the subset of its
+`Evidence refs:` without which its PR-created mechanism or observed consequence
+would not be established. Include exact changed-code evidence for a code-caused
+blocker, plus a CI diagnostic only when that diagnostic is necessary to its
+causal conclusion. Explain the link in prose; a source on the same path is not
+causal merely because its path matches. The same catalog ID may also support a
+confidence-changing check. If a high-priority finding has no causal evidence,
+lower the claim or omit it rather than assigning an unrelated reference.
 
 <PR_INTENT_AND_DETAILS_UNTRUSTED>
 {pr_details}
@@ -395,6 +412,14 @@ identifies a current PR-caused consequence that deserves owner action.
 Only copy IDs that Deep explicitly listed on an `Evidence refs:` line. When
 Deep wrote `none`, emit an empty array; never turn a path, symbol, check name,
 or other prose description into an evidence reference.
+For each finding, copy Deep's `Causal refs:` subset into
+`required_evidence_refs`, and put its other `Evidence refs:` in
+`supporting_evidence_refs`. If an older memo lacks `Causal refs:`, use only
+Deep's explicit causal explanation to classify listed IDs; never infer causal
+necessity from a matching path, a red check, or the need to fill a required
+array. An exact ID may appear in a finding and a confidence check when both
+claims genuinely depend on that observation. Reusing evidence does not merge
+their distinct conclusions or make the check a second finding.
 Copy Deep's explicit opening merge posture without inferring it from later
 unknowns or checks. When Deep says approve, clear, or no blocking findings,
 emit `clear`; when Deep says request changes or do not merge, emit `blocking`.
@@ -426,8 +451,10 @@ If Deep's opening paragraph mixes a blocking carrier with a separate
 nondeciding unknown or check, remove the latter from `decision.summary` and
 `decision.owner_actions`. A fact that can change only severity or category
 while the verdict remains blocking is nondeciding.
-`required_evidence_refs` are dependencies without
-which the finding's core causal conclusion is unsupported.
+`required_evidence_refs` are Deep-identified dependencies without
+which the finding's core causal conclusion is unsupported. Preserve these
+dependencies across compression and item merging; do not freely reassign a
+causal reference to another section to shorten the presentation.
 `supporting_evidence_refs` improve confidence or explanation but are not
 deciding dependencies and never become required implicitly. A retained
 nonblocking P2 may have an empty required array, but at least one of the two
@@ -464,15 +491,14 @@ string. Never combine before-change and after-change alternatives. Never use
 `...` or another synthetic omission placeholder inside a snippet; choose one
 complete verbatim source line instead.
 
-Treat Deep's confidence-changing checks as an exclusive source section. Each
-item there has exactly one output home: `confidence_checks`. Do not repeat its
-check name, status, diagnostic, causal-attribution explanation, or any other
-substance in `decision.summary`, `decision.owner_actions`, `material_unknowns`,
-or any finding field or evidence array. A CI item outside that Deep section may
-appear with a finding only when Deep made its exact reference required evidence
-for that finding's causal conclusion; emit it in `required_evidence_refs` and
-discuss it only with that deciding finding. Classify by Deep's evidence role,
-never by CI check name or other name heuristics.
+Keep Deep's confidence-changing checks in `confidence_checks`; do not turn a
+check into an additional finding or merge-deciding unknown. A check's catalog
+ID is not exclusive: the same exact CI observation may appear in a finding's
+`required_evidence_refs` when Deep identified it as a causal dependency, and
+in `confidence_checks` when it also changes review confidence. Do not copy
+nondeciding check prose into the first-screen decision or treat the shared ID
+as proof of PR causality on its own. Classify by Deep's evidence role, never
+by CI check name or other name heuristics.
 Copy Deep's `CI relevance` classification to `ci_relevance` for every CI-backed
 confidence check. Use `not_applicable` only when the check has no CI evidence.
 Do not label a failure unrelated unless Deep cited exact evidence for that

@@ -34,6 +34,14 @@ A review-behavior change should include:
 
 Do not replace model-owned engineering judgment with repository-specific keywords. Prompts and behavior must remain general across repositories and languages.
 
+The [review delivery upgrade](QUALITY_UPGRADE.md) records the current regression
+families. Final correction tests must exercise the failed first response and the
+rendered correction, preserve a parsed verdict, and prove that ordinary success
+adds no call. Late settlement tests must cross a real dispatch fence before
+advancing lifecycle/ownership, then verify both retained usage and denied new
+dispatch. CI refresh tests assert the maintainer's first screen, not only an
+internal status flag.
+
 Objective-closure or PFR-priority changes must prove that both continuation and
 standalone planning receive the same fixed Route commitment. The tested order
 is author acceptance criteria; authoritative validation wiring when tests, CI,

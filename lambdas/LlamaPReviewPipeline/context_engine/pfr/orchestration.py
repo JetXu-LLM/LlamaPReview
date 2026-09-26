@@ -240,7 +240,8 @@ def collect_context_pfr(
         "same_conversation_prefix_used": bool(route_conversation),
         "max_questions": plan_question_cap,
         "plan_model_tier": (
-            "pro" if plan_model == config.DEEPSEEK_MODEL else "flash"
+            "luna" if config.MODEL_PROVIDER == "openrouter"
+            else "pro" if plan_model == config.DEEPSEEK_MODEL else "flash"
         ),
         "plan_reasoning_effort": plan_effort,
     }
@@ -322,7 +323,8 @@ def collect_context_pfr(
                     ),
                     "max_questions": plan_question_cap,
                     "plan_model_tier": (
-                        "pro"
+                        "luna" if config.MODEL_PROVIDER == "openrouter"
+                        else "pro"
                         if plan_model == config.DEEPSEEK_MODEL
                         else "flash"
                     ),

@@ -51,16 +51,25 @@ GITHUB_APP_ID = env("GITHUB_APP_ID")
 GITHUB_PRIVATE_KEY = env("GITHUB_PRIVATE_KEY")
 GITHUB_WEBHOOK_SECRET = env("GITHUB_WEBHOOK_SECRET")
 
+MODEL_PROVIDER = env("MODEL_PROVIDER", "openrouter")
+if MODEL_PROVIDER not in {"openrouter", "deepseek"}:
+    raise ValueError("MODEL_PROVIDER must be openrouter or deepseek")
+OPENROUTER_API_KEY = env("OPENROUTER_API_KEY")
 DEEPSEEK_API_KEY = env("DEEPSEEK_API_KEY")
-DEEPSEEK_MODEL = env("DEEPSEEK_MODEL", "deepseek-v4-pro")
+# The provider switch selects a complete, coherent model profile. Legacy
+# DeepSeek per-phase overrides remain available only in the rollback profile;
+# stale DeepSeek environment values cannot silently dilute the Luna profile.
+_LUNA = MODEL_PROVIDER == "openrouter"
+DEEPSEEK_MODEL = (
+    "openai/gpt-6-luna" if _LUNA else env("DEEPSEEK_MODEL", "deepseek-v4-pro")
+)
 # The billed transport model may differ from the logical review tier.  Keep
 # both identities in provider accounting; an explicit empty value restores
 # direct logical-model dispatch.
-DEEPSEEK_TRANSPORT_MODEL_OVERRIDE = env(
-    "DEEPSEEK_TRANSPORT_MODEL_OVERRIDE",
-    "deepseek-v4-flash",
+DEEPSEEK_TRANSPORT_MODEL_OVERRIDE = (
+    "" if _LUNA else env("DEEPSEEK_TRANSPORT_MODEL_OVERRIDE", "deepseek-v4-flash")
 )
-DEEPSEEK_EFFORT = env("DEEPSEEK_REASONING_EFFORT", "max")
+DEEPSEEK_EFFORT = "max" if _LUNA else env("DEEPSEEK_REASONING_EFFORT", "max")
 DEEPSEEK_TRACE_MODE = env("DEEPSEEK_TRACE_MODE", "summary")
 DEEPSEEK_TRACE_DIR = env("DEEPSEEK_TRACE_DIR", "")
 DEEPSEEK_TRACE_S3_BUCKET = env("DEEPSEEK_TRACE_S3_BUCKET", RUN_ARTIFACT_BUCKET)
@@ -68,16 +77,17 @@ DEEPSEEK_TRACE_CHUNK_CHARS = env_int("DEEPSEEK_TRACE_CHUNK_CHARS", 45_000)
 
 PFR_MODEL = DEEPSEEK_MODEL
 PFR_EFFORT = DEEPSEEK_EFFORT
+PFR_HIGH_PLAN_EFFORT = "max" if _LUNA else "high"
 REVIEW_MODEL = DEEPSEEK_MODEL
 REVIEW_EFFORT = DEEPSEEK_EFFORT
-ANALYZER_MODEL = env("ANALYZER_MODEL", "deepseek-v4-flash")
-ANALYZER_EFFORT = env("ANALYZER_EFFORT", "high")
-LOW_REVIEW_MODEL = env("LOW_REVIEW_MODEL", "deepseek-v4-flash")
-LOW_REVIEW_EFFORT = env("LOW_REVIEW_EFFORT", "high")
-PFR_NORMAL_MODEL = env("PFR_NORMAL_MODEL", "deepseek-v4-flash")
-PFR_NORMAL_EFFORT = env("PFR_NORMAL_EFFORT", "high")
-NORMAL_REVIEW_MODEL = env("NORMAL_REVIEW_MODEL", "deepseek-v4-pro")
-NORMAL_REVIEW_EFFORT = env("NORMAL_REVIEW_EFFORT", "high")
+ANALYZER_MODEL = "openai/gpt-6-luna" if _LUNA else env("ANALYZER_MODEL", "deepseek-v4-flash")
+ANALYZER_EFFORT = "max" if _LUNA else env("ANALYZER_EFFORT", "high")
+LOW_REVIEW_MODEL = "openai/gpt-6-luna" if _LUNA else env("LOW_REVIEW_MODEL", "deepseek-v4-flash")
+LOW_REVIEW_EFFORT = "max" if _LUNA else env("LOW_REVIEW_EFFORT", "high")
+PFR_NORMAL_MODEL = "openai/gpt-6-luna" if _LUNA else env("PFR_NORMAL_MODEL", "deepseek-v4-flash")
+PFR_NORMAL_EFFORT = "max" if _LUNA else env("PFR_NORMAL_EFFORT", "high")
+NORMAL_REVIEW_MODEL = "openai/gpt-6-luna" if _LUNA else env("NORMAL_REVIEW_MODEL", "deepseek-v4-pro")
+NORMAL_REVIEW_EFFORT = "max" if _LUNA else env("NORMAL_REVIEW_EFFORT", "high")
 
 DEEPSEEK_TIMEOUT_SECONDS = env_int("DEEPSEEK_TIMEOUT_SECONDS", 460)
 PFR_HIGH_TIME_BUDGET_SECONDS = env_int(

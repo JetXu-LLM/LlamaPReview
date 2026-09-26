@@ -230,6 +230,35 @@ def _real_context_meta() -> dict:
     }
 
 
+def _blocking_presentation(*, required: list[str], supporting: list[str]) -> dict:
+    raw = _real_presentation(supporting_ci=False)
+    raw["decision"].update({
+        "verdict": "blocking",
+        "summary": "The changed call breaks the required runtime contract.",
+        "owner_actions": ["Restore the required call behavior before merge."],
+    })
+    item = raw["findings"][0]
+    item.update({
+        "headline": "The changed call breaks the required runtime contract",
+        "priority": "P1",
+        "category": "bug",
+        "analysis": (
+            "The changed call passes the wrong value; the exact-head unit "
+            "failure confirms the contract break."
+        ),
+        "owner_action": "Restore the required call behavior before merge.",
+        "required_evidence_refs": required,
+        "supporting_evidence_refs": supporting,
+        "representation_requirement": "semantic",
+        "placement": "headline",
+    })
+    raw["confidence_checks"][0]["result"] = (
+        "The exact-head unit check failed on the changed behavior."
+    )
+    raw["confidence_checks"][0]["ci_relevance"] = "pr_related"
+    return raw
+
+
 class ReviewGenerationV1Tests(unittest.TestCase):
     def test_deep_ledger_failure_escapes_generation_without_second_call(self):
         client = DeepSeekClient(api_key="key")
@@ -302,7 +331,7 @@ class ReviewGenerationV1Tests(unittest.TestCase):
         )
         self.assertEqual(len(client.provider_call_records()), 2)
 
-    def test_representation_failure_stops_after_final_without_extra_call(self):
+    def test_representation_failure_spends_only_one_bounded_correction(self):
         client = DeepSeekClient(api_key="key")
         persisted = []
 
@@ -331,12 +360,15 @@ class ReviewGenerationV1Tests(unittest.TestCase):
                 reasoning_effort="max",
             )
 
-        self.assertEqual(post.call_count, 2)
-        compiler.assert_called_once()
-        self.assertEqual(len(client.provider_call_records()), 2)
+        self.assertEqual(post.call_count, 3)
+        self.assertEqual(compiler.call_count, 2)
+        self.assertEqual(len(client.provider_call_records()), 3)
         self.assertFalse(result["review_publishable"])
-        self.assertNotIn("review_presentation_repair_attempted", result)
         self.assertEqual(result["review_failure_kind"], "json_parse_error")
+        self.assertEqual(
+            [p["phase"] for p in result["review_model_phases"]],
+            ["deep_judgment", "final_presentation", "final_presentation_repair"],
+        )
 
     def test_ordinary_path_is_one_free_deep_and_one_json_final(self):
         evidence_sentinel = "RAW_DIFF_AND_PFR_SENTINEL_8193"
@@ -433,7 +465,193 @@ class ReviewGenerationV1Tests(unittest.TestCase):
             final_call["messages"][3]["content"],
         )
 
-    def test_representation_failure_never_spends_a_third_model_call(self):
+    def test_deciding_item_correction_delivers_shared_ci_finding(self):
+        meta = _real_context_meta()
+        meta["ci_generation_model_payload"]["checks"][0].update({
+            "classification": "failure",
+            "conclusion": "failure",
+        })
+        meta["evidence_catalog"][1]["outcome"] = "failure"
+        deep_memo = (
+            "Merge posture: request changes. The changed call breaks the "
+            "required contract; restore it before merge.\n"
+            "Evidence refs: path:src/app.py, ci:unit\n"
+            "Causal refs: path:src/app.py, ci:unit\n"
+            "CI relevance: pr_related"
+        )
+        initial = _blocking_presentation(
+            required=[],
+            supporting=["path:src/app.py", "ci:unit"],
+        )
+        corrected = _blocking_presentation(
+            required=["path:src/app.py", "ci:unit"],
+            supporting=[],
+        )
+        client = _Client([
+            _response(deep_memo, token_count=2),
+            _response(json.dumps(initial), token_count=3),
+            _response(json.dumps(corrected), token_count=4),
+        ])
+
+        result = generation.generate_review(
+            REAL_PR_DETAILS,
+            "Exact-head context",
+            client=client,
+            context_meta=meta,
+        )
+
+        self.assertTrue(result["review_publishable"])
+        self.assertEqual(len(client.calls), 3)
+        self.assertEqual(
+            result["review_presentation_selected_phase"],
+            "final_presentation_repair",
+        )
+        self.assertEqual(result["deepseek_usage_total"]["total_tokens"], 18)
+        self.assertIn("The changed call breaks", result["pr_review_comment"])
+        self.assertIn("Restore the required call", result["pr_review_comment"])
+        retained = result["presentation_v1"]["findings"][0]
+        self.assertEqual(
+            retained["required_evidence_refs"],
+            ["path:src/app.py", "ci:unit"],
+        )
+        self.assertEqual(
+            result["presentation_v1"]["confidence_checks"][0]["evidence_refs"],
+            ["ci:unit"],
+        )
+        self.assertEqual(client.calls[2]["messages"][2]["content"], deep_memo)
+        self.assertEqual(
+            client.calls[2]["messages"][4]["content"],
+            json.dumps(initial),
+        )
+
+    def test_correction_does_not_promote_same_path_support_itself(self):
+        meta = _real_context_meta()
+        meta["ci_generation_model_payload"]["checks"][0].update({
+            "classification": "failure",
+            "conclusion": "failure",
+        })
+        meta["evidence_catalog"][1]["outcome"] = "failure"
+        deep_memo = (
+            "Merge posture: request changes. CI diagnoses a blocker.\n"
+            "Evidence refs: path:src/app.py, ci:unit\n"
+            "Causal refs: ci:unit"
+        )
+        initial = _blocking_presentation(
+            required=[],
+            supporting=["path:src/app.py", "ci:unit"],
+        )
+        client = _Client([
+            _response(deep_memo),
+            _response(json.dumps(initial)),
+            _response(json.dumps(initial)),
+        ])
+
+        result = generation.generate_review(
+            REAL_PR_DETAILS,
+            "Exact-head context",
+            client=client,
+            context_meta=meta,
+        )
+
+        self.assertFalse(result["review_publishable"])
+        self.assertEqual(len(client.calls), 3)
+        self.assertNotIn("pr_review_comment", result)
+        self.assertEqual(
+            client.calls[2]["messages"][4]["content"],
+            json.dumps(initial),
+        )
+
+    def test_correction_rejects_stale_head_evidence(self):
+        meta = _real_context_meta()
+        meta["ci_generation_model_payload"]["checks"][0].update({
+            "classification": "failure",
+            "conclusion": "failure",
+        })
+        meta["evidence_catalog"][1]["outcome"] = "failure"
+        meta["evidence_catalog"][0]["source_ref"] = "pr_head:" + "b" * 40
+        deep_memo = (
+            "Merge posture: request changes.\n"
+            "Evidence refs: path:src/app.py, ci:unit\n"
+            "Causal refs: path:src/app.py, ci:unit"
+        )
+        initial = _blocking_presentation(required=[], supporting=["ci:unit"])
+        corrected = _blocking_presentation(
+            required=["path:src/app.py", "ci:unit"],
+            supporting=[],
+        )
+        client = _Client([
+            _response(deep_memo),
+            _response(json.dumps(initial)),
+            _response(json.dumps(corrected)),
+        ])
+
+        result = generation.generate_review(
+            REAL_PR_DETAILS,
+            "Exact-head context",
+            client=client,
+            context_meta=meta,
+        )
+
+        self.assertFalse(result["review_publishable"])
+        self.assertEqual(len(client.calls), 3)
+        self.assertNotIn("pr_review_comment", result)
+
+    def test_correction_cannot_erase_blocking_verdict_with_empty_clear(self):
+        initial = _blocking_presentation(
+            required=[],
+            supporting=["path:src/app.py"],
+        )
+        empty_clear = copy.deepcopy(_publishable().presentation)
+        client = _Client([
+            _response(
+                "Merge posture: request changes.\n"
+                "Evidence refs: path:src/app.py\n"
+                "Causal refs: path:src/app.py"
+            ),
+            _response(json.dumps(initial)),
+            _response(json.dumps(empty_clear)),
+        ])
+
+        result = generation.generate_review(
+            REAL_PR_DETAILS,
+            "Exact-head context",
+            client=client,
+            context_meta=_real_context_meta(),
+        )
+
+        self.assertEqual(len(client.calls), 3)
+        self.assertFalse(result["review_publishable"])
+        self.assertEqual(result["review_failure_kind"], "deciding_item_loss")
+        self.assertNotIn("pr_review_comment", result)
+
+    def test_ambiguous_json_gets_one_bounded_correction(self):
+        clear = copy.deepcopy(_publishable().presentation)
+        ambiguous = json.dumps(clear) + "\n" + json.dumps(clear)
+        client = _Client([
+            _response("Merge posture: clear. No findings."),
+            _response(ambiguous),
+            _response(json.dumps(clear)),
+        ])
+
+        result = generation.generate_review(
+            REAL_PR_DETAILS,
+            "Exact-head context",
+            client=client,
+            context_meta=_real_context_meta(),
+        )
+
+        self.assertTrue(result["review_publishable"])
+        self.assertEqual(len(client.calls), 3)
+        self.assertEqual(
+            result["review_presentation_selected_phase"],
+            "final_presentation_repair",
+        )
+        self.assertEqual(
+            [phase["phase"] for phase in result["review_model_phases"]],
+            ["deep_judgment", "final_presentation", "final_presentation_repair"],
+        )
+
+    def test_failed_correction_does_not_spend_a_fourth_model_call(self):
         failed_presentation = copy.deepcopy(_publishable().presentation)
         failed_presentation["representation_noise"] = True
         failed_final = json.dumps(failed_presentation)
@@ -441,6 +659,7 @@ class ReviewGenerationV1Tests(unittest.TestCase):
         client = _Client(
             [
                 _response("Deep memo"),
+                _response(failed_final),
                 _response(failed_final),
             ]
         )
@@ -457,11 +676,10 @@ class ReviewGenerationV1Tests(unittest.TestCase):
             )
 
         self.assertFalse(result["review_publishable"])
-        self.assertNotIn("review_presentation_repair_attempted", result)
-        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(len(client.calls), 3)
         self.assertEqual(
             [phase["phase"] for phase in result["review_model_phases"]],
-            ["deep_judgment", "final_presentation"],
+            ["deep_judgment", "final_presentation", "final_presentation_repair"],
         )
 
     def test_misplaced_supporting_ci_is_removed_without_repair(self):
@@ -565,6 +783,7 @@ class ReviewGenerationV1Tests(unittest.TestCase):
             [
                 _response(raw_deep),
                 _response(raw_final),
+                _response(raw_final),
             ]
         )
         with patch.object(
@@ -579,10 +798,9 @@ class ReviewGenerationV1Tests(unittest.TestCase):
                 context_meta={},
             )
 
-        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(len(client.calls), 3)
         self.assertFalse(result["review_publishable"])
         self.assertFalse(result["review_publication_safe"])
-        self.assertNotIn("review_presentation_repair_attempted", result)
         self.assertNotIn("review_presentation_repair_recovered", result)
         self.assertNotIn("pr_review_comment", result)
         self.assertNotIn("inline_comments", result)
@@ -594,10 +812,11 @@ class ReviewGenerationV1Tests(unittest.TestCase):
             "json_root_invalid",
         )
 
-    def test_failed_blocking_final_cannot_be_rewritten_by_a_third_call(self):
+    def test_failed_blocking_correction_cannot_publish_without_evidence(self):
         client = _Client(
             [
                 _response("Deep blocking memo"),
+                _response('{"version":"presentation_v1"}'),
                 _response('{"version":"presentation_v1"}'),
             ]
         )
@@ -616,13 +835,12 @@ class ReviewGenerationV1Tests(unittest.TestCase):
                 context_meta={},
             )
 
-        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(len(client.calls), 3)
         self.assertFalse(result["review_publishable"])
         self.assertEqual(
             result["review_failure_kind"],
             "deciding_item_loss",
         )
-        self.assertNotIn("review_presentation_repair_attempted", result)
         self.assertNotIn("pr_review_comment", result)
 
     def test_incomplete_final_fails_closed_without_a_third_call(self):

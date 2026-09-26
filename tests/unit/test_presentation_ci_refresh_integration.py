@@ -13,6 +13,7 @@ set_default_env()
 install_fake_requests_module()
 
 from lambdas.LlamaPReviewPipeline import pipeline_ci
+from lambdas.LlamaPReviewPipeline.errors import HeadSuperseded
 from lambdas.LlamaPReviewPipeline.review.presentation import (
     compile_presentation_v1,
 )
@@ -68,6 +69,9 @@ def _meta(
     meta = {
         "head_sha": "a" * 40,
         "ci_snapshot": {
+            "schema_version": 1,
+            "retrieval_outcome": "ok",
+            "has_ci": True,
             "checks": [
                 _check(
                     conclusion=conclusion,
@@ -149,6 +153,71 @@ def _generated_review() -> dict:
 
 
 class PresentationCIRefreshIntegrationTests(unittest.TestCase):
+    def test_global_retrieval_fact_refreshes_first_screen_without_check_churn(self):
+        generated = _generated_review()
+        generated["presentation_v1"]["decision"].update(
+            {
+                "verdict": "clear",
+                "summary": "No review blocker found. The new mode uses the same guard.",
+                "owner_actions": [],
+            }
+        )
+        generated["presentation_v1"]["findings"] = []
+        before = _meta(conclusion="success")
+        before["ci_snapshot"]["retrieval_outcome"] = "partial"
+        after = _meta(conclusion="success")
+
+        refreshed = pipeline_ci.reapply_latest_ci_guard(
+            generated,
+            PR_DETAILS,
+            after,
+            generation_context_meta=before,
+        )
+
+        self.assertTrue(after["ci_snapshot_changed_after_generation"])
+        self.assertEqual(after["ci_changed_evidence_refs"], [])
+        self.assertTrue(refreshed["review_publishable"])
+        first_screen = refreshed["pr_review_comment"].split("<details>", 1)[0]
+        self.assertNotIn("Conditional code-review clear", first_screen)
+        self.assertNotIn("retrieval partial", first_screen)
+
+    def test_irrelevant_refresh_metadata_does_not_recompile(self):
+        generated = _generated_review()
+        before = _meta(conclusion="success")
+        after = copy.deepcopy(before)
+        after["ci_snapshot"]["actionable_detail_retrieval"] = {
+            "attempted_check_count": 1,
+            "annotation_omitted_count": 2,
+        }
+        after["ci_refreshed_at"] = "later"
+
+        with patch.object(pipeline_ci, "compile_presentation_v1") as compile_result:
+            refreshed = pipeline_ci.reapply_latest_ci_guard(
+                generated,
+                PR_DETAILS,
+                after,
+                generation_context_meta=before,
+            )
+
+        self.assertIs(refreshed, generated)
+        self.assertFalse(after["ci_snapshot_changed_after_generation"])
+        compile_result.assert_not_called()
+
+    def test_changed_head_ci_refresh_is_rejected_before_publication(self):
+        class WrongHeadRuntime:
+            def get_ci_results_for_head(self, repo, head_sha, **kwargs):
+                return {"head_sha": "b" * 40, "checks": []}
+
+        with self.assertRaises(HeadSuperseded):
+            pipeline_ci.refresh_review_ci_context(
+                WrongHeadRuntime(),
+                "owner/repo",
+                "a" * 40,
+                PR_DETAILS,
+                _meta(conclusion="success"),
+                stage="review.ci_before_finalize",
+            )
+
     def test_unchanged_ci_returns_the_exact_generated_review(self):
         generated = _generated_review()
         generation_meta = _meta(conclusion="failure")
@@ -195,7 +264,7 @@ class PresentationCIRefreshIntegrationTests(unittest.TestCase):
         )
         self.assertNotIn("No review blocker found", refreshed["pr_review_comment"])
 
-    def test_new_failure_holds_clear_review_for_existing_bounded_retry(self):
+    def test_new_failure_keeps_code_clear_and_shows_unassessed_ci_red(self):
         generated = _generated_review()
         generated["presentation_v1"]["decision"].update(
             {
@@ -208,27 +277,93 @@ class PresentationCIRefreshIntegrationTests(unittest.TestCase):
         generated["v3_review"]["decision"]["verdict"] = "clear"
         generated["pr_review_comment"] = "No blocking issues found."
 
-        with patch.object(
-            pipeline_ci,
-            "compile_presentation_v1",
-        ) as compile_presentation:
-            refreshed = pipeline_ci.reapply_latest_ci_guard(
-                generated,
-                PR_DETAILS,
-                _meta(conclusion="failure"),
-                generation_context_meta=_meta(conclusion="success"),
+        refreshed = pipeline_ci.reapply_latest_ci_guard(
+            generated,
+            PR_DETAILS,
+            _meta(conclusion="failure"),
+            generation_context_meta=_meta(conclusion="success"),
+        )
+
+        self.assertTrue(refreshed["review_publishable"])
+        self.assertTrue(refreshed["review_publication_safe"])
+        self.assertEqual(refreshed["v3_review"]["decision"]["verdict"], "clear")
+        first_screen = refreshed["pr_review_comment"].split("<details>", 1)[0]
+        self.assertIn("Conditional code-review clear", first_screen)
+        self.assertIn("1 failed", first_screen)
+        self.assertIn("no CI-dependent merge-safety claim", first_screen)
+        self.assertNotIn("safe to merge", first_screen.casefold())
+
+    def test_new_failure_retains_independent_material_unknown(self):
+        generated = _generated_review()
+        presentation = generated["presentation_v1"]
+        presentation["decision"].update(
+            {
+                "verdict": "verification_needed",
+                "summary": "Deployment ownership has not been verified.",
+                "owner_actions": ["Confirm the deployment owner."],
+            }
+        )
+        presentation["findings"] = []
+        presentation["material_unknowns"] = [
+            {
+                "missing_fact": "Deployment ownership is unverified.",
+                "impact": "The owner must confirm the handoff.",
+                "owner_action": "Confirm the deployment owner.",
+                "evidence_refs": ["path:deploy.yml"],
+            }
+        ]
+
+        refreshed = pipeline_ci.reapply_latest_ci_guard(
+            generated,
+            PR_DETAILS,
+            _meta(conclusion="failure"),
+            generation_context_meta=_meta(conclusion="success"),
+        )
+
+        self.assertTrue(refreshed["review_publishable"])
+        self.assertEqual(
+            refreshed["v3_review"]["decision"]["verdict"],
+            "unverified",
+        )
+        first_screen = refreshed["pr_review_comment"].split("<details>", 1)[0]
+        self.assertIn("Deployment ownership is unverified", first_screen)
+        self.assertIn("1 failed", first_screen)
+        self.assertNotIn("safe to merge", first_screen.casefold())
+
+    def test_new_failure_retries_when_clear_prose_depended_on_prior_pass(self):
+        generated = _generated_review()
+        presentation = generated["presentation_v1"]
+        presentation["decision"].update(
+            {
+                "verdict": "clear",
+                "summary": (
+                    "No review blocker found. Build Verification success "
+                    "confirms the changed deployment mode."
+                ),
+                "owner_actions": [],
+            }
+        )
+        presentation["findings"] = []
+        before = _meta(conclusion="success")
+        after = _meta(conclusion="failure")
+        for meta in (before, after):
+            meta["ci_snapshot"]["checks"][0]["name"] = "Build Verification"
+            meta["ci_generation_model_payload"] = (
+                pipeline_ci.model_ci_snapshot_payload(meta["ci_snapshot"])
             )
 
-        compile_presentation.assert_not_called()
+        refreshed = pipeline_ci.reapply_latest_ci_guard(
+            generated,
+            PR_DETAILS,
+            after,
+            generation_context_meta=before,
+        )
+
         self.assertFalse(refreshed["review_publishable"])
         self.assertTrue(refreshed["review_failure_retryable"])
         self.assertEqual(
             refreshed["review_failure_kind"],
-            "ci_blocking_evidence_changed_after_generation",
-        )
-        self.assertEqual(
-            refreshed["review_failure_class"],
-            "CINewBlockingEvidence",
+            "ci_refresh_changed_ci_core_prose_tainted",
         )
 
     def test_deciding_basis_loss_never_synthesizes_clear(self):
@@ -247,6 +382,7 @@ class PresentationCIRefreshIntegrationTests(unittest.TestCase):
             refreshed["review_failure_kind"],
             "ci_refresh_deciding_item_loss",
         )
+        self.assertTrue(refreshed["review_failure_retryable"])
         self.assertEqual(
             refreshed["v3_review"]["decision"]["verdict"],
             "blocked_findings",
@@ -298,6 +434,7 @@ class PresentationCIRefreshIntegrationTests(unittest.TestCase):
                     refreshed["review_failure_kind"],
                     "ci_refresh_deciding_item_loss",
                 )
+                self.assertTrue(refreshed["review_failure_retryable"])
                 self.assertEqual(
                     refreshed["pr_review_comment"],
                     generated["pr_review_comment"],

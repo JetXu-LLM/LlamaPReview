@@ -1,12 +1,12 @@
 # Privacy and data retention
 
-This document distinguishes the official hosted service from a self-hosted deployment. It describes observed production configuration as of **August 12, 2026**; a later release may change it and should update this page.
+This document distinguishes source defaults from the official hosted deployment. The retention observations below were recorded on **August 12, 2026**. The source now defaults to OpenRouter; this change alone does not establish that an operator has deployed the new provider configuration.
 
 ## Hosted repository boundary
 
 The official service supports public repositories only.
 
-After verifying the GitHub webhook signature, the Webhook reads the event kind and repository visibility. If GitHub marks the repository private, the application returns a generic success acknowledgement before it constructs durable identity or enters the Pipeline. It performs no product DynamoDB/S3 write, DeepSeek call, or GitHub product API call, and writes no repository name, pull request number, delivery ID, installation ID, account identity, head SHA, title, or payload to application logs.
+After verifying the GitHub webhook signature, the Webhook reads the event kind and repository visibility. If GitHub marks the repository private, the application returns a generic success acknowledgement before it constructs durable identity or enters the Pipeline. It performs no product DynamoDB/S3 write, model provider call, or GitHub product API call, and writes no repository name, pull request number, delivery ID, installation ID, account identity, head SHA, title, or payload to application logs.
 
 This boundary applies to new events. Historical private-repository records from earlier service behavior were not deleted, migrated, inventoried, backfilled, or exposed during the open-source launch. They remain in private operator-controlled storage under their existing lifecycle and access controls.
 
@@ -29,7 +29,7 @@ General sensitive-path rules prevent the retrieval tools from reading common sec
 | --- | --- |
 | DynamoDB lifecycle records | `ttl_epoch` is set to 30 days; DynamoDB TTL deletion is asynchronous |
 | S3 context, review, and recovery artifacts | lifecycle expiry after 30 days |
-| S3 DeepSeek trace objects | lifecycle expiry after 7 days |
+| S3 provider trace objects | lifecycle expiry after 7 days |
 | Webhook CloudWatch logs | 30 days |
 | Pipeline CloudWatch logs | 90 days |
 | GitHub review comments | retained by GitHub and the repository until removed there |
@@ -38,9 +38,11 @@ The hosted S3 bucket is private, uses S3-managed encryption at rest, blocks publ
 
 Default provider traces are summaries: identities, model routing, usage, timing, and tool counts, without prompts or model output. Recovery artifacts can contain public repository code, model-derived review content, and GitHub payload material.
 
-## DeepSeek processing
+## Model provider processing
 
-The active Pipeline sends bounded public-repository evidence directly to the DeepSeek API. DeepSeek is the only model provider in the active runtime.
+The default `MODEL_PROVIDER=openrouter` sends bounded public-repository evidence to OpenRouter for `openai/gpt-6-luna`. OpenRouter routes the request to a serving provider. Gateway logging, account settings, and the serving provider's policies are separate from LlamaPReview's AWS retention. This repository does not promise categorical zero retention or no training for a deployment; consult [OpenRouter's privacy policy](https://openrouter.ai/privacy) and [provider routing and data-policy controls](https://openrouter.ai/docs/guides/routing/provider-selection).
+
+`MODEL_PROVIDER=deepseek` sends the same bounded evidence directly to DeepSeek. It is an explicit operator switch, with no automatic cross-provider fallback.
 
 DeepSeek's current Open Platform terms govern API use, while its current privacy policy says that processing rules for end-user personal data in downstream applications are the developer's responsibility. Those documents do not give this service a categorical no-training or fixed-retention promise for API inputs. DeepSeek's API documentation also says disk context caching is enabled by default and unused cache entries are usually cleared within a few hours to a few days.
 

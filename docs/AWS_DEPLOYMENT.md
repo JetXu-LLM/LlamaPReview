@@ -2,7 +2,7 @@
 
 The reference Terraform stack deploys one public-repository review path: an alias-qualified Webhook Function URL, one DynamoDB lifecycle table and stream, an immutable Pipeline alias, one dependency Layer, a private S3 bucket, least-privilege IAM, logs, alarms, and one event-source mapping.
 
-It contains no official account identity, production backend, legacy handler, rollout allowlist, automatic deploy role, paid secret service, or private-repository mode. AWS and DeepSeek usage incur costs.
+It contains no official account identity, production backend, legacy handler, rollout allowlist, automatic deploy role, paid secret service, or private-repository mode. AWS and model provider usage incur costs.
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@ It contains no official account identity, production backend, legacy handler, ro
 - AWS credentials authorized to create only the resources in `infra/terraform`;
 - an encrypted, versioned, public-blocked S3 backend that you control;
 - a GitHub App ID, private key, and webhook secret;
-- a DeepSeek API key;
+- an OpenRouter API key for the default profile; retaining a DeepSeek key enables the one-setting switch back;
 - one fully verified LlamaPReview release.
 
 Follow [release verification](RELEASE_VERIFICATION.md) before preparing Terraform inputs. Do not rebuild different function bytes during deployment.

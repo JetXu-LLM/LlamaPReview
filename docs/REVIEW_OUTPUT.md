@@ -2,6 +2,12 @@
 
 LlamaPReview separates engineering judgment from public presentation.
 
+Final may make one bounded representation correction when its initial object
+cannot be published. It receives the same Deep judgment and evidence identities,
+plus the compiler's diagnostics. The corrected object must pass the same truth
+and placement checks; a valid first result uses no correction call. This does
+not authorize new findings, severity changes, or invented causal evidence.
+
 ## Main review
 
 A substantive review has one model-derived body projected into deterministic Markdown. It may contain:
@@ -31,6 +37,12 @@ clear; a separate second paragraph states the unresolved CI fact. Code never
 turns pending or missing CI into `verification_needed`. Deep changes the
 posture only when that fact decides whether the pull-request objective is
 actually achieved.
+
+A later failed check refreshes this separate CI fact without automatically
+discarding an independent code judgment. If changed CI invalidates a finding,
+a deciding unknown, or the review's core prose, the existing bounded review
+retry asks the model to judge the new evidence. Code does not infer approval
+from a passing check or a blocker from a failed check.
 
 A `test-gap` is not categorically nonblocking. It may carry a blocking verdict
 only with admitted required evidence and a concrete owner action that must be

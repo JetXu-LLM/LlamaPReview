@@ -312,7 +312,7 @@ def bind_provider_call_accounting(
         )
         if not stored:
             raise RuntimeError(
-                "Provider-call ledger rejected the active phase owner"
+                "Provider-call ledger could not settle the original dispatch"
             )
 
     fence_setter(persist_fence)

@@ -492,7 +492,7 @@ def _plan_question_cap(route: Dict[str, Any]) -> int:
     return max(1, min(route_cap, int(config.PFR_MAX_PLAN_QUESTIONS)))
 
 def _plan_model_selection(route: Dict[str, Any]) -> Tuple[str, str]:
-    """Use Pro/high for High or risk-bearing plans."""
+    """Use the selected provider's high-plan profile for consequential plans."""
 
     risk_domains = route.get("risk_domains")
     risk_bearing = bool(
@@ -503,9 +503,9 @@ def _plan_model_selection(route: Dict[str, Any]) -> Tuple[str, str]:
         )
     )
     if risk_bearing:
-        return config.DEEPSEEK_MODEL, "high"
+        return config.DEEPSEEK_MODEL, config.PFR_HIGH_PLAN_EFFORT
     if str(route.get("complexity") or "").strip().lower() == "high":
-        return config.DEEPSEEK_MODEL, "high"
+        return config.DEEPSEEK_MODEL, config.PFR_HIGH_PLAN_EFFORT
     return config.PFR_NORMAL_MODEL, config.PFR_NORMAL_EFFORT
 
 def _apply_route_identity(plan: Dict[str, Any], route: Dict[str, Any]) -> None:

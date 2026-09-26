@@ -395,27 +395,24 @@ def _ci_catalog_changes(
     )
 
 
-def _blocking_ci_refs(
-    context_meta: Optional[Dict[str, Any]],
-) -> set[str]:
-    """Return exact check identities classified as failures by CI packing."""
+def _ci_snapshot_state_changed(
+    generation_context_meta: Optional[Dict[str, Any]],
+    final_context_meta: Optional[Dict[str, Any]],
+) -> bool:
+    """Compare global CI facts that affect Deep or the rendered public posture."""
 
-    snapshot = (context_meta or {}).get("ci_snapshot")
-    if not isinstance(snapshot, dict):
-        return set()
-    raw_blocking = snapshot.get("blocking_checks")
-    checks = (
-        raw_blocking
-        if isinstance(raw_blocking, list)
-        else snapshot.get("checks")
-    )
-    return {
-        f"ci:{identity}"
-        for item in (checks if isinstance(checks, list) else [])
-        if isinstance(item, dict)
-        and str(item.get("classification") or "") == "failure"
-        and (identity := str(item.get("identity") or ""))
-    }
+    def state(meta: Optional[Dict[str, Any]]) -> tuple[Any, ...]:
+        snapshot = (meta or {}).get("ci_snapshot")
+        if not isinstance(snapshot, dict):
+            return (None, None, None, None)
+        return (
+            snapshot.get("aggregate_classification"),
+            snapshot.get("commit_status_state"),
+            snapshot.get("retrieval_outcome"),
+            bool(snapshot.get("has_ci")),
+        )
+
+    return state(generation_context_meta) != state(final_context_meta)
 
 
 def mark_ci_basis_change_nonpublishable(
@@ -483,6 +480,10 @@ def reapply_latest_ci_guard(
         generation_context_meta,
         context_meta,
     )
+    snapshot_state_changed = _ci_snapshot_state_changed(
+        generation_context_meta,
+        context_meta,
+    )
     context_meta["ci_generation_snapshot"] = (
         (generation_context_meta or {}).get("ci_snapshot")
     )
@@ -492,10 +493,10 @@ def reapply_latest_ci_guard(
         )
     )
     context_meta["ci_snapshot_changed_after_generation"] = bool(
-        changed_ci_refs
+        changed_ci_refs or snapshot_state_changed
     )
     context_meta["ci_changed_evidence_refs"] = changed_ci_refs
-    if not changed_ci_refs:
+    if not changed_ci_refs and not snapshot_state_changed:
         return review_json
     presentation = review_json.get("presentation_v1")
     if not isinstance(presentation, dict):
@@ -503,31 +504,11 @@ def reapply_latest_ci_guard(
             review_json,
             reason="ci_refresh_requires_presentation_v1",
         )
-    decision = presentation.get("decision")
-    verdict = (
-        str(decision.get("verdict") or "")
-        if isinstance(decision, dict)
-        else ""
-    )
-    newly_blocking_refs = sorted(
-        _blocking_ci_refs(context_meta)
-        - _blocking_ci_refs(generation_context_meta)
-    )
-    if newly_blocking_refs and verdict in {"clear", "verification_needed"}:
-        # Do not turn a late CI failure into a deterministic blocker.  Hold
-        # this stale presentation and let the existing bounded review retry
-        # make the causal judgment with the stable exact-head CI snapshot.
-        context_meta["ci_new_blocking_evidence_refs"] = newly_blocking_refs
-        return mark_ci_basis_change_nonpublishable(
-            review_json,
-            reason="ci_blocking_evidence_changed_after_generation",
-            retryable=True,
-            failure_class="CINewBlockingEvidence",
-            failure_message=(
-                "An exact-head CI failure appeared after Deep judgment; "
-                "the existing bounded review retry must judge it."
-            ),
-        )
+    # A new failure is a fresh CI fact, not automatically a new code finding.
+    # The compiler retains a model-owned code judgment only where its deciding
+    # evidence and core prose survive, then renders the current CI separately.
+    # Changed deciding evidence still fails closed below and uses the existing
+    # bounded review retry for a new model judgment.
     compiled = compile_presentation_v1(
         presentation,
         pr_details=pr_details,
@@ -538,6 +519,10 @@ def reapply_latest_ci_guard(
         compiled.review,
         dict,
     ):
+        needs_rejudgment = compiled.failure_kind in {
+            "deciding_item_loss",
+            "changed_ci_core_prose_tainted",
+        }
         return mark_ci_basis_change_nonpublishable(
             review_json,
             reason=(
@@ -545,6 +530,16 @@ def reapply_latest_ci_guard(
                 + str(
                     compiled.failure_kind
                     or "presentation_not_publishable"
+                )
+            ),
+            retryable=needs_rejudgment,
+            failure_class="CIRefreshReviewChanged",
+            failure_message=(
+                "An exact-head CI change invalidated the model presentation."
+                + (
+                    " The existing bounded review retry must judge the new evidence."
+                    if needs_rejudgment
+                    else ""
                 )
             ),
         )
@@ -582,7 +577,7 @@ def reapply_latest_ci_guard(
             ]
         )
     )
-    if compiled.safe_partial:
+    if changed_ci_refs or snapshot_state_changed:
         projected["quality_scoreable"] = False
         projected["quality_exclusion_reasons"] = list(
             dict.fromkeys(

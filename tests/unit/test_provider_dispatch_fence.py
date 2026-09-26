@@ -238,29 +238,8 @@ class TestProviderDispatchFence(unittest.TestCase):
         )["Item"]
         current["context_attempt"] = 2
         current["context_claim"] = _claim("owner-2", 2)
-        stale_terminal = {
-            **durable[0],
-            "status": "completed",
-            "finish_reason": "stop",
-            "elapsed_seconds": 1,
-            "last_attempt_elapsed_seconds": 1,
-            "usage_state": "reported",
-            "usage": {
-                "prompt_tokens": 3,
-                "completion_tokens": 2,
-                "total_tokens": 5,
-            },
-        }
-        self.assertFalse(
-            persistence.record_provider_call(
-                "owner/repo",
-                21,
-                expected_status="PENDING",
-                record=stale_terminal,
-                phase_claim=_claim("owner-1", 1),
-                table=self.table,
-            )
-        )
+        # No response has been recovered. A takeover is not evidence that the
+        # original dispatch failed, so the second HTTP call must stay blocked.
         self.assertEqual(
             persistence.provider_call_records(current),
             durable,
@@ -391,6 +370,87 @@ class TestProviderDispatchFence(unittest.TestCase):
         records = persistence.provider_call_records(current)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["status"], "completed")
+
+    def test_in_flight_response_settles_after_terminal_or_owner_change(self):
+        # A response started under a valid fence still belongs in the ledger
+        # after lifecycle cancellation or a same-event lease takeover.
+        for status in ("PROCESSED", "SUPERSEDED", "PENDING"):
+            with self.subTest(status=status):
+                self.setUp()
+                client = self._bound_client(owner="owner-1")
+
+                def end_phase_before_response(*_args, **_kwargs):
+                    current = self.table.get_item(
+                        Key={"repo": "owner/repo", "pr_number": 21}
+                    )["Item"]
+                    current["status"] = status
+                    current["context_attempt"] = 2
+                    current["context_claim"] = _claim("owner-2", 2)
+                    current["publication_receipt"] = {"review_id": 42}
+                    return _Response()
+
+                with patch(
+                    "lambdas.LlamaPReviewPipeline.deepseek_client.requests.post",
+                    side_effect=end_phase_before_response,
+                ) as post:
+                    client.chat(
+                        [{"role": "user", "content": "route"}],
+                        max_retries=1,
+                        trace_phase="route",
+                        trace_metadata=_trace(1),
+                    )
+                post.assert_called_once()
+                current = self.table.get_item(
+                    Key={"repo": "owner/repo", "pr_number": 21}
+                )["Item"]
+                records = persistence.provider_call_records(current)
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0]["status"], "completed")
+                self.assertEqual(records[0]["usage"]["total_tokens"], 5)
+                self.assertEqual(current["status"], status)
+                self.assertEqual(current["context_claim"], _claim("owner-2", 2))
+                self.assertEqual(current["publication_receipt"], {"review_id": 42})
+                update_count = len(self.table.update_calls)
+                self.assertTrue(persistence.record_provider_call(
+                    "owner/repo", 21, expected_status="PENDING",
+                    record=records[0], phase_claim=_claim("owner-1", 1),
+                    table=self.table,
+                ))
+                self.assertEqual(len(self.table.update_calls), update_count)
+                # Settlement cannot grant the old owner permission to spend.
+                with patch(
+                    "lambdas.LlamaPReviewPipeline.deepseek_client.requests.post"
+                ) as second_post:
+                    with self.assertRaises(ProviderCallFenceError):
+                        client.chat(
+                            [{"role": "user", "content": "another call"}],
+                            max_retries=1,
+                            trace_phase="pfr_plan",
+                            trace_metadata=_trace(1),
+                        )
+                second_post.assert_not_called()
+
+    def test_late_settlement_cannot_replace_another_dispatch_identity(self):
+        client = self._bound_client(owner="owner-1")
+        operation = client._begin_provider_operation(
+            trace_phase="route", trace_metadata=_trace(1)
+        )
+        fence = client._build_provider_dispatch_fence(
+            payload=client.build_payload([{"role": "user", "content": "route"}]),
+            operation=operation, transport_attempt_index=1,
+        )
+        client._persist_provider_dispatch_fence(fence)
+        current = self.table.get_item(
+            Key={"repo": "owner/repo", "pr_number": 21}
+        )["Item"]
+        current["status"] = "SUPERSEDED"
+        with self.assertRaises(persistence.ArtifactIntegrityError):
+            persistence.record_provider_call(
+                "owner/repo", 21, expected_status="PENDING",
+                record={**fence, "status": "completed", "head_sha": "b" * 40},
+                phase_claim=_claim("owner-1", 1), table=self.table,
+            )
+        self.assertEqual(persistence.provider_call_records(current), [fence])
 
     def test_crash_after_fence_before_http_blocks_every_later_http(self):
         first_client = self._bound_client(owner="owner-1")

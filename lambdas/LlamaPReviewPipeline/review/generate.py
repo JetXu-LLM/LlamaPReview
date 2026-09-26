@@ -25,6 +25,12 @@ from ..context_engine.packing import (
 from ..deadline import Deadline
 from ..deepseek_client import DeepSeekClient
 from ..provider_usage import merge_numeric_usage
+from ..structured_repair import (
+    ContractRepairIssue,
+    RepairStageContract,
+    build_repair_messages,
+    select_repair_issues,
+)
 from .context_projection import (
     acceptance_criteria_for_deep,
     changed_delta_for_deep,
@@ -46,6 +52,7 @@ from .judgment import (
     run_model_phase,
 )
 from .presentation import (
+    DECISION_VERDICTS,
     PRESENTATION_VERSION,
     PresentationResult,
     compile_presentation_v1,
@@ -59,9 +66,36 @@ from .prompts import (
 
 logger = logging.getLogger(__name__)
 
-_FINAL_REASONING_EFFORT = ""
+_FINAL_REASONING_EFFORT = (
+    "max" if config.MODEL_PROVIDER == "openrouter" else ""
+)
+_FINAL_THINKING = config.MODEL_PROVIDER == "openrouter"
 _JSON_OBJECT_RESPONSE = {"type": "json_object"}
 _FINAL_PRESENTATION_PHASE = "final_presentation"
+_FINAL_REPAIR_PHASE = "final_presentation_repair"
+_FINAL_REPAIRABLE_FAILURES = frozenset({
+    "ambiguous_json_objects",
+    "json_parse_error",
+    "json_root_invalid",
+    "presentation_version_invalid",
+    "presentation_shape_invalid",
+    "presentation_item_cap_exceeded",
+    "decision_invalid",
+    "deciding_item_loss",
+    "out_of_catalog_material_evidence",
+})
+_FINAL_REPAIR_CONTRACT = RepairStageContract(
+    stage="final_presentation",
+    contract_instructions=(
+        "Deep's original memo alone owns findings, causal dependencies, severity, and merge posture. Correct only Final's JSON representation or evidence-role assignment.",
+        "Copy required references from Deep's Causal refs when present; a matching file path alone does not make supporting evidence causal.",
+        "A catalog ID may support both a finding and a confidence check. Preserve valid finding substance and the original Deep-owned decision.",
+        "Use only exact admitted catalog IDs cited on Deep's Evidence refs lines. Return the complete presentation_v1 object.",
+    ),
+    forbidden_instructions=(
+        "Do not re-review, add a finding, alter the merge judgment, invent a reference, or turn CI status alone into code causality.",
+    ),
+)
 _FINAL_DEEP_HANDOFF = (
     "The next assistant message is the exact visible Deep review memo from "
     "the completed judgment stage. It is Final's sole substantive authority. "
@@ -204,6 +238,35 @@ def _final_messages(
     ]
 
 
+def _final_repair_issues(compiled: PresentationResult):
+    if (
+        compiled.failure_kind not in _FINAL_REPAIRABLE_FAILURES
+        or any(issue.severity == "truth" for issue in compiled.issues)
+    ):
+        return None
+    issues = [
+        ContractRepairIssue(
+            code=issue.code,
+            location=issue.location,
+            message=issue.message,
+            repair_action=(
+                "restore_deep_causal_refs"
+                if issue.code in {
+                    "high_priority_evidence_gate_failed",
+                    "finding_evidence_capability_insufficient",
+                    "deciding_item_lost",
+                }
+                else "repair_json_representation"
+            ),
+            priority=(
+                10 if issue.code != "deciding_item_lost" else 20
+            ),
+        )
+        for issue in compiled.issues
+    ]
+    return select_repair_issues(issues) if issues else None
+
+
 def _append_phase(
     phases: list[Dict[str, Any]],
     telemetry: Optional[Mapping[str, Any]],
@@ -278,7 +341,7 @@ def _selected_presentation_metadata(
     presentation attempt happened to run last.
     """
 
-    if selected_phase != _FINAL_PRESENTATION_PHASE:
+    if selected_phase not in {_FINAL_PRESENTATION_PHASE, _FINAL_REPAIR_PHASE}:
         raise ValueError(
             f"unsupported selected presentation phase: {selected_phase}"
         )
@@ -345,7 +408,8 @@ def _nonpublishable_result(
         "review_failure_class": type(error).__name__,
         "review_failure_message": message,
         "review_model_finish_reason": (
-            str(finish_reasons.get("final_presentation") or "")
+            str(finish_reasons.get(_FINAL_REPAIR_PHASE) or "")
+            or str(finish_reasons.get(_FINAL_PRESENTATION_PHASE) or "")
             or str(finish_reasons.get("deep_judgment") or "")
         ),
         "review_stage_finish_reasons": dict(finish_reasons),
@@ -354,8 +418,33 @@ def _nonpublishable_result(
         "review_presentation_normalizations": list(
             dict.fromkeys(str(item) for item in normalizations if str(item))
         ),
-        "review_final_thinking": False,
-        "review_final_reasoning_effort": _FINAL_REASONING_EFFORT,
+        "review_final_thinking": bool(
+            next(
+                (
+                    item.get("thinking")
+                    for item in reversed(phases)
+                    if str(item.get("phase") or "") in {
+                        _FINAL_PRESENTATION_PHASE,
+                        _FINAL_REPAIR_PHASE,
+                    }
+                ),
+                False,
+            )
+        ),
+        "review_final_reasoning_effort": str(
+            next(
+                (
+                    item.get("reasoning_effort")
+                    for item in reversed(phases)
+                    if str(item.get("phase") or "") in {
+                        _FINAL_PRESENTATION_PHASE,
+                        _FINAL_REPAIR_PHASE,
+                    }
+                ),
+                "",
+            )
+            or ""
+        ),
         "review_model_phases": _phase_copies(phases),
         "deepseek_usage_total": _usage_total(phases),
         "review_quality_warnings": [],
@@ -538,7 +627,7 @@ def generate_review(
             messages=final_messages,
             model=model,
             reasoning_effort=_FINAL_REASONING_EFFORT,
-            thinking=False,
+            thinking=_FINAL_THINKING,
             max_tokens=config.REVIEW_FINAL_OUTPUT_MAX_TOKENS or None,
             timeout_seconds=final_timeout,
             deadline=deadline,
@@ -557,7 +646,7 @@ def generate_review(
             phase="final_presentation",
             model=model,
             reasoning_effort=_FINAL_REASONING_EFFORT,
-            thinking=False,
+            thinking=_FINAL_THINKING,
             elapsed_seconds=time.monotonic() - final_started,
         )
         finish_reasons["final_presentation"] = (
@@ -590,6 +679,109 @@ def generate_review(
             finish_reasons=finish_reasons,
             normalizations=compiled.normalizations,
         )
+    repair_selection = (
+        _final_repair_issues(compiled)
+        if final_incomplete_error is None and failed_final_content.strip()
+        else None
+    )
+    if (
+        repair_selection is not None
+        and repair_selection.selected
+    ):
+        initial_decision = (
+            compiled.presentation.get("decision")
+            if isinstance(compiled.presentation, Mapping)
+            else None
+        )
+        initial_verdict = (
+            initial_decision.get("verdict")
+            if isinstance(initial_decision, Mapping)
+            else None
+        )
+        if initial_verdict not in DECISION_VERDICTS:
+            initial_verdict = None
+        repair_messages = build_repair_messages(
+            final_messages,
+            failed_final_content,
+            contract=_FINAL_REPAIR_CONTRACT,
+            issues=repair_selection.selected,
+        )
+        if before_final is not None:
+            before_final()
+        repair_started = time.monotonic()
+        try:
+            repaired = run_model_phase(
+                active_client,
+                phase=_FINAL_REPAIR_PHASE,
+                messages=repair_messages,
+                model=model,
+                reasoning_effort=_FINAL_REASONING_EFFORT,
+                thinking=_FINAL_THINKING,
+                max_tokens=config.REVIEW_FINAL_OUTPUT_MAX_TOKENS or None,
+                timeout_seconds=phase_timeout_seconds(
+                    config.REVIEW_FINAL_OUTPUT_TIMEOUT_SECONDS,
+                    stage_started,
+                    phase=_FINAL_REPAIR_PHASE,
+                    deadline=deadline,
+                ),
+                deadline=deadline,
+                trace_metadata=metadata,
+                response_format=dict(_JSON_OBJECT_RESPONSE),
+            )
+            _append_phase(phases, repaired.telemetry)
+            finish_reasons[_FINAL_REPAIR_PHASE] = str(
+                repaired.telemetry.get("finish_reason") or ""
+            )
+        except REVIEW_CALL_EXCEPTIONS as error:
+            _append_failed_phase(
+                phases,
+                error,
+                phase=_FINAL_REPAIR_PHASE,
+                model=model,
+                reasoning_effort=_FINAL_REASONING_EFFORT,
+                thinking=_FINAL_THINKING,
+                elapsed_seconds=time.monotonic() - repair_started,
+            )
+            finish_reasons[_FINAL_REPAIR_PHASE] = (
+                _finish_reason_from_telemetry(error)
+            )
+            return _nonpublishable_result(
+                error=error,
+                phase="final_presentation",
+                phases=phases,
+                finish_reasons=finish_reasons,
+                normalizations=compiled.normalizations,
+            )
+        corrected = compile_presentation_v1(
+            repaired.content,
+            pr_details=pr_details,
+            context_meta=context_meta,
+        )
+        corrected_decision = (
+            corrected.presentation.get("decision")
+            if isinstance(corrected.presentation, Mapping)
+            else None
+        )
+        corrected_verdict = (
+            corrected_decision.get("verdict")
+            if isinstance(corrected_decision, Mapping)
+            else None
+        )
+        if corrected.publishable and (
+            initial_verdict is None or corrected_verdict == initial_verdict
+        ):
+            return _publishable_result(
+                corrected,
+                selected_phase=_FINAL_REPAIR_PHASE,
+                phases=phases,
+                finish_reasons=finish_reasons,
+                normalizations=(
+                    *compiled.normalizations,
+                    *corrected.normalizations,
+                ),
+            )
+        if not corrected.publishable:
+            compiled = corrected
     presentation_error = _presentation_failure(compiled)
     return _nonpublishable_result(
         error=presentation_error,

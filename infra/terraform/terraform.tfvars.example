@@ -24,7 +24,9 @@ release_artifacts = {
 github_app_id         = "123456"
 github_private_key    = "replace-with-the-complete-PEM-value"
 github_webhook_secret = "replace-with-a-long-random-webhook-secret"
-deepseek_api_key      = "replace-with-your-provider-key"
+openrouter_api_key    = "replace-with-your-openrouter-key"
+deepseek_api_key      = "replace-with-your-deepseek-rollback-key"
+model_provider        = "openrouter"
 
 # Safe first apply: no stream consumption and no GitHub product writes.
 pipeline_stream_enabled = false
