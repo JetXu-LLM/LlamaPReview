@@ -15,6 +15,7 @@
     "tests.unit.test_review_generation_v1.ReviewGenerationV1Tests.test_representation_failure_spends_only_one_bounded_correction",
     "tests.unit.test_review_generation_v1.ReviewGenerationV1Tests.test_deciding_item_correction_delivers_shared_ci_finding",
     "tests.unit.test_review_generation_v1.ReviewGenerationV1Tests.test_publishable_partial_repairs_lost_primary_with_existing_ref",
+    "tests.unit.test_review_generation_v1.ReviewGenerationV1Tests.test_publishable_partial_repairs_primary_with_missing_required_refs",
     "tests.unit.test_review_generation_v1.ReviewGenerationV1Tests.test_correction_cannot_erase_blocking_verdict_with_empty_clear",
     "tests.unit.test_review_generation_v1.ReviewGenerationV1Tests.test_incomplete_final_fails_closed_without_a_third_call",
     "tests.unit.test_context_engine_pipeline.TestContextEnginePipeline.test_inventory_error_uses_bounded_exact_head_probe_for_planned_read",
