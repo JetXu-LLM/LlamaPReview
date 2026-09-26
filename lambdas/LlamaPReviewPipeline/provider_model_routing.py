@@ -1,4 +1,4 @@
-"""Resolve logical DeepSeek models to the model sent over HTTP.
+"""Resolve the selected provider's logical model to the model sent over HTTP.
 
 The override is owned at the provider transport boundary. The pipeline keeps
 selecting and recording its logical model tier while this module preserves the
@@ -16,6 +16,7 @@ KNOWN_DEEPSEEK_MODELS = frozenset(
         "deepseek-v4-pro",
     }
 )
+OPENROUTER_LUNA_MODEL = "openai/gpt-6-luna"
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,8 @@ def _known_model(value: object, *, field: str) -> str:
 def resolve_provider_model(
     logical_model: object,
     transport_model_override: object,
+    *,
+    provider: str = "deepseek",
 ) -> ProviderModelSelection:
     """Return the logical and billed model, failing closed on ambiguity.
 
@@ -47,6 +50,15 @@ def resolve_provider_model(
     rejected because they are usually an operational configuration mistake.
     """
 
+    if provider == "openrouter":
+        if logical_model != OPENROUTER_LUNA_MODEL or transport_model_override != "":
+            raise ValueError("OpenRouter profile requires exact Luna model without override")
+        return ProviderModelSelection(
+            logical_model=OPENROUTER_LUNA_MODEL,
+            billed_model=OPENROUTER_LUNA_MODEL,
+        )
+    if provider != "deepseek":
+        raise ValueError(f"Unsupported model provider: {provider!r}")
     logical = _known_model(logical_model, field="logical_model")
     if transport_model_override == "":
         billed = logical

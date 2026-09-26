@@ -14,13 +14,13 @@ Private-repository events are acknowledged and discarded at the signed Webhook b
 
 The reference Terraform deploys the same two active Lambdas and one dependency Layer. It is intentionally public-repository-only as shipped; there is no hidden private-repository mode, legacy handler, shadow router, or repository allowlist. Its `pipeline_capacity_policy` defaults to the whole-policy literal `off`, so a self-hoster paying for its own provider account does not inherit the personally funded hosted-service bounds. That literal disables quota counters only and leaves one-time head succession enabled; only an explicit `successor=off` key disables succession. See [configuration](CONFIGURATION.md#free-review-capacity).
 
-Self-hosters provide and pay for their own AWS, GitHub App, and DeepSeek accounts. They also become responsible for:
+Self-hosters provide and pay for their own AWS, GitHub App, and OpenRouter accounts. A retained DeepSeek key enables the documented provider switch back. They also become responsible for:
 
 - GitHub App installation scope and permissions;
 - AWS access, cost controls, alarms, log retention, and incident response;
 - protecting Lambda environment configuration and Terraform state;
 - selecting retention periods that meet their obligations;
-- reviewing DeepSeek's current terms for their use case;
+- reviewing the selected gateway and model provider's current terms for their use case;
 - verifying release artifacts before deployment.
 
 Follow [AWS deployment](AWS_DEPLOYMENT.md) rather than copying official production names or state. The public repository contains no production account, role, bucket, backend, or rollback identity.

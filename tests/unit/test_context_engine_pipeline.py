@@ -32,6 +32,7 @@ from lambdas.LlamaPReviewPipeline.context_engine.pfr import (
 from lambdas.LlamaPReviewPipeline.context_engine.pfr.evidence_execution import (
     _read_step_can_expand_evidence,
 )
+from lambdas.LlamaPReviewPipeline.context_engine.repo_structure import RepoInventory
 from lambdas.LlamaPReviewPipeline.context_engine.search_rag import (
     postprocess_search_args,
     postprocess_search_candidates,
@@ -2842,6 +2843,104 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
         self.assertEqual(
             meta["fetch_health"]["planned_retrieval_status"], "complete"
         )
+
+    def test_inventory_error_uses_bounded_exact_head_probe_for_planned_read(self):
+        head = "abcdef123456"
+        changed = "scripts/hygiene-guard.test.ts"
+        caller = "src/hygiene-caller.ts"
+        guessed = "scripts/not-at-head.ts"
+        removed = "scripts/removed.ts"
+        sensitive = "scripts/private.key"
+        content = "export function hygieneGuard() { return true; }\n"
+
+        class Runtime:
+            def __init__(self):
+                self.read_calls = []
+                self.owner_doc_calls = []
+
+            def read_text_file_bounded(self, repo, path, *, sha, opt_in):
+                self.read_calls.append((repo, path, sha))
+                if path in {changed, caller}:
+                    return {
+                        "outcome": "success",
+                        "content": content,
+                        "source_size_bytes": len(content.encode()),
+                        "bytes_read": len(content.encode()),
+                    }
+                return {"outcome": "not_found", "error_type": "NotFound"}
+
+            def get_file_content(self, repo, path, *, sha):
+                self.owner_doc_calls.append((repo, path, sha))
+                return None
+
+        runtime = Runtime()
+        pr_content = {
+            "pr_metadata": {"number": 168, "title": "Hygiene guard"},
+            "file_changes": [
+                {"file_path": changed, "change_type": "modified", "diff": ""},
+                {"file_path": removed, "change_type": "removed", "diff": ""},
+                {"file_path": sensitive, "change_type": "modified", "diff": ""},
+            ],
+        }
+        inventory = RepoInventory(
+            repository="owner/repo",
+            requested_sha=head,
+            status="error",
+            error="Repository tree request failed: ReadTimeout",
+        )
+        client = _FakePfrClient([
+            {
+                "verification_plan": [
+                    {
+                        "question": f"Inspect {path}",
+                        "why_it_matters": "Check the exact PR-head file before judging the change.",
+                        "tool": "read_file",
+                        "args": {"path": path},
+                    }
+                    for path in (changed, caller, guessed, removed, sensitive)
+                ],
+            },
+            {"summary": "Changed path checked.", "answered": [], "unresolved_gaps": [], "followups": [], "complete": True},
+        ])
+
+        _context, meta = collect_context_pfr(
+            runtime=runtime,
+            github_token="token",
+            repo_full_name="owner/repo",
+            pr_content=pr_content,
+            pr_details="# PR\n",
+            head_sha=head,
+            default_branch="main",
+            client=client,
+            repo_inventory=inventory,
+        )
+
+        self.assertEqual(runtime.owner_doc_calls, [])
+        self.assertEqual(runtime.read_calls, [
+            ("owner/repo", changed, head),
+            ("owner/repo", caller, head),
+            ("owner/repo", guessed, head),
+        ])
+        self.assertEqual(meta["read_success_paths"], [changed, caller])
+        self.assertEqual(meta["repo_inventory"]["status"], "error")
+        self.assertEqual(meta["repo_inventory"]["direct_probe_paths"], sorted((changed, caller, guessed)))
+        self.assertEqual(meta["planned_invalid_read_paths"], [sensitive])
+        self.assertEqual(meta["removed_path_skips"], [removed])
+        self.assertNotIn(guessed, meta["read_success_paths"])
+        self.assertIn(
+            "PR-head repository inventory is unavailable",
+            client.calls[0]["messages"][-1]["content"],
+        )
+        self.assertTrue(any(
+            event["tool"] == "read_file"
+            and event["outcome"] == "hit"
+            and event["source_ref"] == f"pr_head:{head}"
+            for event in meta["evidence_ledger"]["evidence_events"]
+        ))
+        for index in range(3):
+            inventory.record_direct_probe(f"scripts/other-{index}.ts", readable=False)
+        self.assertFalse(inventory.can_direct_probe("scripts/another.ts"))
+        self.assertFalse(inventory.can_direct_probe(sensitive))
 
     def test_pfr_skips_nonexistent_planned_reads_without_tool_error(self):
         runtime = _Runtime()

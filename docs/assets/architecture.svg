@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 830" width="900" height="830" role="img" aria-labelledby="t d">
   <title id="t">How LlamaPReview turns a public pull request into a published review</title>
-  <desc id="d">A signed public GitHub event is admitted at an exact head commit. Code gathers bounded public evidence, DeepSeek supplies engineering judgment, and deterministic code owns schema, safety, accounting, recovery, and irreversible publication. The result is a public review anyone can inspect, from source anyone can run.</desc>
+  <desc id="d">A signed public GitHub event is admitted at an exact head commit. Code gathers bounded public evidence, the model supplies engineering judgment, and deterministic code owns schema, safety, accounting, recovery, and irreversible publication. The result is a public review anyone can inspect, from source anyone can run.</desc>
 
   <defs>
     <style>
@@ -53,7 +53,7 @@
     <rect x="48" y="422" width="6" height="100" rx="3" fill="#7c3aed"/>
     <circle cx="96" cy="472" r="20" fill="#7c3aed"/>
     <text x="96" y="479" class="num" text-anchor="middle">3</text>
-    <text x="136" y="464" class="name">DeepSeek supplies engineering judgment</text>
+    <text x="136" y="464" class="name">Model supplies engineering judgment</text>
     <text x="136" y="494" class="det">Causal risk, severity, uncertainty, merge posture — nothing else.</text>
   </g>
   <path d="M450 522 V550" class="flow"/>

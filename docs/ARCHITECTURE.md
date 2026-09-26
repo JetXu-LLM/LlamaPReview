@@ -212,6 +212,13 @@ path exists.
 
 Each provider HTTP attempt has a durable dispatch fence and a stable operation identity. The ledger retains logical routing identity, billed transport identity, status, token classes, and usage. A successful review cannot make a discarded or retried provider call disappear from accounting.
 
+Creating a dispatch fence requires the active phase owner. Settling an existing
+fence compares the complete original call identity instead: a response arriving
+after cancellation or lease takeover still completes that call's ledger entry.
+Settlement changes neither lifecycle state nor publication authority. It cannot
+create a new call or overwrite another call's terminal result. Terminal artifact
+aggregates remain snapshots; the per-call ledger holds later settlement facts.
+
 The provider boundary exposes two different typed failures. If the durable
 fence cannot be proven before HTTP, `provider_dispatch_fence_unavailable` is a
 retryable zero-dispatch abort: the HTTP request was not made. If a durable

@@ -127,3 +127,24 @@ def validate_complete_token_usage(
     ):
         errors.append("total_tokens_invariant_mismatch")
     return retained, errors
+
+
+def normalize_openrouter_usage(usage: Any) -> dict[str, Any]:
+    """Keep reported gateway cost/cache details and normalize token aliases.
+
+    OpenRouter's Chat Completions response normally reports the three Chat
+    token fields. Its Responses-compatible shape may additionally report
+    input/output aliases. Never invent a total or a cost when absent.
+    """
+
+    retained = _numeric_usage_tree(usage)
+    normalized = dict(retained) if isinstance(retained, Mapping) else {}
+    if isinstance(usage, Mapping) and isinstance(usage.get("is_byok"), bool):
+        normalized["is_byok"] = usage["is_byok"]
+    for target, source in (
+        ("prompt_tokens", "input_tokens"),
+        ("completion_tokens", "output_tokens"),
+    ):
+        if target not in normalized and source in normalized:
+            normalized[target] = normalized[source]
+    return normalized

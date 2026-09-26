@@ -102,18 +102,42 @@ variable "github_webhook_secret" {
 }
 
 variable "deepseek_api_key" {
-  description = "DeepSeek API key used by the Pipeline. Stored in encrypted Lambda configuration and Terraform state."
+  description = "DeepSeek API key retained for one-setting rollback. Stored in encrypted Lambda configuration and Terraform state."
   type        = string
   sensitive   = true
+  default     = ""
 
   validation {
-    condition     = length(trimspace(var.deepseek_api_key)) > 0
-    error_message = "deepseek_api_key must not be empty."
+    condition     = var.model_provider != "deepseek" || length(trimspace(var.deepseek_api_key)) > 0
+    error_message = "deepseek_api_key must not be empty when model_provider is deepseek."
+  }
+}
+
+variable "openrouter_api_key" {
+  description = "OpenRouter API key used for the default GPT-6 Luna profile. Stored in encrypted Lambda configuration and Terraform state."
+  type        = string
+  sensitive   = true
+  default     = ""
+
+  validation {
+    condition     = var.model_provider != "openrouter" || length(trimspace(var.openrouter_api_key)) > 0
+    error_message = "openrouter_api_key must not be empty when model_provider is openrouter."
+  }
+}
+
+variable "model_provider" {
+  description = "One setting chooses the complete runtime model profile and provider endpoint."
+  type        = string
+  default     = "openrouter"
+
+  validation {
+    condition     = contains(["openrouter", "deepseek"], var.model_provider)
+    error_message = "model_provider must be openrouter or deepseek."
   }
 }
 
 variable "model_routing" {
-  description = "Current logical and transport model routing. Change only with matching behavioral validation."
+  description = "Legacy DeepSeek logical and transport routing, used only when model_provider is deepseek."
   type = object({
     deep_model               = string
     transport_model_override = string

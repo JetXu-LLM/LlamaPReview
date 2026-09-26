@@ -17,7 +17,7 @@ The hosted GitHub App is free for public repositories — and this repository is
 
 There is no separate reviewer hidden behind the hosted service. The Webhook and Pipeline in this repository **are** the production source, released under Apache-2.0, and every review the App publishes comes from code on this page.
 
-![How LlamaPReview turns a public pull request into a published review: a signed public GitHub event, exact-head admission and bounded evidence, DeepSeek engineering judgment, deterministic projection and publication, and a public review from source you can run](docs/assets/architecture.svg)
+![How LlamaPReview turns a public pull request into a published review: a signed public GitHub event, exact-head admission and bounded evidence, model engineering judgment, deterministic projection and publication, and a public review from source you can run](docs/assets/architecture.svg)
 
 *The model supplies engineering judgment. Everything around it — evidence boundaries, output schema, sanitation, placement, and publication identity — is deterministic code you can read.*
 
@@ -69,7 +69,7 @@ Self-hosting runs the same public-only Webhook and Pipeline path in your AWS acc
 
 1. Download one semantic release and [verify its checksums and GitHub provenance](docs/RELEASE_VERIFICATION.md).
 2. Follow the [AWS deployment guide](docs/AWS_DEPLOYMENT.md) to deploy the two Lambda functions, dependency Layer, DynamoDB table, private S3 bucket, event-source mapping, alarms, and least-privilege IAM.
-3. Supply your own GitHub App and DeepSeek credentials, then pay your own AWS and provider costs.
+3. Supply your own GitHub App and OpenRouter credentials, then pay your own AWS and provider costs. The default model is a GPT-6 Luna max [trial with documented qualification limits](docs/QUALITY_UPGRADE.md#validation-boundaries); configure a DeepSeek key as well to enable the [one-setting switch back](docs/CONFIGURATION.md#review-routing).
 
 The reference stack has no automatic production deployment, paid secret-management service, hidden private-repository mode, or official AWS identity.
 
@@ -77,9 +77,9 @@ Repository evidence is retrieved through [llama-github](https://github.com/JetXu
 
 ## Privacy and security
 
-For eligible public pull requests, selected public GitHub evidence, prompts, and generated output are sent to DeepSeek for engineering judgment. New private-repository events are discarded at the early hosted boundary, before any durable state, provider call, or GitHub product API call.
+For eligible public pull requests, selected public GitHub evidence and prompts are sent to the configured model provider. This source defaults to OpenRouter's GPT-6 Luna; the selected provider in a hosted deployment is an operator setting. New private-repository events are discarded at the early hosted boundary, before any durable state, provider call, or GitHub product API call.
 
-Official-service retention is explicit and bounded: public-run records and artifacts expire in 30 days, full provider traces in 7. The exact table, the DeepSeek terms this depends on, and the credential boundaries are documented in [privacy and retention](docs/PRIVACY.md) and the [security model](docs/SECURITY.md).
+Official-service retention is explicit and bounded: public-run records and artifacts expire in 30 days, full provider traces in 7. The exact table, provider processing, and credential boundaries are documented in [privacy and retention](docs/PRIVACY.md) and the [security model](docs/SECURITY.md).
 
 ## Repository map
 

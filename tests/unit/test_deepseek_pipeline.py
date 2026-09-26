@@ -1253,7 +1253,7 @@ class TestDeepSeekPipeline(unittest.TestCase):
                 trace_metadata={"run_id": "chunk-test"},
             )
 
-        trace_logs = [call for call in log_info.call_args_list if call.args and call.args[0] == "DeepSeek trace summary: %s"]
+        trace_logs = [call for call in log_info.call_args_list if call.args and call.args[0] == "Provider trace summary: %s"]
         self.assertEqual(len(trace_logs), 1)
         cloudwatch_event = json.loads(trace_logs[0].args[1])
         self.assertEqual(cloudwatch_event["phase"], "pfr_reconcile")

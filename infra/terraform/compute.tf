@@ -92,6 +92,8 @@ resource "aws_lambda_function" "pipeline" {
       DEEPSEEK_TRACE_MODE               = var.provider_trace_mode
       DEEPSEEK_TRACE_S3_BUCKET          = aws_s3_bucket.artifacts.id
       DEEPSEEK_TRANSPORT_MODEL_OVERRIDE = var.model_routing.transport_model_override
+      MODEL_PROVIDER                    = var.model_provider
+      OPENROUTER_API_KEY                = var.openrouter_api_key
       DRY_RUN                           = tostring(var.pipeline_dry_run)
       DYNAMODB_PIPELINE_TABLE           = aws_dynamodb_table.pipeline.name
       GITHUB_APP_ID                     = var.github_app_id

@@ -25,6 +25,9 @@ def set_default_env() -> None:
         "GITHUB_APP_ID": "123456",
         "GITHUB_PRIVATE_KEY": "test-private-key-placeholder",
         "DEEPSEEK_API_KEY": "fake-deepseek",
+        # Existing synthetic regression fixtures assert the historical
+        # DeepSeek dialect. New Luna tests select the OpenRouter profile.
+        "MODEL_PROVIDER": "deepseek",
         "DEEPSEEK_TRANSPORT_MODEL_OVERRIDE": "deepseek-v4-flash",
         "ANALYZER_MODEL": "deepseek-v4-flash",
         "ANALYZER_EFFORT": "high",

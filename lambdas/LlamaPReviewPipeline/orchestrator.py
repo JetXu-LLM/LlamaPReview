@@ -638,7 +638,13 @@ def _context_for_mode(
             initial_evidence_ledger=initial_evidence_ledger,
         )
 
-    kwargs: Dict[str, Any] = {}
+    kwargs: Dict[str, Any] = {
+        "soft_time_budget": (
+            config.PFR_NORMAL_SOFT_TIME_BUDGET_SECONDS
+            if review_mode == "normal"
+            else config.PFR_HIGH_SOFT_TIME_BUDGET_SECONDS
+        ),
+    }
     if review_mode == "normal":
         kwargs.update(
             {

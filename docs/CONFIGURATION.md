@@ -9,7 +9,8 @@ The reference Terraform separates secret values from non-secret behavior configu
 | `GITHUB_WEBHOOK_SECRET` | HMAC verification of webhook bodies |
 | `GITHUB_APP_ID` | GitHub App authentication identity |
 | `GITHUB_PRIVATE_KEY` | GitHub App JWT signing key |
-| `DEEPSEEK_API_KEY` | Direct DeepSeek API authentication |
+| `OPENROUTER_API_KEY` | OpenRouter API authentication for the default Luna profile |
+| `DEEPSEEK_API_KEY` | Direct DeepSeek API authentication retained for one-setting rollback |
 
 AWS Lambda encrypts environment variables at rest. That does not make function configuration public-safe: IAM principals that can read function configuration, Terraform state, saved plans, or deployment inputs may be able to recover secret values. Restrict those surfaces and keep temporary secret projections outside the repository with mode `0600`.
 
@@ -26,7 +27,22 @@ AWS Lambda encrypts environment variables at rest. That does not make function c
 
 Route selects `skip`, `low`, `normal`, or `high` from the pull request and bounded repository facts. Low and normal tiers use smaller evidence and review budgets. High uses the full bounded PFR path. The model still owns the engineering decision inside the admitted evidence; repository-specific keyword rules do not replace that judgment.
 
-The principal model controls are:
+`MODEL_PROVIDER=openrouter` selects `openai/gpt-6-luna` through OpenRouter
+Chat Completions at `max` reasoning for every active model phase. The active
+phases use JSON outputs and execute repository tools in application code; they
+do not send provider function tools. The transport omits DeepSeek's `thinking`
+field and sets OpenRouter `provider.require_parameters=true` so routing cannot
+silently discard max reasoning or JSON format. It records the requested model,
+returned model, provider, token classes,
+cache details, and reported gateway cost in the existing fenced call ledger.
+An absent gateway cost stays absent; token prices are not treated as a billed
+receipt. OpenRouter's [model catalog](https://openrouter.ai/openai/gpt-6-luna)
+and [Chat API](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request)
+describe the exact identifier and request fields.
+
+`MODEL_PROVIDER=deepseek` restores the prior DeepSeek endpoint, phase routing,
+and reasoning profile in one setting when both provider keys are already
+configured. The following controls apply only to that rollback profile:
 
 - `ANALYZER_MODEL` / `ANALYZER_EFFORT`
 - `LOW_REVIEW_MODEL` / `LOW_REVIEW_EFFORT`
@@ -36,9 +52,34 @@ The principal model controls are:
 
 `DEEPSEEK_TRANSPORT_MODEL_OVERRIDE` changes the exact model identifier sent to DeepSeek without rewriting the logical routing tier. The provider ledger records both identities. Set it to the exact empty string only when direct logical-model dispatch has been deliberately validated.
 
+`MODEL_PROVIDER` must be exactly `openrouter` or `deepseek`. A missing key for
+the selected provider fails before any HTTP dispatch; the transport never
+silently switches providers. Luna with function tools at `max` would require
+the Responses API, so the Chat transport rejects such a request instead of
+quietly lowering reasoning effort. This follows the [official OpenAI GPT-6
+migration guidance](https://developers.openai.com/api/docs/guides/latest-model).
+
 ## Budgets and deadlines
 
 Context size, tool rounds, provider timeouts, and phase deadlines are bounded by the variables in [`config.py`](../lambdas/LlamaPReviewPipeline/config.py). Treat those defaults as a coherent tested profile. A larger value can raise Lambda duration, provider cost, DynamoDB/S3 pressure, and the probability that a head changes before publication.
+
+With `MODEL_PROVIDER=openrouter`, normal and high PFR both allow up to 600
+seconds for retrieval steps and use a 780-second PFR time budget. The context
+phase still has its separate 780-second limit and 30-second state-write
+reserve; tool, token, and context-size caps remain different by review tier.
+This longer retrieval window prevents a max-reasoning Plan that exceeds the
+legacy 180-second gate from automatically skipping its planned checks. It is
+not a guarantee that every Plan and Reconcile finishes within the phase limit.
+`MODEL_PROVIDER=deepseek` restores the previous normal 180/240-second and high
+420/780-second soft/time budgets. The four `PFR_*TIME_BUDGET_SECONDS` settings
+can explicitly override these profile defaults.
+
+On the deployed Lambda main thread, a POSIX wall timer bounds each provider
+HTTP request and body read even if the peer sends bytes slowly enough to keep
+resetting a socket read timeout. It preserves a shorter outer Review timer.
+If an in-flight attempt expires, the existing dispatch ledger records unknown
+usage and makes no automatic second call. Non-main-thread or non-POSIX local
+callers retain only the socket timeout and phase checks.
 
 ## Free review capacity
 

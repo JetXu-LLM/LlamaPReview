@@ -61,6 +61,9 @@ def read_owner_docs(state) -> str:
         direct_probe = (
             path not in state.accessible_files
             and inventory is not None
+            # On a failed tree request, reserve the six probes for planned
+            # evidence instead of spending five on speculative owner docs.
+            and inventory.status == "partial"
             and inventory.can_direct_probe(path)
         )
         if path not in state.accessible_files and not direct_probe:
@@ -90,11 +93,11 @@ def read_owner_docs(state) -> str:
                 f"{_truncate(content.strip(), 4000)}\n"
                 f"--- END OWNER DOC {path} ---"
             )
-    return (
-        "\n\n".join(blocks)
-        if blocks
-        else "No owner-authored review instructions found."
-    )
+    if blocks:
+        return "\n\n".join(blocks)
+    if state.repo_inventory is not None and state.repo_inventory.status == "error":
+        return "Owner-authored review instructions could not be discovered because the PR-head repository inventory is unavailable."
+    return "No owner-authored review instructions found."
 
 
 def format_unique_suffix_path_hints(

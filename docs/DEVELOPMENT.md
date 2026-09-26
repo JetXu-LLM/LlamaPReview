@@ -34,11 +34,21 @@ A review-behavior change should include:
 
 Do not replace model-owned engineering judgment with repository-specific keywords. Prompts and behavior must remain general across repositories and languages.
 
+The [review delivery upgrade](QUALITY_UPGRADE.md) records the current regression
+families. Final correction tests must exercise the failed first response and the
+rendered correction, preserve a parsed verdict, and prove that ordinary success
+adds no call. Late settlement tests must cross a real dispatch fence before
+advancing lifecycle/ownership, then verify both retained usage and denied new
+dispatch. CI refresh tests assert the maintainer's first screen, not only an
+internal status flag.
+
 Objective-closure or PFR-priority changes must prove that both continuation and
 standalone planning receive the same fixed Route commitment. The tested order
-is author acceptance criteria; authoritative validation wiring when tests, CI,
-or validation infrastructure change; Route's highest-consequence locally
-answerable fact; then general exploration. Ordinary steps retain that semantic
+is author acceptance criteria and their runtime prerequisites; Route's
+highest-consequence locally answerable fact; authoritative validation wiring
+when validation execution changes or a new path is claimed; then general
+exploration. Ordinary test additions do not displace an unanswered caller or
+state prerequisite. Ordinary steps retain that semantic
 order across tool types, with only the reserved removed-symbol check ahead of
 it. No question, round, token, model, or provider-call cap changes. Evaluation
 may attribute evidence flow from the existing ledger and full private trace,

@@ -85,6 +85,7 @@ run "safe_reference_topology" {
     github_private_key    = "mock-private-key"
     github_webhook_secret = "mock-webhook-secret-long-value"
     deepseek_api_key      = "mock-provider-key"
+    openrouter_api_key    = "mock-openrouter-key"
   }
 
   assert {
@@ -170,6 +171,7 @@ run "explicit_activation" {
     github_private_key       = "mock-private-key"
     github_webhook_secret    = "mock-webhook-secret-long-value"
     deepseek_api_key         = "mock-provider-key"
+    openrouter_api_key       = "mock-openrouter-key"
     pipeline_dry_run         = false
     pipeline_stream_enabled  = true
     pipeline_capacity_policy = "repo_daily=3;global_daily=100;successor=off"
@@ -211,6 +213,7 @@ run "reject_partially_unbounded_capacity" {
     github_private_key       = "mock-private-key"
     github_webhook_secret    = "mock-webhook-secret-long-value"
     deepseek_api_key         = "mock-provider-key"
+    openrouter_api_key       = "mock-openrouter-key"
     pipeline_capacity_policy = "repo_daily=3;global_daily=0"
   }
 
@@ -243,6 +246,7 @@ run "reject_capacity_above_item_bound" {
     github_private_key       = "mock-private-key"
     github_webhook_secret    = "mock-webhook-secret-long-value"
     deepseek_api_key         = "mock-provider-key"
+    openrouter_api_key       = "mock-openrouter-key"
     pipeline_capacity_policy = "repo_daily=3;global_daily=513"
   }
 
@@ -275,6 +279,7 @@ run "reject_repo_capacity_above_numeric_bound" {
     github_private_key       = "mock-private-key"
     github_webhook_secret    = "mock-webhook-secret-long-value"
     deepseek_api_key         = "mock-provider-key"
+    openrouter_api_key       = "mock-openrouter-key"
     pipeline_capacity_policy = "repo_daily=999999999999999999999999999999999999999;global_daily=100"
   }
 

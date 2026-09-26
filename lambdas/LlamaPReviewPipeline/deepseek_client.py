@@ -1,4 +1,4 @@
-"""DeepSeek V4 client for thinking-mode review and tool loops."""
+"""One fenced provider client for OpenRouter Luna and DeepSeek rollback."""
 
 from __future__ import annotations
 
@@ -9,16 +9,19 @@ import logging
 import os
 from pathlib import Path
 import re
+import signal
+import threading
 import time
 import uuid
 from collections.abc import Mapping
+from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
 from . import config
 from .deadline import Deadline, DeadlineExceeded
 from .provider_model_routing import resolve_provider_model
-from .provider_usage import validate_complete_token_usage
+from .provider_usage import normalize_openrouter_usage, validate_complete_token_usage
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +31,10 @@ except ModuleNotFoundError:  # local offline mock scripts may not need HTTP
     requests = None  # type: ignore
 
 
-_REDACTED_KEYS = {"authorization", "api_key", "apikey", "token", "access_token", "private_key"}
+_REDACTED_KEYS = {
+    "authorization", "api_key", "apikey", "openrouter_api_key",
+    "deepseek_api_key", "token", "access_token", "private_key",
+}
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b"),
@@ -169,6 +175,78 @@ def _message_summary(message: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _payload_effort(payload: Mapping[str, Any]) -> str:
+    reasoning = payload.get("reasoning")
+    if isinstance(reasoning, Mapping):
+        return str(reasoning.get("effort") or "")
+    return str(payload.get("reasoning_effort") or "")
+
+
+def _payload_thinking(payload: Mapping[str, Any]) -> bool:
+    return _payload_effort(payload) not in {"", "none"} or (
+        (payload.get("thinking") or {}).get("type") == "enabled"
+    )
+
+
+def _selected_openrouter_endpoint(result: Mapping[str, Any]) -> tuple[str, str]:
+    metadata = result.get("openrouter_metadata")
+    endpoints = metadata.get("endpoints") if isinstance(metadata, Mapping) else None
+    available = endpoints.get("available") if isinstance(endpoints, Mapping) else None
+    if not isinstance(available, list):
+        return "", ""
+    selected = [item for item in available if isinstance(item, Mapping) and item.get("selected") is True]
+    if len(selected) != 1:
+        return "", ""
+    provider = selected[0].get("provider")
+    model = selected[0].get("model")
+    return (
+        str(provider)[:128] if isinstance(provider, str) else "",
+        str(model)[:128] if isinstance(model, str) else "",
+    )
+
+
+@contextmanager
+def _absolute_request_timeout(seconds: float, *, stage: str):
+    """Enforce one blocking HTTP wall budget on the Lambda main thread.
+
+    Requests' read timeout resets when a peer sends another byte. Preserve a
+    shorter outer Review alarm; if this guard installs an earlier timer,
+    restore the outer alarm with time spent here deducted. Other threads and
+    platforms without setitimer retain Requests' socket timeout only.
+    """
+
+    if (
+        threading.current_thread() is not threading.main_thread()
+        or not hasattr(signal, "setitimer")
+    ):
+        yield
+        return
+    old_handler = signal.getsignal(signal.SIGALRM)
+    old_remaining, old_interval = signal.getitimer(signal.ITIMER_REAL)
+    if old_remaining > 0 and (old_remaining <= seconds or old_interval > 0):
+        yield
+        return
+    started = time.monotonic()
+
+    def expire(_signum: int, _frame: Any) -> None:
+        raise DeadlineExceeded(stage, remaining_seconds=0)
+
+    signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, max(0.001, float(seconds)))
+    try:
+        yield
+    finally:
+        elapsed = max(0.0, time.monotonic() - started)
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)
+        if old_remaining > 0:
+            signal.setitimer(
+                signal.ITIMER_REAL,
+                max(0.000001, old_remaining - elapsed),
+                old_interval,
+            )
+
+
 def _write_local_trace(event: Dict[str, Any]) -> None:
     directory = _trace_dir()
     if not directory:
@@ -195,7 +273,7 @@ def _summary_event(event: Dict[str, Any]) -> Dict[str, Any]:
 
 def _emit_cloudwatch_trace(event: Dict[str, Any]) -> None:
     logger.info(
-        "DeepSeek trace summary: %s",
+        "Provider trace summary: %s",
         json.dumps(_summary_event(event), ensure_ascii=False, default=str),
     )
 
@@ -266,6 +344,7 @@ def _build_trace_event(
     provider_call_record: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     message = (result.get("choices") or [{}])[0].get("message", {})
+    upstream_provider, upstream_model = _selected_openrouter_endpoint(result)
     logical_model = payload.get("_llamapreview_logical_model")
     billed_model = payload.get("_llamapreview_billed_model")
     summary = {
@@ -274,6 +353,10 @@ def _build_trace_event(
         "model": logical_model,
         "logical_model": logical_model,
         "billed_model": billed_model,
+        "response_model": str(result.get("model") or ""),
+        "service_tier": str(result.get("service_tier") or ""),
+        "upstream_provider": upstream_provider,
+        "upstream_model": upstream_model,
         "call_id": str((provider_call_record or {}).get("call_id") or ""),
         "operation_id": str(
             (provider_call_record or {}).get("operation_id") or ""
@@ -292,8 +375,9 @@ def _build_trace_event(
             (provider_call_record or {}).get("transport_attempt_index") or 0
         ),
         "api_variant": payload.get("_llamapreview_api_variant", "stable"),
-        "reasoning_effort": payload.get("reasoning_effort"),
-        "thinking": (payload.get("thinking") or {}).get("type") == "enabled",
+        "provider": payload.get("_llamapreview_provider", "deepseek"),
+        "reasoning_effort": _payload_effort(payload),
+        "thinking": _payload_thinking(payload),
         "thinking_type": (payload.get("thinking") or {}).get("type"),
         "response_format": payload.get("response_format"),
         "strict_tool_count": sum(
@@ -348,7 +432,7 @@ def _emit_failure_summary(
     elapsed_seconds: float,
 ) -> None:
     logger.warning(
-        "DeepSeek failure summary: %s",
+        "Provider failure summary: %s",
         json.dumps(
             {
                 "phase": trace_phase or "unknown",
@@ -368,6 +452,7 @@ def _emit_failure_summary(
 class DeepSeekClient:
     API_BASE = "https://api.deepseek.com"
     API_BETA_BASE = "https://api.deepseek.com/beta"
+    OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
     CHAT_PATH = "/chat/completions"
 
     def __init__(
@@ -378,10 +463,15 @@ class DeepSeekClient:
         reasoning_effort: str = config.DEEPSEEK_EFFORT,
         timeout: int = config.DEEPSEEK_TIMEOUT_SECONDS,
         transport_model_override: str = config.DEEPSEEK_TRANSPORT_MODEL_OVERRIDE,
+        provider: str = config.MODEL_PROVIDER,
     ):
-        self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
+        if provider not in {"openrouter", "deepseek"}:
+            raise ValueError("provider must be openrouter or deepseek")
+        self.provider = provider
+        key_name = "OPENROUTER_API_KEY" if provider == "openrouter" else "DEEPSEEK_API_KEY"
+        self.api_key = api_key or os.environ.get(key_name)
         if not self.api_key:
-            raise ValueError("DEEPSEEK_API_KEY is not set.")
+            raise ValueError(f"{key_name} is not set.")
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.timeout = timeout
@@ -510,6 +600,7 @@ class DeepSeekClient:
         usage_reported = not usage_errors
         record: Dict[str, Any] = {
             "schema_version": 2,
+            "provider": self.provider,
             "call_id": call_id,
             "operation_id": operation_id,
             "run_id": str(operation.get("run_id") or ""),
@@ -530,8 +621,8 @@ class DeepSeekClient:
             "billed_model": str(
                 payload.get("_llamapreview_billed_model") or ""
             ),
-            "thinking": (payload.get("thinking") or {}).get("type") == "enabled",
-            "reasoning_effort": str(payload.get("reasoning_effort") or ""),
+            "thinking": _payload_thinking(payload),
+            "reasoning_effort": _payload_effort(payload),
             "status": str(status or "unknown"),
             "finish_reason": finish_reason,
             "elapsed_seconds": round(max(0.0, float(elapsed_seconds)), 3),
@@ -550,6 +641,17 @@ class DeepSeekClient:
             "usage_state": "reported" if usage_reported else "unreported",
             "usage": numeric_usage,
         }
+        if isinstance(result, Mapping):
+            record["response_model"] = str(result.get("model") or "")
+            record["service_tier"] = str(result.get("service_tier") or "")
+            if self.provider == "openrouter":
+                upstream_provider, upstream_model = _selected_openrouter_endpoint(result)
+                record["upstream_provider"] = upstream_provider
+                record["upstream_model"] = upstream_model
+                record["generation_id"] = str(result.get("id") or "")[:128]
+                gateway_usage = result.get("usage")
+                if isinstance(gateway_usage, Mapping) and isinstance(gateway_usage.get("is_byok"), bool):
+                    record["is_byok"] = gateway_usage["is_byok"]
         if usage_errors:
             record["usage_validation_errors"] = usage_errors
         if http_status is not None:
@@ -589,6 +691,7 @@ class DeepSeekClient:
         ).hexdigest()
         return {
             "schema_version": 2,
+            "provider": self.provider,
             "call_id": call_id,
             "operation_id": operation_id,
             "run_id": str(operation.get("run_id") or ""),
@@ -611,9 +714,8 @@ class DeepSeekClient:
             "billed_model": str(
                 payload.get("_llamapreview_billed_model") or ""
             ),
-            "thinking": (payload.get("thinking") or {}).get("type")
-            == "enabled",
-            "reasoning_effort": str(payload.get("reasoning_effort") or ""),
+            "thinking": _payload_thinking(payload),
+            "reasoning_effort": _payload_effort(payload),
             "status": "dispatching",
             "finish_reason": "",
             "elapsed_seconds": 0,
@@ -669,6 +771,8 @@ class DeepSeekClient:
     ) -> Dict[str, Any]:
         if api_variant not in {"stable", "beta"}:
             raise ValueError("DeepSeek api_variant must be stable or beta")
+        if self.provider == "openrouter" and api_variant != "stable":
+            raise ValueError("OpenRouter does not use the DeepSeek beta endpoint")
         payload: Dict[str, Any] = {
             "model": self.model if model is None else model,
             "messages": messages,
@@ -676,9 +780,19 @@ class DeepSeekClient:
             # trace summaries retain only this stable enum.
             "_llamapreview_api_variant": api_variant,
         }
-        if thinking:
-            payload["reasoning_effort"] = reasoning_effort or self.reasoning_effort
-        payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
+        if self.provider == "openrouter":
+            # Luna's active review profile always uses max reasoning, including
+            # legacy callers whose `thinking=False` meant DeepSeek Final. The
+            # Chat endpoint is valid here because active phases do not send
+            # provider function tools; repository tools execute in our code.
+            if tools:
+                raise ValueError("Luna reasoning with function tools requires Responses API")
+            payload["reasoning"] = {"effort": "max"}
+            payload["provider"] = {"require_parameters": True}
+        else:
+            if thinking:
+                payload["reasoning_effort"] = reasoning_effort or self.reasoning_effort
+            payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
         if tools:
             payload["tools"] = tools
         if tool_choice is not None:
@@ -686,7 +800,7 @@ class DeepSeekClient:
         if response_format:
             payload["response_format"] = response_format
         if max_tokens:
-            payload["max_tokens"] = max_tokens
+            payload["max_completion_tokens" if self.provider == "openrouter" else "max_tokens"] = max_tokens
         return payload
 
     def chat(
@@ -748,11 +862,18 @@ class DeepSeekClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        if self.provider == "openrouter":
+            headers["X-OpenRouter-Metadata"] = "enabled"
         api_variant = str(payload.get("_llamapreview_api_variant") or "stable")
-        api_base = self.API_BETA_BASE if api_variant == "beta" else self.API_BASE
+        api_base = (
+            self.OPENROUTER_API_BASE
+            if self.provider == "openrouter"
+            else self.API_BETA_BASE if api_variant == "beta" else self.API_BASE
+        )
         model_selection = resolve_provider_model(
             payload.get("model"),
             self.transport_model_override,
+            provider=self.provider,
         )
         transport_payload = {
             key: value
@@ -763,6 +884,7 @@ class DeepSeekClient:
         evidence_payload = {
             **transport_payload,
             "_llamapreview_api_variant": api_variant,
+            "_llamapreview_provider": self.provider,
             "_llamapreview_logical_model": model_selection.logical_model,
             "_llamapreview_billed_model": model_selection.billed_model,
         }
@@ -810,22 +932,33 @@ class DeepSeekClient:
                 # dispatch on stream redelivery.
                 self._persist_provider_dispatch_fence(dispatch_fence)
                 started = time.monotonic()
-                response = requests.post(
-                    url,
-                    headers=headers,
-                    json=transport_payload,
-                    timeout=request_timeout,
-                )
+                with _absolute_request_timeout(
+                    request_timeout,
+                    stage=f"provider.{trace_phase or 'unknown'}.http",
+                ):
+                    response = requests.post(
+                        url,
+                        headers=headers,
+                        json=transport_payload,
+                        timeout=request_timeout,
+                    )
+                    # With stream=False, Requests reads the body in post();
+                    # keep JSON decoding under the same absolute wall fence.
+                    if response.status_code == 200:
+                        try:
+                            result = response.json()
+                        except ValueError as exc:
+                            raise DeepSeekResponseError(
+                                "Provider returned a non-JSON success response"
+                            ) from exc
                 elapsed = time.monotonic() - started
                 dispatch_http_status = int(response.status_code)
                 if response.status_code == 200:
                     last_status = 200
-                    try:
-                        result = response.json()
-                    except Exception as exc:
-                        raise DeepSeekResponseError("DeepSeek returned a non-JSON success response") from exc
                     if not isinstance(result, dict):
-                        raise DeepSeekResponseError("DeepSeek success response must be a JSON object")
+                        raise DeepSeekResponseError("Provider success response must be a JSON object")
+                    if self.provider == "openrouter":
+                        result["usage"] = normalize_openrouter_usage(result.get("usage"))
                     self._log_success(result)
                     operation_elapsed = time.monotonic() - operation_started_at
                     call_record = self._record_provider_call(
@@ -856,7 +989,7 @@ class DeepSeekClient:
                 if response.status_code == 429 or response.status_code >= 500:
                     last_status = int(response.status_code)
                     last_error = DeepSeekHTTPError(
-                        f"DeepSeek retryable HTTP status {response.status_code}",
+                        f"Provider retryable HTTP status {response.status_code}",
                         status_code=last_status,
                     )
                     final_dispatch = attempt == max_retries - 1
@@ -880,7 +1013,7 @@ class DeepSeekClient:
                     dispatch_recorded = True
                     retry_after = response.headers.get("Retry-After")
                     wait = int(retry_after) if retry_after and retry_after.isdigit() else 2**attempt
-                    logger.warning("DeepSeek retryable status %s; waiting %ss", response.status_code, wait)
+                    logger.warning("Provider retryable status %s; waiting %ss", response.status_code, wait)
                     if attempt < max_retries - 1:
                         self._bounded_backoff(
                             wait,
@@ -890,7 +1023,7 @@ class DeepSeekClient:
                         )
                     continue
                 raise DeepSeekHTTPError(
-                    f"DeepSeek API client error status {response.status_code}",
+                    f"Provider API client error status {response.status_code}",
                     status_code=int(response.status_code),
                 )
             except (
@@ -1009,16 +1142,16 @@ class DeepSeekClient:
                 raise
         if isinstance(last_error, requests.Timeout):
             final_error: DeepSeekError = DeepSeekTimeoutError(
-                f"DeepSeek request timed out after {max_retries} attempt(s)"
+                f"Provider request timed out after {max_retries} attempt(s)"
             )
         elif isinstance(last_error, requests.RequestException):
             final_error = DeepSeekTransportError(
-                f"DeepSeek transport failed after {max_retries} attempt(s): "
+                f"Provider transport failed after {max_retries} attempt(s): "
                 f"{last_error.__class__.__name__}"
             )
         else:
             final_error = DeepSeekHTTPError(
-                "DeepSeek request failed after retry exhaustion",
+                "Provider request failed after retry exhaustion",
                 status_code=last_status,
             )
         _emit_failure_summary(
@@ -1055,7 +1188,7 @@ class DeepSeekClient:
 
     def _log_success(self, result: Dict[str, Any]) -> None:
         usage = result.get("usage", {})
-        logger.info("DeepSeek API success: total_tokens=%s", usage.get("total_tokens", 0))
+        logger.info("Provider API success: provider=%s total_tokens=%s", self.provider, usage.get("total_tokens", 0))
 
     def _trace_success(
         self,
@@ -1092,7 +1225,7 @@ class DeepSeekClient:
             # unavailable; CloudWatch already has the content-free summary and
             # the durable provider ledger still executes next.
             logger.exception(
-                "DeepSeek local trace persistence failed: phase=%s trace_id=%s",
+                "Provider local trace persistence failed: phase=%s trace_id=%s",
                 event.get("phase"),
                 event.get("trace_id"),
             )
@@ -1104,7 +1237,7 @@ class DeepSeekClient:
                 # summary. Avoid replaying an expensive model call solely
                 # because optional full-trace persistence failed.
                 logger.exception(
-                    "DeepSeek full trace persistence failed: phase=%s trace_id=%s",
+                    "Provider full trace persistence failed: phase=%s trace_id=%s",
                     event.get("phase"),
                     event.get("trace_id"),
                 )
