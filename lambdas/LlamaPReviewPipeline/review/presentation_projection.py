@@ -665,8 +665,6 @@ def _normalize_finding(
             ),
             "item",
         )
-        if carries_blocking_decision:
-            state.contract_blocking_decision_if_needed(location)
         return None
     path_value = raw.get("file_path")
     path = (
@@ -719,7 +717,6 @@ def _normalize_finding(
                 "blocking test-gap requires a concrete pre-merge owner action",
                 "item",
             )
-            state.contract_blocking_decision_if_needed(location)
             return None
         if pre_merge_action != owner_action:
             owner_action = pre_merge_action
@@ -1003,8 +1000,6 @@ def _normalize_finding(
             "P0/P1 lacks independent changed-code evidence capability",
             "item",
         )
-        if carries_blocking_decision:
-            state.contract_blocking_decision_if_needed(location)
         return None
     if priority == "P2" and (
         capability["rejected_refs"]
@@ -1614,6 +1609,23 @@ def compile_presentation_object(
     normalized_findings: list[Dict[str, Any]] = []
     v3_findings: list[Dict[str, Any]] = []
     seen_findings: set[tuple[Any, ...]] = set()
+    # Blocking P0/P1 items carry the decision; without one, the first
+    # substantive item is the possible carrier. Later P2 loss stays local.
+    blocking_candidates = (
+        [
+            index for index, raw in enumerate(raw_findings[:MAX_FINDINGS])
+            if isinstance(raw, dict)
+            and raw.get("category") not in ("question", "note")
+        ]
+        if verdict == "blocking"
+        else []
+    )
+    deciding_candidates = {
+        index for index in blocking_candidates
+        if raw_findings[index].get("priority") in {"P0", "P1"}
+    }
+    if not deciding_candidates and blocking_candidates:
+        deciding_candidates.add(blocking_candidates[0])
     for index, raw in enumerate(raw_findings[:MAX_FINDINGS]):
         item = _normalize_finding(
             raw,
@@ -1630,6 +1642,20 @@ def compile_presentation_object(
                 kind="out_of_catalog_material_evidence",
             )
         if item is None:
+            if index in deciding_candidates:
+                location = f"$.findings[{index}]"
+                if not any(
+                    issue.location == location
+                    or issue.location.startswith(f"{location}.")
+                    for issue in state.issues
+                ):
+                    state.add_issue(
+                        "deciding_item_lost",
+                        location,
+                        "merge-deciding finding was removed by projection",
+                        "item",
+                    )
+                state.contract_blocking_decision_if_needed(location)
             continue
         normalized, projected = item
         fingerprint = _finding_fingerprint(normalized)

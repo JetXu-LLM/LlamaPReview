@@ -3,10 +3,15 @@
 LlamaPReview separates engineering judgment from public presentation.
 
 Final may make one bounded representation correction when its initial object
-cannot be published. It receives the same Deep judgment and evidence identities,
-plus the compiler's diagnostics. The corrected object must pass the same truth
-and placement checks; a valid first result uses no correction call. This does
-not authorize new findings, severity changes, or invented causal evidence.
+cannot be published or when Projection removes a merge-deciding finding but
+another finding leaves the result mechanically publishable. It receives the
+same Deep judgment and evidence identities, plus the compiler's diagnostics.
+The corrected object must retain the original parsed verdict, restore the
+compiler-observed lost finding count, and pass the same truth and placement
+checks. Repeated deciding-finding loss fails closed; a
+valid first result or harmless optional degradation uses no correction call.
+This does not authorize new findings, severity changes, or invented causal
+evidence.
 
 ## Main review
 

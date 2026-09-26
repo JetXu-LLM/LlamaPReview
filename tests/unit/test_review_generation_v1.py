@@ -259,6 +259,40 @@ def _blocking_presentation(*, required: list[str], supporting: list[str]) -> dic
     return raw
 
 
+def _two_blocking_findings(*, wrong_primary_ref: bool) -> tuple[str, dict, dict]:
+    pr_details = REAL_PR_DETAILS + """
+### src/other.py
+```diff
+@@ -1 +1 @@
+-message = parse_old(body)
++message = parse_new(body)
+```
+"""
+    meta = _real_context_meta()
+    meta["evidence_catalog"].append({
+        "id": "path:src/other.py",
+        "source_type": "diff",
+        "outcome": "hit",
+        "paths": ["src/other.py"],
+        "coverage_type": "changed_region",
+    })
+    presentation = _blocking_presentation(
+        required=["path:src/other.py" if wrong_primary_ref else "path:src/app.py"],
+        supporting=[],
+    )
+    second = copy.deepcopy(presentation["findings"][0])
+    second.update({
+        "headline": "The parser truncates escaped release notes",
+        "file_path": "src/other.py",
+        "code_snippet": "message = parse_new(body)",
+        "analysis": "The changed parser stops at an escaped quote.",
+        "owner_action": "Make the parser escape-aware before merge.",
+        "required_evidence_refs": ["path:src/other.py"],
+    })
+    presentation["findings"].append(second)
+    return pr_details, meta, presentation
+
+
 class ReviewGenerationV1Tests(unittest.TestCase):
     def test_deep_ledger_failure_escapes_generation_without_second_call(self):
         client = DeepSeekClient(api_key="key")
@@ -522,6 +556,221 @@ class ReviewGenerationV1Tests(unittest.TestCase):
         self.assertEqual(
             client.calls[2]["messages"][4]["content"],
             json.dumps(initial),
+        )
+
+    def test_publishable_partial_repairs_lost_primary_with_existing_ref(self):
+        pr_details, meta, initial = _two_blocking_findings(wrong_primary_ref=True)
+        _, _, corrected = _two_blocking_findings(wrong_primary_ref=False)
+        deep_memo = (
+            "Merge posture: request changes. The changed call breaks its "
+            "contract and the parser truncates escaped release notes.\n"
+            "Evidence refs: path:src/app.py, path:src/other.py\n"
+            "Causal refs: path:src/app.py, path:src/other.py"
+        )
+        client = _Client([
+            _response(deep_memo),
+            _response(json.dumps(initial)),
+            _response(json.dumps(corrected)),
+        ])
+
+        result = generation.generate_review(
+            pr_details, "Exact-head context", client=client, context_meta=meta
+        )
+
+        self.assertTrue(result["review_publishable"])
+        self.assertEqual(len(client.calls), 3)
+        self.assertEqual(
+            result["review_presentation_selected_phase"],
+            "final_presentation_repair",
+        )
+        self.assertEqual(
+            [finding["required_evidence_refs"]
+             for finding in result["presentation_v1"]["findings"]],
+            [["path:src/app.py"], ["path:src/other.py"]],
+        )
+        self.assertEqual(
+            result["presentation_v1"]["decision"]["owner_actions"],
+            ["Restore the required call behavior before merge."],
+        )
+        self.assertIn("The changed call breaks", result["pr_review_comment"])
+        self.assertIn("parser truncates", result["pr_review_comment"])
+        self.assertEqual(client.calls[2]["messages"][2]["content"], deep_memo)
+
+    def test_publishable_partial_repairs_primary_with_missing_required_refs(self):
+        pr_details, meta, corrected = _two_blocking_findings(wrong_primary_ref=False)
+        initial = copy.deepcopy(corrected)
+        initial["findings"][0]["required_evidence_refs"] = []
+        deep_memo = (
+            "Merge posture: request changes. Both changed paths have defects.\n"
+            "Evidence refs: path:src/app.py, path:src/other.py\n"
+            "Causal refs: path:src/app.py, path:src/other.py"
+        )
+        client = _Client([
+            _response(deep_memo),
+            _response(json.dumps(initial)),
+            _response(json.dumps(corrected)),
+        ])
+
+        result = generation.generate_review(
+            pr_details, "Exact-head context", client=client, context_meta=meta
+        )
+
+        self.assertTrue(result["review_publishable"])
+        self.assertEqual(len(client.calls), 3)
+        self.assertEqual(
+            result["review_presentation_selected_phase"],
+            "final_presentation_repair",
+        )
+        self.assertEqual(
+            [finding["required_evidence_refs"]
+             for finding in result["presentation_v1"]["findings"]],
+            [["path:src/app.py"], ["path:src/other.py"]],
+        )
+        self.assertEqual(
+            result["presentation_v1"]["decision"]["owner_actions"],
+            ["Restore the required call behavior before merge."],
+        )
+
+    def test_publishable_partial_repairs_primary_with_invalid_category(self):
+        pr_details, meta, corrected = _two_blocking_findings(wrong_primary_ref=False)
+        initial = copy.deepcopy(corrected)
+        initial["findings"][0]["category"] = "BUG"
+        client = _Client([
+            _response("Merge posture: request changes. Both changed paths have defects."),
+            _response(json.dumps(initial)),
+            _response(json.dumps(corrected)),
+        ])
+
+        result = generation.generate_review(
+            pr_details, "Exact-head context", client=client, context_meta=meta
+        )
+
+        self.assertTrue(result["review_publishable"])
+        self.assertEqual(len(client.calls), 3)
+        self.assertCountEqual(
+            [item["headline"] for item in result["presentation_v1"]["findings"]],
+            [item["headline"] for item in corrected["findings"]],
+        )
+        self.assertEqual(
+            result["presentation_v1"]["decision"]["owner_actions"],
+            corrected["decision"]["owner_actions"],
+        )
+
+    def test_optional_secondary_p2_loss_does_not_spend_repair(self):
+        pr_details, meta, initial = _two_blocking_findings(wrong_primary_ref=False)
+        initial["findings"][1]["priority"] = "P2"
+        initial["findings"][1]["required_evidence_refs"] = []
+        client = _Client([
+            _response("Merge posture: request changes."),
+            _response(json.dumps(initial)),
+        ])
+
+        result = generation.generate_review(
+            pr_details, "Exact-head context", client=client, context_meta=meta
+        )
+
+        self.assertTrue(result["review_publishable"])
+        self.assertTrue(result["review_presentation_safe_partial"])
+        self.assertEqual(len(result["presentation_v1"]["findings"]), 1)
+        self.assertEqual(len(client.calls), 2)
+
+    def test_first_blocking_p2_loss_uses_same_bounded_repair(self):
+        pr_details, meta, corrected = _two_blocking_findings(wrong_primary_ref=False)
+        for finding in corrected["findings"]:
+            finding["priority"] = "P2"
+        initial = copy.deepcopy(corrected)
+        initial["findings"][0]["required_evidence_refs"] = []
+        client = _Client([
+            _response(
+                "Merge posture: request changes.\n"
+                "Causal refs: path:src/app.py, path:src/other.py"
+            ),
+            _response(json.dumps(initial)),
+            _response(json.dumps(corrected)),
+        ])
+
+        result = generation.generate_review(
+            pr_details, "Exact-head context", client=client, context_meta=meta
+        )
+
+        self.assertTrue(result["review_publishable"])
+        self.assertEqual(len(client.calls), 3)
+        self.assertEqual(len(result["presentation_v1"]["findings"]), 2)
+
+    def test_repeated_publishable_primary_loss_fails_after_one_repair(self):
+        pr_details, meta, initial = _two_blocking_findings(wrong_primary_ref=True)
+        raw = json.dumps(initial)
+        client = _Client([
+            _response("Merge posture: request changes."),
+            _response(raw),
+            _response(raw),
+        ])
+
+        result = generation.generate_review(
+            pr_details, "Exact-head context", client=client, context_meta=meta
+        )
+
+        self.assertEqual(len(client.calls), 3)
+        self.assertFalse(result["review_publishable"])
+        self.assertEqual(result["review_failure_kind"], "deciding_item_loss")
+        self.assertNotIn("pr_review_comment", result)
+
+    def test_partial_repair_cannot_omit_lost_primary(self):
+        pr_details, meta, initial = _two_blocking_findings(wrong_primary_ref=True)
+        omitted = copy.deepcopy(initial)
+        omitted["findings"] = [omitted["findings"][1]]
+        omitted["decision"]["summary"] = omitted["findings"][0]["headline"]
+        omitted["decision"]["owner_actions"] = [
+            omitted["findings"][0]["owner_action"]
+        ]
+        client = _Client([
+            _response("Merge posture: request changes."),
+            _response(json.dumps(initial)),
+            _response(json.dumps(omitted)),
+        ])
+
+        result = generation.generate_review(
+            pr_details, "Exact-head context", client=client, context_meta=meta
+        )
+
+        self.assertEqual(len(client.calls), 3)
+        self.assertFalse(result["review_publishable"])
+        self.assertEqual(result["review_failure_kind"], "deciding_item_loss")
+        self.assertNotIn("pr_review_comment", result)
+
+    def test_partial_repair_cannot_change_blocking_verdict_to_clear(self):
+        pr_details, meta, initial = _two_blocking_findings(wrong_primary_ref=True)
+        client = _Client([
+            _response("Merge posture: request changes."),
+            _response(json.dumps(initial)),
+            _response(json.dumps(_publishable().presentation)),
+        ])
+
+        result = generation.generate_review(
+            pr_details, "Exact-head context", client=client, context_meta=meta
+        )
+
+        self.assertEqual(len(client.calls), 3)
+        self.assertFalse(result["review_publishable"])
+        self.assertEqual(result["review_failure_kind"], "deciding_item_loss")
+        self.assertNotIn("pr_review_comment", result)
+
+    def test_valid_two_findings_need_no_correction_call(self):
+        pr_details, meta, final = _two_blocking_findings(wrong_primary_ref=False)
+        client = _Client([
+            _response("Merge posture: request changes."),
+            _response(json.dumps(final)),
+        ])
+
+        result = generation.generate_review(
+            pr_details, "Exact-head context", client=client, context_meta=meta
+        )
+
+        self.assertTrue(result["review_publishable"])
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(
+            result["review_presentation_selected_phase"],
+            "final_presentation",
         )
 
     def test_correction_does_not_promote_same_path_support_itself(self):
