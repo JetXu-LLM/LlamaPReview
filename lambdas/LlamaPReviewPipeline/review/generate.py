@@ -239,11 +239,28 @@ def _final_messages(
 
 
 def _final_repair_issues(compiled: PresentationResult):
+    lost_locations = _lost_blocking_decision_locations(compiled)
+    partial_deciding_loss = compiled.publishable and bool(lost_locations)
     if (
-        compiled.failure_kind not in _FINAL_REPAIRABLE_FAILURES
+        (
+            not partial_deciding_loss
+            and compiled.failure_kind not in _FINAL_REPAIRABLE_FAILURES
+        )
         or any(issue.severity == "truth" for issue in compiled.issues)
     ):
         return None
+    if partial_deciding_loss:
+        source_issues = (
+            issue for issue in compiled.issues
+            if issue.severity == "item"
+            and any(
+                issue.location == location
+                or issue.location.startswith(f"{location}.")
+                for location in lost_locations
+            )
+        )
+    else:
+        source_issues = compiled.issues
     issues = [
         ContractRepairIssue(
             code=issue.code,
@@ -262,9 +279,17 @@ def _final_repair_issues(compiled: PresentationResult):
                 10 if issue.code != "deciding_item_lost" else 20
             ),
         )
-        for issue in compiled.issues
+        for issue in source_issues
     ]
     return select_repair_issues(issues) if issues else None
+
+
+def _lost_blocking_decision_locations(compiled: PresentationResult) -> set[str]:
+    return {
+        action.rsplit(":", 1)[0]
+        for action in compiled.normalizations
+        if action.endswith(":blocking_decision_dependency_removed")
+    }
 
 
 def _append_phase(
@@ -671,7 +696,8 @@ def generate_review(
     )
     if final_incomplete_error is not None:
         compiled = mark_final_response_incomplete(compiled)
-    if compiled.publishable:
+    lost_locations = _lost_blocking_decision_locations(compiled)
+    if compiled.publishable and not lost_locations:
         return _publishable_result(
             compiled,
             selected_phase=_FINAL_PRESENTATION_PHASE,
@@ -683,6 +709,11 @@ def generate_review(
         _final_repair_issues(compiled)
         if final_incomplete_error is None and failed_final_content.strip()
         else None
+    )
+    minimum_repaired_findings = (
+        len(compiled.presentation["findings"]) + len(lost_locations)
+        if compiled.publishable and lost_locations
+        else 0
     )
     if (
         repair_selection is not None
@@ -767,8 +798,11 @@ def generate_review(
             if isinstance(corrected_decision, Mapping)
             else None
         )
-        if corrected.publishable and (
-            initial_verdict is None or corrected_verdict == initial_verdict
+        if (
+            corrected.publishable
+            and not _lost_blocking_decision_locations(corrected)
+            and len(corrected.presentation["findings"]) >= minimum_repaired_findings
+            and (initial_verdict is None or corrected_verdict == initial_verdict)
         ):
             return _publishable_result(
                 corrected,
@@ -780,7 +814,7 @@ def generate_review(
                     *corrected.normalizations,
                 ),
             )
-        if not corrected.publishable:
+        if not corrected.publishable or _lost_blocking_decision_locations(corrected):
             compiled = corrected
     presentation_error = _presentation_failure(compiled)
     return _nonpublishable_result(
@@ -789,5 +823,9 @@ def generate_review(
         phases=phases,
         finish_reasons=finish_reasons,
         normalizations=compiled.normalizations,
-        failure_kind_override=compiled.failure_kind,
+        failure_kind_override=(
+            "deciding_item_loss"
+            if _lost_blocking_decision_locations(compiled)
+            else compiled.failure_kind
+        ),
     )
