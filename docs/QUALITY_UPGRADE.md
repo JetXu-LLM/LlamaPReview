@@ -24,6 +24,7 @@ from these diagnostic cases.
 | A trickling HTTP response exceeds the intended total time | Enforce the remaining wall budget around request and body decoding on the Lambda main thread, preserving the outer phase timer. | A local drip-response test expires one dispatch without a second purchase; missing usage remains unknown. |
 | Test fixtures are mistaken for shared production behavior | Deep checks lexical scope, actual callers, and the purpose of negative controls. | A test-only mutation is not reported as a production regression without a real caller path. |
 | Authors are asked to recheck available repository facts | Deep answers supplied manifest/helper facts, distinguishes unread evidence from external unknowns, and keeps optional improvements nonblocking. | Frozen source reviews resolve an admitted dependency range locally and retain honest gaps when evidence is absent. |
+| A max-effort plan consumes the old retrieval window before useful reads run | Luna uses a 600-second soft retrieval gate within the existing 780-second context budget. The orchestrator passes the mode's soft gate explicitly; DeepSeek retains its prior budgets. | Normal and high overrides remain independent. Retrieval and reconciliation still share the hard deadline and state reserve; extra time is not evidence that the model found the right issues. |
 | Model labels hide the actual transport | One provider profile selects OpenRouter `openai/gpt-6-luna` with `max` for every active model call. The ledger retains requested/returned identities and reported usage. | Route, PFR, Deep, Final, and correction use the same target; switching `MODEL_PROVIDER` to `deepseek` restores the previous profile. |
 
 Evidence and lifecycle checks retain their existing owners. The change does not
@@ -47,6 +48,13 @@ judgment, and presentation. It cannot qualify OpenRouter's wire behavior,
 gateway billing, model-serving identity, or per-call output-token enforcement.
 Those differences stay explicit in its receipt. No OpenRouter connection test
 is claimed for this upgrade.
+
+The Luna default is a trial migration, not an established quality improvement.
+Local CLI runs recovered supported lockfile, JSON parsing, and HTML-email
+findings, but also showed variable findings and a reconciliation timeout on a
+repeated frozen PR. A successful schema or publication receipt does not cancel
+those misses. These diagnostic cases do not establish that Luna reliably
+replaces Flash; the DeepSeek profile remains available through the same runtime.
 
 The default in source is not a deployment receipt. Official activation still
 requires a real OpenRouter key, verified public release artifacts, an inspected
