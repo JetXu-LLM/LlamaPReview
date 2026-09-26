@@ -63,6 +63,17 @@ migration guidance](https://developers.openai.com/api/docs/guides/latest-model).
 
 Context size, tool rounds, provider timeouts, and phase deadlines are bounded by the variables in [`config.py`](../lambdas/LlamaPReviewPipeline/config.py). Treat those defaults as a coherent tested profile. A larger value can raise Lambda duration, provider cost, DynamoDB/S3 pressure, and the probability that a head changes before publication.
 
+With `MODEL_PROVIDER=openrouter`, normal and high PFR both allow up to 600
+seconds for retrieval steps and use a 780-second PFR time budget. The context
+phase still has its separate 780-second limit and 30-second state-write
+reserve; tool, token, and context-size caps remain different by review tier.
+This longer retrieval window prevents a max-reasoning Plan that exceeds the
+legacy 180-second gate from automatically skipping its planned checks. It is
+not a guarantee that every Plan and Reconcile finishes within the phase limit.
+`MODEL_PROVIDER=deepseek` restores the previous normal 180/240-second and high
+420/780-second soft/time budgets. The four `PFR_*TIME_BUDGET_SECONDS` settings
+can explicitly override these profile defaults.
+
 On the deployed Lambda main thread, a POSIX wall timer bounds each provider
 HTTP request and body read even if the peer sends bytes slowly enough to keep
 resetting a socket read timeout. It preserves a shorter outer Review timer.

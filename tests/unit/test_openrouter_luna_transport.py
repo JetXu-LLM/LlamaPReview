@@ -19,6 +19,7 @@ set_default_env()
 install_fake_requests_module()
 
 from lambdas.LlamaPReviewPipeline import deepseek_client as transport  # noqa: E402
+from lambdas.LlamaPReviewPipeline import orchestrator  # noqa: E402
 from lambdas.LlamaPReviewPipeline.deepseek_client import DeepSeekClient  # noqa: E402
 
 
@@ -169,6 +170,93 @@ class OpenRouterLunaTransportTests(unittest.TestCase):
                     ])
                     self.assertEqual(selected[7:11], ["high"] * 4)
                     self.assertEqual(selected[11], "max")
+
+    def test_pfr_budget_defaults_and_explicit_environment_overrides_by_provider(self):
+        code = (
+            "import json; from lambdas.LlamaPReviewPipeline import config as c; "
+            "print(json.dumps([c.PFR_NORMAL_SOFT_TIME_BUDGET_SECONDS,"
+            "c.PFR_NORMAL_TIME_BUDGET_SECONDS,"
+            "c.PFR_HIGH_SOFT_TIME_BUDGET_SECONDS,"
+            "c.PFR_HIGH_TIME_BUDGET_SECONDS,"
+            "c.PIPELINE_CONTEXT_PHASE_MAX_SECONDS,"
+            "c.PIPELINE_STATE_WRITE_RESERVE_SECONDS]))"
+        )
+        base = {
+            name: value
+            for name, value in os.environ.items()
+            if name not in {
+                "PFR_NORMAL_SOFT_TIME_BUDGET_SECONDS",
+                "PFR_NORMAL_TIME_BUDGET_SECONDS",
+                "PFR_HIGH_SOFT_TIME_BUDGET_SECONDS",
+                "PFR_HIGH_TIME_BUDGET_SECONDS",
+                "PIPELINE_CONTEXT_PHASE_MAX_SECONDS",
+                "PIPELINE_STATE_WRITE_RESERVE_SECONDS",
+            }
+        }
+
+        def selected(env):
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return json.loads(result.stdout)
+
+        self.assertEqual(
+            selected({**base, "MODEL_PROVIDER": "openrouter"}),
+            [600, 780, 600, 780, 780, 30],
+        )
+        self.assertEqual(
+            selected({**base, "MODEL_PROVIDER": "deepseek"}),
+            [180, 240, 420, 780, 780, 30],
+        )
+        for provider in ("openrouter", "deepseek"):
+            with self.subTest(provider=provider):
+                self.assertEqual(
+                    selected({
+                        **base,
+                        "MODEL_PROVIDER": provider,
+                        "PFR_NORMAL_SOFT_TIME_BUDGET_SECONDS": "511",
+                        "PFR_NORMAL_TIME_BUDGET_SECONDS": "711",
+                        "PFR_HIGH_SOFT_TIME_BUDGET_SECONDS": "522",
+                        "PFR_HIGH_TIME_BUDGET_SECONDS": "722",
+                    }),
+                    [511, 711, 522, 722, 780, 30],
+                )
+
+    def test_normal_and_high_context_routes_use_their_own_soft_budget(self):
+        kwargs = {
+            "runtime": object(),
+            "token": "synthetic-token",
+            "repo": "example/repo",
+            "pr_number": 1,
+            "pr_content": {},
+            "pr_details": "synthetic PR",
+            "head_sha": "a" * 40,
+            "default_branch": "main",
+            "trace_metadata": {},
+            "route_plan": {},
+            "deadline": object(),
+        }
+        with (
+            patch.object(orchestrator.config, "PFR_NORMAL_TIME_BUDGET_SECONDS", 780),
+            patch.object(orchestrator.config, "PFR_HIGH_TIME_BUDGET_SECONDS", 780),
+            patch.object(orchestrator.config, "PFR_NORMAL_SOFT_TIME_BUDGET_SECONDS", 511),
+            patch.object(orchestrator.config, "PFR_HIGH_SOFT_TIME_BUDGET_SECONDS", 522),
+            patch.object(orchestrator.persistence, "load_repo_fact_sheet", return_value=""),
+            patch.object(orchestrator, "collect_context", return_value=("context", {})) as collect,
+        ):
+            for review_mode, expected_soft in (("normal", 511), ("high", 522)):
+                with self.subTest(review_mode=review_mode):
+                    orchestrator._context_for_mode(review_mode=review_mode, **kwargs)
+                    call_kwargs = collect.call_args.kwargs
+                    self.assertEqual(call_kwargs["soft_time_budget"], expected_soft)
+                    if review_mode == "normal":
+                        self.assertEqual(call_kwargs["time_budget"], 780)
+                    else:
+                        self.assertNotIn("time_budget", call_kwargs)
 
     @unittest.skipUnless(hasattr(signal, "setitimer"), "POSIX wall timer required")
     def test_slow_drip_expires_one_fenced_dispatch_without_retry(self):
