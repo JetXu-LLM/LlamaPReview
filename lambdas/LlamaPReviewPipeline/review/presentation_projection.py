@@ -1615,7 +1615,7 @@ def compile_presentation_object(
         [
             index for index, raw in enumerate(raw_findings[:MAX_FINDINGS])
             if isinstance(raw, dict)
-            and raw.get("category") in CATEGORIES - {"question", "note"}
+            and raw.get("category") not in ("question", "note")
         ]
         if verdict == "blocking"
         else []

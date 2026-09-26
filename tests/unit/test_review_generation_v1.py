@@ -631,6 +631,31 @@ class ReviewGenerationV1Tests(unittest.TestCase):
             ["Restore the required call behavior before merge."],
         )
 
+    def test_publishable_partial_repairs_primary_with_invalid_category(self):
+        pr_details, meta, corrected = _two_blocking_findings(wrong_primary_ref=False)
+        initial = copy.deepcopy(corrected)
+        initial["findings"][0]["category"] = "BUG"
+        client = _Client([
+            _response("Merge posture: request changes. Both changed paths have defects."),
+            _response(json.dumps(initial)),
+            _response(json.dumps(corrected)),
+        ])
+
+        result = generation.generate_review(
+            pr_details, "Exact-head context", client=client, context_meta=meta
+        )
+
+        self.assertTrue(result["review_publishable"])
+        self.assertEqual(len(client.calls), 3)
+        self.assertCountEqual(
+            [item["headline"] for item in result["presentation_v1"]["findings"]],
+            [item["headline"] for item in corrected["findings"]],
+        )
+        self.assertEqual(
+            result["presentation_v1"]["decision"]["owner_actions"],
+            corrected["decision"]["owner_actions"],
+        )
+
     def test_optional_secondary_p2_loss_does_not_spend_repair(self):
         pr_details, meta, initial = _two_blocking_findings(wrong_primary_ref=False)
         initial["findings"][1]["priority"] = "P2"
