@@ -15,7 +15,7 @@ class ReplayCorpusTests(unittest.TestCase):
         cls.manifest = load_manifest()
 
     def test_manifest_has_current_and_sealed_suites(self):
-        self.assertEqual(len(self.manifest["current"]), 23)
+        self.assertEqual(len(self.manifest["current"]), 24)
         self.assertEqual(len(self.manifest["sealed"]), 6)
 
     def test_manifest_rejects_duplicates_and_unknown_tests(self):
@@ -31,7 +31,7 @@ class ReplayCorpusTests(unittest.TestCase):
 
     def test_current_suite_passes(self):
         receipt = run_local_cases(self.manifest, suites=("current",))
-        self.assertEqual(receipt["attempted"], 23)
+        self.assertEqual(receipt["attempted"], 24)
         self.assertEqual(receipt["failed"], 0)
 
     def test_sealed_suite_passes(self):

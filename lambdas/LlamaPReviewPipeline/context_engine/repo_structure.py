@@ -92,9 +92,11 @@ class RepoInventory:
 
     def can_direct_probe(self, path: str) -> bool:
         normalized = normalize_repo_path(path)
+        # A failed tree request leaves exact paths unknown, just like a
+        # truncated tree; only a bounded PR-head read can establish a result.
         return bool(
             normalized
-            and self.status == "partial"
+            and self.status in {"partial", "error"}
             and not is_sensitive_repo_path(normalized)
             and normalized not in self.direct_probe_paths
             and len(self.direct_probe_paths) < 6
