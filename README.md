@@ -69,7 +69,7 @@ Self-hosting runs the same public-only Webhook and Pipeline path in your AWS acc
 
 1. Download one semantic release and [verify its checksums and GitHub provenance](docs/RELEASE_VERIFICATION.md).
 2. Follow the [AWS deployment guide](docs/AWS_DEPLOYMENT.md) to deploy the two Lambda functions, dependency Layer, DynamoDB table, private S3 bucket, event-source mapping, alarms, and least-privilege IAM.
-3. Supply your own GitHub App and OpenRouter credentials, then pay your own AWS and provider costs. The default model is GPT-6 Luna at max reasoning; configure a DeepSeek key as well to enable the [one-setting switch back](docs/CONFIGURATION.md#review-routing).
+3. Supply your own GitHub App and OpenRouter credentials, then pay your own AWS and provider costs. The default model is a GPT-6 Luna max [trial with documented qualification limits](docs/QUALITY_UPGRADE.md#validation-boundaries); configure a DeepSeek key as well to enable the [one-setting switch back](docs/CONFIGURATION.md#review-routing).
 
 The reference stack has no automatic production deployment, paid secret-management service, hidden private-repository mode, or official AWS identity.
 
