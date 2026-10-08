@@ -39,9 +39,9 @@ The app does not review every push. Reviews use GitHub's `COMMENT` state, not `A
 
 ## Hosted capacity and limits
 
-The free hosted service admits up to **3 review runs per repository per UTC day**, within a **shared 100-run daily limit**. Capacity counts attempts admitted after deterministic skip checks and before the first paid model call; it does not guarantee three successfully delivered reviews. A retry of the same run reuses its admission within the same UTC day; a retry after UTC rollover needs that day's capacity.
+Free hosted capacity: up to **3 admitted review attempts per repository per UTC day**, within a **shared 100-attempt daily limit**. An attempt does not guarantee a completed review. Over-capacity requests are skipped, not queued.
 
-Over-capacity requests are skipped, not queued for the next day. The first ordinary request over a repository's limit may receive a skip notice; later requests that day stop quietly. The global limit is always silent. See the [capacity policy](docs/CONFIGURATION.md#free-review-capacity) and [failure and skip messages](docs/REVIEW_OUTPUT.md#failure-and-skip-messages).
+[Capacity policy](docs/CONFIGURATION.md#free-review-capacity) · [Failure and skip messages](docs/REVIEW_OUTPUT.md#failure-and-skip-messages).
 
 Reviews can miss issues or be wrong; they supplement your tests and review process. Repository evidence is bounded, and missing coverage remains a gap. New private-repository events are discarded before product storage or model processing. Read the [privacy and retention policy](docs/PRIVACY.md) and [security model](docs/SECURITY.md).
 
