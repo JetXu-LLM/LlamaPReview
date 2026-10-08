@@ -11,6 +11,49 @@ do not appear as project versions.
 
 ## [Unreleased]
 
+### Changed
+
+- Substantive main reviews and post-merge follow-ups carry one of two equal-weight
+  invitation footers: inspect LlamaPReview's source or open CarbonChat. Selection
+  is stable for the reviewed head; recovery preserves the saved request bytes.
+  Inline comments and code-owned error, stopped and capacity notices remain
+  footer-free. Existing published reviews are not edited.
+- README and website lead with a real review and installation steps, link the
+  main install entry to Marketplace, and clarify trigger and attempt-capacity
+  limits. Editable SVGs describe quick start and the actual review pipeline.
+
+## [0.1.8] - 2026-09-26
+
+### Fixed
+
+- Partial Final outputs that lose a deciding finding through an invalid evidence
+  reference or malformed field use the existing single compiler-guided correction.
+  The correction preserves the original verdict and finding count under the same
+  evidence and publication gates. Valid reviews and optional secondary degradation
+  add no call; provider selection and budgets are unchanged by this patch.
+
+## [0.1.7] - 2026-09-26
+
+### Changed
+
+- Final preserves causal evidence references and can correct one invalid
+  representation using the original Deep judgment and compiler diagnostics.
+  CI refresh retains independent code findings while reporting current check
+  state; changed deciding evidence still requires model rejudgment.
+- Source installations default to an OpenRouter GPT-6 Luna max trial. The
+  existing DeepSeek profile remains available through `MODEL_PROVIDER=deepseek`.
+  Documented CLI qualification does not establish reliable Flash replacement
+  or qualify OpenRouter connectivity, billing, identity or latency. Publishing
+  this source release does not deploy the official hosted service.
+
+### Fixed
+
+- Late provider responses can settle their original ledger without reviving
+  cancelled work; slow response bodies obey the absolute wall deadline.
+- Repository-tree failures can use bounded exact-head reads without treating
+  unknown paths as absent. Runtime and test-scope prompts focus on changed
+  behavior and evidence available in the repository.
+
 ## [0.1.6] - 2026-08-27
 
 ### Changed

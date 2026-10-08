@@ -12,7 +12,7 @@ from lambdas.LlamaPReviewPipeline.review.projection import (
     elect_primary_inline,
 )
 from lambdas.LlamaPReviewPipeline.review.publish import (
-    PUBLIC_FOOTER_MARKER,
+    PUBLIC_FOOTER_VARIANTS,
     build_main_comment,
 )
 
@@ -2485,7 +2485,7 @@ class PresentationCompilationTests(unittest.TestCase):
         self.assertNotIn("path:src/app.py", body)
         self.assertEqual(len(result.review["inline_comments"]), 1)
         published = build_main_comment(result.review)
-        self.assertEqual(published.count(PUBLIC_FOOTER_MARKER), 1)
+        self.assertEqual(sum(published.count(variant) for variant in PUBLIC_FOOTER_VARIANTS), 1)
 
 class PresentationRepresentationTests(unittest.TestCase):
     def test_parse_failure_is_typed_and_has_no_public_fallback(self):

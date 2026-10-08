@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from tests.unit.fakes import ensure_repo_root_on_path, set_default_env
 
@@ -7,7 +8,7 @@ set_default_env()
 
 from lambdas.LlamaPReviewPipeline.review.publish import (
     PUBLIC_FOOTER,
-    PUBLIC_FOOTER_MARKER,
+    _RETIRED_PUBLIC_FOOTER_VARIANTS,
     PUBLIC_FOOTER_VARIANTS,
     public_footer,
     build_diff_maps_from_pr_files,
@@ -66,7 +67,7 @@ class PublicationFailureSafetyTests(unittest.TestCase):
             }
         )
         self.assertEqual(body, "")
-        self.assertNotIn(PUBLIC_FOOTER_MARKER, body)
+        self.assertFalse(any(variant in body for variant in PUBLIC_FOOTER_VARIANTS))
 
     def test_complete_review_requires_model_derived_comment(self):
         with self.assertRaisesRegex(
@@ -86,7 +87,7 @@ class PublicationFailureSafetyTests(unittest.TestCase):
                 body="### LlamaPReview — Ready to merge\n\nNo blocker found."
             )
         )
-        self.assertEqual(body.count(PUBLIC_FOOTER_MARKER), 1)
+        self.assertEqual(sum(body.count(variant) for variant in PUBLIC_FOOTER_VARIANTS), 1)
         self.assertEqual(body.count(PUBLIC_FOOTER), 1)
 
     def test_model_marker_phrase_cannot_suppress_the_exact_footer(self):
@@ -94,7 +95,7 @@ class PublicationFailureSafetyTests(unittest.TestCase):
             _publishable_review(
                 body=(
                     "### Review\n\nA source note uses the phrase "
-                    f"{PUBLIC_FOOTER_MARKER} without the code-owned block."
+                    "LlamaPReview is open source. without the code-owned block."
                 )
             )
         )
@@ -146,7 +147,7 @@ class PublicationFailureSafetyTests(unittest.TestCase):
         self.assertEqual(prepared.main_body.count(public_footer(HEAD)), 1)
         self.assertTrue(
             all(
-                PUBLIC_FOOTER_MARKER not in comment["body"]
+                not any(variant in comment["body"] for variant in PUBLIC_FOOTER_VARIANTS)
                 for comment in prepared.comments
             )
         )
@@ -188,7 +189,7 @@ class PublicationFailureSafetyTests(unittest.TestCase):
             head_sha=HEAD,
             diff_maps={},
         )
-        other = "9" * 40
+        other = "0" * 40
         self.assertNotEqual(public_footer(HEAD), public_footer(other))
 
         rebuilt = build_main_comment(
@@ -196,26 +197,75 @@ class PublicationFailureSafetyTests(unittest.TestCase):
             invitation_seed=other,
         )
 
-        self.assertEqual(rebuilt.count(PUBLIC_FOOTER_MARKER), 1)
+        self.assertEqual(sum(rebuilt.count(variant) for variant in PUBLIC_FOOTER_VARIANTS), 1)
         self.assertTrue(rebuilt.endswith(public_footer(other)))
         self.assertNotIn(public_footer(HEAD), rebuilt)
 
-    def test_every_footer_variant_is_one_line_and_carries_the_marker(self):
+    def test_footer_variants_match_the_two_approved_invitations(self):
+        self.assertEqual(
+            PUBLIC_FOOTER_VARIANTS,
+            (
+                "\n\n---\n*LlamaPReview is open source. "
+                "[Explore the code behind this review.](https://github.com/JetXu-LLM/LlamaPReview)*",
+                "\n\n---\n*Still coding alone? "
+                "[Open CarbonChat, a chat room right inside Codex.](https://carbonchat.codexforwork.com/)*",
+            ),
+        )
+        self.assertEqual(public_footer(HEAD), PUBLIC_FOOTER_VARIANTS[0])
+        self.assertEqual(public_footer("0" * 40), PUBLIC_FOOTER_VARIANTS[1])
+
+    def test_every_footer_is_one_line_with_one_untracked_link(self):
         for variant in PUBLIC_FOOTER_VARIANTS:
             with self.subTest(variant=variant):
                 self.assertTrue(variant.startswith("\n\n---\n*"))
-                self.assertTrue(variant.endswith(".*"))
-                self.assertEqual(variant.count(PUBLIC_FOOTER_MARKER), 1)
+                self.assertTrue(variant.endswith(")*"))
                 self.assertEqual(variant.strip().count("\n"), 1)
-
-    def test_every_footer_variant_says_the_reviewer_is_open_source(self):
-        for variant in PUBLIC_FOOTER_VARIANTS:
-            with self.subTest(variant=variant):
-                self.assertIn("open-source", variant)
-                # One door per footer, and it has to be a real link.
-                self.assertEqual(variant.count("](https://github.com/"), 1)
+                self.assertEqual(variant.count("](https://"), 1)
                 self.assertNotIn("utm_", variant)
-                self.assertNotIn("star", variant.casefold())
+
+    def test_rebuilding_retired_or_current_footers_leaves_one_invitation(self):
+        model_body = "### Review\n\nKeep the supported finding."
+        for seed in (HEAD, "0" * 40):
+            for old_footer in _RETIRED_PUBLIC_FOOTER_VARIANTS + PUBLIC_FOOTER_VARIANTS:
+                with self.subTest(seed=seed, old_footer=old_footer):
+                    rebuilt = build_main_comment(
+                        _publishable_review(body=model_body + old_footer),
+                        invitation_seed=seed,
+                    )
+                    self.assertEqual(rebuilt, model_body + public_footer(seed))
+                    self.assertFalse(any(
+                        variant in rebuilt for variant in _RETIRED_PUBLIC_FOOTER_VARIANTS
+                    ))
+
+    def test_saved_candidate_recovery_preserves_retired_and_current_bytes(self):
+        for footer in _RETIRED_PUBLIC_FOOTER_VARIANTS + PUBLIC_FOOTER_VARIANTS:
+            with self.subTest(footer=footer):
+                prepared = prepare_main_comment_publication(
+                    "### Review\n\nSaved judgment." + footer,
+                    head_sha=HEAD,
+                    review_mode="normal",
+                )
+                candidate = build_candidate(
+                    prepared,
+                    repo="owner/repo",
+                    pr_number=7,
+                    run_id="run-7",
+                    phase="review",
+                    owner_event_id="stream-event-7",
+                    owner_request_id="request-7",
+                    publication_generation_attempt=1,
+                    preflight_completed_at="2026-10-08T00:00:00+00:00",
+                    generation_runtime_identity={"request_id": "request-7"},
+                    terminal_attributes={},
+                    publication_key="f" * 32,
+                )
+                with patch(
+                    "lambdas.LlamaPReviewPipeline.review.publish.public_footer",
+                    side_effect=AssertionError("recovery must not choose an invitation"),
+                ):
+                    recovered = prepared_from_candidate(candidate)
+                self.assertEqual(recovered.request_payload(), prepared.request_payload())
+                self.assertEqual(recovered.payload_sha256, prepared.payload_sha256)
 
     def test_footer_choice_is_stable_and_spreads_across_heads(self):
         self.assertEqual(public_footer(HEAD), public_footer(HEAD))
