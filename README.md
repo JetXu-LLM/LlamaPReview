@@ -49,7 +49,7 @@ Reviews can miss issues or be wrong; they supplement your tests and review proce
 
 This repository contains the Webhook and Pipeline source used by the hosted service, under Apache-2.0. Inspect the evidence retrieval, output validation and publication path.
 
-![A signed eligible public event passes exact-head admission and capacity gates, Route and PFR guide bounded evidence retrieval, Deep and Final provide judgment and presentation, and code validates and publishes a prepared GitHub review. Recovery reconciles the same prepared request.](docs/assets/architecture.svg)
+![An admitted public PR is pinned to head H. Route and PFR guide bounded evidence selection with sources and explicit gaps. Deep judges risks and uncertainty; Final presents findings, actions and placement requests. Code validates and prepares an immutable request, rechecks head and lifecycle, and publishes a GitHub COMMENT review. Recovery reconciles the same request.](docs/assets/architecture.svg)
 
 The model supplies engineering judgment; code enforces evidence boundaries, output validation, safe placement and publication. The reviewed head is checked again through the pipeline and before publishing. Recovery reuses the saved request instead of regenerating its body or changing its invitation footer.
 
