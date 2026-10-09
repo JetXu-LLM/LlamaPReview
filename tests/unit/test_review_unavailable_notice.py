@@ -24,7 +24,7 @@ from lambdas.LlamaPReviewPipeline.errors import (
 from lambdas.LlamaPReviewPipeline.pipeline_publication import (
     PublicationContext,
 )
-from lambdas.LlamaPReviewPipeline.review.publish import PUBLIC_FOOTER_MARKER
+from lambdas.LlamaPReviewPipeline.review.publish import PUBLIC_FOOTER_VARIANTS
 from lambdas.LlamaPReviewPipeline.review.terminal_messages import (
     REVIEW_UNAVAILABLE_NOTICE,
 )
@@ -180,7 +180,7 @@ class ReviewUnavailableNoticeTests(unittest.TestCase):
         self.assertEqual(prepared.main_body, REVIEW_UNAVAILABLE_NOTICE)
         self.assertEqual(prepared.comments, ())
         self.assertEqual(prepared.request_payload()["event"], "COMMENT")
-        self.assertNotIn(PUBLIC_FOOTER_MARKER, prepared.main_body)
+        self.assertFalse(any(variant in prepared.main_body for variant in PUBLIC_FOOTER_VARIANTS))
         self.assertNotIn("mermaid", prepared.main_body.casefold())
         self.assertNotIn("deepseek", prepared.main_body.casefold())
         self.assertEqual(prepared.artifact["review_mode"], "failed")

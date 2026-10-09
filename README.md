@@ -1,29 +1,21 @@
-<div align="center">
-
 # LlamaPReview
 
-**Open-source pull request review that reads the exact code you are about to merge.**
+**Open-source pull request review for public GitHub repositories.**
 
-The hosted GitHub App is free for public repositories — and this repository is the code it runs.
+LlamaPReview reviews a pull request at its exact head commit, explains findings against the code, and reports known gaps in the evidence.
 
-[**Install the GitHub App**](https://github.com/apps/llamapreview) · [**Read the source**](https://github.com/JetXu-LLM/LlamaPReview/tree/main/lambdas) · [**Website**](https://jetxu-llm.github.io/LlamaPReview-site/) · [**Self-host it**](docs/HOSTING.md)
+Free hosted GitHub App · Public repositories only · Apache-2.0 source
+
+[**Install for a public repository**](https://github.com/marketplace/llamapreview) · [**See a real review**](https://github.com/Texarkanine/SumMem/pull/10#pullrequestreview-4978442337) · [**Read the source**](https://github.com/JetXu-LLM/LlamaPReview/tree/main/lambdas)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/JetXu-LLM/LlamaPReview/ci.yml?branch=main&label=CI)](https://github.com/JetXu-LLM/LlamaPReview/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/github/license/JetXu-LLM/LlamaPReview)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB)](https://www.python.org/)
 [![Latest release](https://img.shields.io/github/v/release/JetXu-LLM/LlamaPReview)](https://github.com/JetXu-LLM/LlamaPReview/releases)
 
-</div>
+## See the result
 
-There is no separate reviewer hidden behind the hosted service. The Webhook and Pipeline in this repository **are** the production source, released under Apache-2.0, and every review the App publishes comes from code on this page.
-
-![How LlamaPReview turns a public pull request into a published review: a signed public GitHub event, exact-head admission and bounded evidence, model engineering judgment, deterministic projection and publication, and a public review from source you can run](docs/assets/architecture.svg)
-
-*The model supplies engineering judgment. Everything around it — evidence boundaries, output schema, sanitation, placement, and publication identity — is deterministic code you can read.*
-
-## What a review actually looks like
-
-Reviews are evidence-led and say so when evidence is missing. From a [real published review](https://github.com/Texarkanine/SumMem/pull/10#pullrequestreview-4978442337):
+From a [published review on Texarkanine/SumMem#10](https://github.com/Texarkanine/SumMem/pull/10#pullrequestreview-4978442337):
 
 > ### LlamaPReview — Blocking issues found
 >
@@ -31,70 +23,51 @@ Reviews are evidence-led and say so when evidence is missing. From a [real publi
 >
 > Exact-head CI remains unresolved (1 pending); no CI-dependent merge-safety claim is made.
 
-Note the second paragraph. When the evidence does not support a claim, the review declines to make it rather than guessing. Here is [another public review](https://github.com/mmayasaurus/heddle/pull/66#pullrequestreview-4977897488), and the full [output contract](docs/REVIEW_OUTPUT.md) states exactly what will and will not be published.
+In this public review, LlamaPReview flagged a mismatch between the command an agent was told to run and the executable path shipped by the PR. It also recorded unresolved CI separately. This is one historical example, not a measure of overall accuracy. [Another public example](https://github.com/mmayasaurus/heddle/pull/66#pullrequestreview-4977897488) is available to inspect.
 
-## Why it differs from a generic review bot
+A substantive review includes findings, evidence and suggested next steps. It can also include zero or more inline comments where findings can be placed safely, and an optional diagram when it helps explain the change. Known evidence gaps remain visible. See the [output contract](docs/REVIEW_OUTPUT.md) for the exact behavior.
 
-- Evidence is retrieved from the **exact pull-request head**, with provenance and honest coverage gaps — not from a stale branch snapshot.
-- The model performs **engineering judgment only**: causal risk, severity, uncertainty, and merge posture.
-- Deterministic code owns **projection, sanitation, inline placement, Mermaid safety, accounting, recovery, and publication identity**, so an unsafe or unrenderable surface degrades locally instead of reaching your pull request.
-- Empty, skipped, failed, and stale-head outcomes **never** acquire a synthetic "looks good" verdict.
+## Install and run
 
-## How a review is built
+![Install the GitHub App, select a public repository, open a non-draft pull request or mark a draft ready, then read the review on GitHub. Over-capacity requests are skipped, not queued.](docs/assets/quickstart.svg)
 
+1. [Install the GitHub App](https://github.com/marketplace/llamapreview) and select the public repositories you want reviewed.
+2. Open a non-draft pull request, or mark a draft ready for review.
+3. Read the review on GitHub and check its findings against the code.
 
-1. **Verify the signed webhook.** No event is admitted before its GitHub signature is valid.
-2. **Apply the hosted public-only boundary.** A private event is generically acknowledged after minimum visibility parsing, then stops before durable product state, provider work, or GitHub product API calls.
-3. **Pin the exact head.** Admission and every later reread use the pull request's immutable head commit.
-4. **Retrieve bounded evidence.** Route and PFR gather repository facts, provenance, coverage, and explicit gaps.
-5. **Judge, then present.** Deep finds material engineering issues; Final compresses them into owner actions, inline requests, and an optional diagram.
-6. **Project deterministically.** Code validates the public schema, caps content, sanitizes Mermaid, places comments, and degrades an invalid optional surface locally.
-7. **Publish once to the same head.** Durable candidates, intents, receipts, and reconciliation make retries reuse the same prepared GitHub request.
+The app does not review every push. Reviews use GitHub's `COMMENT` state, not `APPROVE` or `REQUEST_CHANGES`, and are not a required merge check.
 
-## What gets published
+## Hosted capacity and limits
 
-A successful review contains one substantive main body, zero or more safely placed inline comments, and—when it materially clarifies the change—one eligible, sanitized Mermaid diagram. An unplaceable inline request can degrade into a bounded section in the main body without changing the underlying finding. Empty, skipped, failed, stale-head, and otherwise nonpublishable outcomes never acquire a synthetic model judgment.
+Free hosted capacity: up to **3 admitted review attempts per repository per UTC day**, within a **shared 100-attempt daily limit**. An attempt does not guarantee a completed review. Over-capacity requests are skipped, not queued.
 
-## Hosted quick start
+[Capacity policy](docs/CONFIGURATION.md#free-review-capacity) · [Failure and skip messages](docs/REVIEW_OUTPUT.md#failure-and-skip-messages).
 
-1. [Install the GitHub App](https://github.com/apps/llamapreview) on a **public** repository.
-2. Open a pull request, or move an existing draft pull request to ready for review.
-3. Read the resulting review as decision support; maintainers remain responsible for what they merge.
+Reviews can miss issues or be wrong; they supplement your tests and review process. Repository evidence is bounded, and missing coverage remains a gap. New private-repository events are discarded before product storage or model processing. Read the [privacy and retention policy](docs/PRIVACY.md) and [security model](docs/SECURITY.md).
 
-The hosted service is free for public repositories and is funded personally, so each repository gets a small daily review capacity and a shared circuit breaker protects the rest. The first pull request that runs past the daily bound says so and stops before spending anything; later ones that day stop quietly. The self-hosted reference stack disables these hosted-service bounds by default. Start at the [official website](https://jetxu-llm.github.io/LlamaPReview-site/) for the current product entry point.
+## How it works
 
-## Self-hosted quick start
+This repository contains the Webhook and Pipeline source used by the hosted service, under Apache-2.0. Inspect the evidence retrieval, output validation and publication path.
 
-Self-hosting runs the same public-only Webhook and Pipeline path in your AWS account.
+![An admitted public PR is pinned to head H. Route and PFR guide bounded evidence selection with sources and explicit gaps. Deep judges risks and uncertainty; Final presents findings, actions and placement requests. Code validates and prepares an immutable request, rechecks head and lifecycle, and publishes a GitHub COMMENT review. Recovery reconciles the same request.](docs/assets/architecture.svg)
 
-1. Download one semantic release and [verify its checksums and GitHub provenance](docs/RELEASE_VERIFICATION.md).
-2. Follow the [AWS deployment guide](docs/AWS_DEPLOYMENT.md) to deploy the two Lambda functions, dependency Layer, DynamoDB table, private S3 bucket, event-source mapping, alarms, and least-privilege IAM.
-3. Supply your own GitHub App and OpenRouter credentials, then pay your own AWS and provider costs. The default model is a GPT-6 Luna max [trial with documented qualification limits](docs/QUALITY_UPGRADE.md#validation-boundaries); configure a DeepSeek key as well to enable the [one-setting switch back](docs/CONFIGURATION.md#review-routing).
+The model supplies engineering judgment; code enforces evidence boundaries, output validation, safe placement and publication. The reviewed head is checked again through the pipeline and before publishing. Recovery reuses the saved request instead of regenerating its body or changing its invitation footer.
 
-The reference stack has no automatic production deployment, paid secret-management service, hidden private-repository mode, or official AWS identity.
+For implementation details, start with the [architecture](docs/ARCHITECTURE.md) and [documentation index](docs/README.md). Evidence retrieval uses [llama-github](https://github.com/JetXu-LLM/llama-github), an independently released SDK.
 
-Repository evidence is retrieved through [llama-github](https://github.com/JetXu-LLM/llama-github), an independently released SDK from the same author that you can use on its own.
+## Self-host
 
-## Privacy and security
+Run the public-repository review pipeline in your own AWS account. Supply your own GitHub App and model-provider credentials, and pay your own AWS and provider costs.
 
-For eligible public pull requests, selected public GitHub evidence and prompts are sent to the configured model provider. This source defaults to OpenRouter's GPT-6 Luna; the selected provider in a hosted deployment is an operator setting. New private-repository events are discarded at the early hosted boundary, before any durable state, provider call, or GitHub product API call.
+1. Download a semantic release and [verify its checksums and GitHub provenance](docs/RELEASE_VERIFICATION.md).
+2. Follow the [AWS deployment guide](docs/AWS_DEPLOYMENT.md) and [self-hosting boundary](docs/HOSTING.md).
+3. Choose a provider using the [configuration guide](docs/CONFIGURATION.md#review-routing). New source installations default to an OpenRouter GPT-6 Luna max trial with [documented qualification limits](docs/QUALITY_UPGRADE.md#validation-boundaries). `MODEL_PROVIDER=deepseek` selects the existing DeepSeek profile; retaining both provider keys enables a one-setting return to DeepSeek.
 
-Official-service retention is explicit and bounded: public-run records and artifacts expire in 30 days, full provider traces in 7. The exact table, provider processing, and credential boundaries are documented in [privacy and retention](docs/PRIVACY.md) and the [security model](docs/SECURITY.md).
+The source default is separate from the hosted deployment's provider setting. The hosted service uses DeepSeek, as disclosed in its [Privacy Policy](https://jetxu-llm.github.io/LlamaPReview-site/privacy.html).
 
-## Repository map
+The reference Terraform stack disables hosted quota counters by default (`pipeline_capacity_policy=off`) and leaves one-time head succession enabled. It still supports public repositories only. Public CI publishes release artifacts; it does not deploy the official AWS service.
 
-| Path | Responsibility |
-|---|---|
-| `lambdas/LlamaPReviewWebhookHandler` | Signed, public-only admission adapter |
-| `lambdas/LlamaPReviewPipeline` | Retrieval, judgment, projection, persistence, accounting, and publication |
-| `infra/terraform` | Generic AWS reference deployment |
-| `scripts` | Deterministic builds, release verification, and safety checks |
-| `tests` | Unit, replay, adversarial, recovery, and parity contracts |
-| `docs` | Operator and contributor documentation |
-
-Start with the [documentation index](docs/README.md) or read the [architecture](docs/ARCHITECTURE.md) in more depth.
-
-## Development
+## Develop and contribute
 
 Ordinary tests and replay fixtures make no paid provider calls.
 
@@ -105,19 +78,16 @@ python -m pip install -r requirements-ci.txt
 make verify
 ```
 
-Focused commands are available when iterating:
+Read [development and testing](docs/DEVELOPMENT.md) for local and release gates, and [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Use [Issues](https://github.com/JetXu-LLM/LlamaPReview/issues) for reproducible bugs and [Discussions](https://github.com/JetXu-LLM/LlamaPReview/discussions) for questions and public review examples. Report vulnerabilities through [SECURITY.md](SECURITY.md).
 
-```bash
-make test
-make replay
-```
-
-See [development and testing](docs/DEVELOPMENT.md) for the exact local and release gates.
-
-## Contributing
-
-Contributors, subscribers, maintainers, and curious reviewers are all welcome. Use [Issues](https://github.com/JetXu-LLM/LlamaPReview/issues) for reproducible bugs and concrete work; use [Discussions](https://github.com/JetXu-LLM/LlamaPReview/discussions) for questions, ideas, and public review examples. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and report vulnerabilities through [SECURITY.md](SECURITY.md).
+| Path | Responsibility |
+| --- | --- |
+| `lambdas/LlamaPReviewWebhookHandler` | Signed event and public-repository admission |
+| `lambdas/LlamaPReviewPipeline` | Retrieval, judgment, validation, recovery and publication |
+| `infra/terraform` | Generic AWS reference deployment |
+| `scripts`, `tests` | Reproducible builds and safety checks |
+| `docs` | Operator and contributor documentation |
 
 ## License
 
-LlamaPReview is licensed under the [Apache License 2.0](LICENSE). Dependency notices are recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and in each release inventory.
+[Apache License 2.0](LICENSE). Dependency notices are recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and each release inventory. Visit the [official website](https://jetxu-llm.github.io/LlamaPReview-site/) for the hosted service.

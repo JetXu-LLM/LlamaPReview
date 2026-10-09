@@ -34,7 +34,7 @@ PATTERNS = {
     ),
 }
 KNOWN_HASH_BOUND_PUBLIC_EXAMPLES = {
-    "pyjwt-2.13.0.dist-info/metadata": {"jwt"},
+    "pyjwt-2.15.1.dist-info/metadata": {"jwt"},
 }
 
 

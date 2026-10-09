@@ -22,18 +22,23 @@ A substantive review has one model-derived body projected into deterministic Mar
 - owner actions and verification guidance;
 - a Mermaid diagram when architecture or flow materially benefits from one;
 - fallback details for a suggestion that could not be safely anchored;
-- one code-owned open-source footer.
+- one code-owned invitation footer.
 
 The footer appears only in a trustworthy substantive main review body. It is never model-generated, never appended to individual inline comments, and is not added to empty, skipped, failed, or other nonpublishable terminal messages.
 
-Its opening sentence never varies and states that the reviewer is open source,
-because that is the one thing a reader cannot infer from the review itself. The
-single invitation that follows is chosen from the reviewed head SHA out of a
-fixed code-owned set, so a retry, a recovery, and a rebuild of the same review
-always produce the same footer, while different pull requests surface different
-entry points into the project. Rendering strips every footer the code can emit
-before appending one, so a body prepared under one head and rebuilt under
-another still ends with exactly one. The footer carries no tracking parameters.
+The footer is one line below the main review. Its two invitations have equal
+weight:
+
+- LlamaPReview is open source. [Explore the code behind this review.](https://github.com/JetXu-LLM/LlamaPReview)
+- Still coding alone? [Open CarbonChat, a chat room right inside Codex.](https://carbonchat.codexforwork.com/)
+
+The SHA-256 of the reviewed head selects one invitation deterministically.
+Different heads therefore approach a 50/50 split; individual batches need not
+contain equal counts. A retry or rebuild on the same head selects the same
+invitation. Recovery reuses the complete immutable candidate, including its
+original footer bytes, even after the runtime's copy changes. Rendering removes
+exact current and retired footer blocks before appending one. Existing published
+reviews are not edited. Neither invitation carries tracking parameters.
 
 For a clear code judgment whose exact-head CI snapshot is still pending,
 incomplete, or unavailable, the existing `Conditional code-review clear`
@@ -204,6 +209,6 @@ Publication identity binds the exact head SHA, required lifecycle disposition,
 publication kind, and canonical request digests for the main body and inline
 list. Ordinary reviews require open/same-head, cancellations require their
 exact ended disposition, and post-merge follow-ups require merged/same-head.
-The intentional open-source footer changes substantive public Markdown and
+The intentional invitation footer changes substantive public Markdown and
 therefore the digest, but retries reuse the same prepared request and never add
 a second footer or publication surface.

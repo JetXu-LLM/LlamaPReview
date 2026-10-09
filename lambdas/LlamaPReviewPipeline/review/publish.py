@@ -20,37 +20,37 @@ MULTILINE_MIN_LINES = 2
 MULTILINE_MAX_LINES = 10
 STRICT_MULTILINE_REQUIRE_ALL_LINES_IN_DIFF = True
 
-PUBLIC_FOOTER_MARKER = "LlamaPReview is an open-source pull request reviewer"
+# The two maintainer-approved invitations have equal weight. The reviewed head
+# selects one before the immutable GitHub request is stored; recovery reuses
+# that request rather than choosing again.
+PUBLIC_FOOTER_VARIANTS = (
+    "\n\n---\n"
+    "*LlamaPReview is open source. "
+    "[Explore the code behind this review.](https://github.com/JetXu-LLM/LlamaPReview)*",
+    "\n\n---\n"
+    "*Still coding alone? "
+    "[Open CarbonChat, a chat room right inside Codex.](https://carbonchat.codexforwork.com/)*",
+)
 
-# The footer is the only place the project speaks for itself inside someone
-# else's repository. It leads with the one fact a reader cannot infer from the
-# review itself — that the reviewer is open source — and then opens exactly one
-# door. The opening sentence never varies because publication matches on it.
-_PUBLIC_FOOTER_LEAD = "*LlamaPReview is an open-source pull request reviewer."
-
-# Which door is offered is chosen from the reviewed head, so a retry, a
-# recovery, and a rebuild of the same review all produce the same footer, while
-# different pull requests surface different entry points over time.
-PUBLIC_FOOTER_INVITATIONS = (
+# Retired blocks are recognized only when rebuilding a body. Existing saved
+# candidates and published reviews keep their original bytes.
+_RETIRED_PUBLIC_FOOTER_INVITATIONS = (
     "[Read the exact code that produced this review](https://github.com/JetXu-LLM/LlamaPReview).*",
     "[See how a review is built, from signed webhook to publication](https://github.com/JetXu-LLM/LlamaPReview/blob/main/docs/ARCHITECTURE.md).*",
     "[Run the same reviewer on your own account](https://github.com/JetXu-LLM/LlamaPReview/blob/main/docs/HOSTING.md).*",
     "[See exactly what it will and will not publish](https://github.com/JetXu-LLM/LlamaPReview/blob/main/docs/REVIEW_OUTPUT.md).*",
     "[Tell the maintainers where this review got it wrong](https://github.com/JetXu-LLM/LlamaPReview/discussions).*",
 )
-
-PUBLIC_FOOTER_VARIANTS = tuple(
-    "\n\n---\n" + _PUBLIC_FOOTER_LEAD + " " + invitation
-    for invitation in PUBLIC_FOOTER_INVITATIONS
+_RETIRED_PUBLIC_FOOTER_VARIANTS = tuple(
+    "\n\n---\n*LlamaPReview is an open-source pull request reviewer. " + invitation
+    for invitation in _RETIRED_PUBLIC_FOOTER_INVITATIONS
 )
 
-# Callers without a reviewed head, and every test that asserts on a literal
-# block, get the first variant.
 PUBLIC_FOOTER = PUBLIC_FOOTER_VARIANTS[0]
 
 
 def public_footer(seed: str = "") -> str:
-    """Return the one code-owned footer block for this reviewed head."""
+    """Return one of two equally weighted, head-stable invitation blocks."""
 
     if not seed:
         return PUBLIC_FOOTER_VARIANTS[0]
@@ -60,9 +60,9 @@ def public_footer(seed: str = "") -> str:
 
 
 def strip_public_footer(body: str) -> str:
-    """Remove any code-owned footer block a presented body already carries."""
+    """Remove exact current or retired blocks before rebuilding a body."""
 
-    for variant in PUBLIC_FOOTER_VARIANTS:
+    for variant in PUBLIC_FOOTER_VARIANTS + _RETIRED_PUBLIC_FOOTER_VARIANTS:
         body = body.replace(variant, "")
     return body
 

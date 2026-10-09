@@ -26,7 +26,7 @@ from lambdas.LlamaPReviewPipeline.errors import (
 )
 from lambdas.LlamaPReviewPipeline.review import publication_candidate
 from lambdas.LlamaPReviewPipeline.review.publish import (
-    PUBLIC_FOOTER_MARKER,
+    PUBLIC_FOOTER_VARIANTS,
     public_footer,
     PreparedGitHubReview,
     build_diff_maps_from_pr_files,
@@ -196,7 +196,26 @@ class LifecyclePublicationPrimitiveTests(unittest.TestCase):
             "`src/app.py:1` — Return the validated value instead.",
             prepared.main_body,
         )
-        self.assertEqual(prepared.main_body.count(PUBLIC_FOOTER_MARKER), 1)
+        self.assertEqual(sum(prepared.main_body.count(variant) for variant in PUBLIC_FOOTER_VARIANTS), 1)
+
+    def test_post_merge_follow_up_keeps_the_same_invitation_for_both_branches(self):
+        for head in (HEAD, "0" * 40):
+            with self.subTest(head=head):
+                final = _publishable_review()
+                ordinary = prepare_review_publication(
+                    final, head_sha=head, diff_maps={},
+                )
+                follow_up = prepare_review_publication(
+                    final, head_sha=head, diff_maps={},
+                    publication_kind="post_merge_follow_up",
+                )
+                self.assertTrue(ordinary.main_body.endswith(public_footer(head)))
+                self.assertTrue(follow_up.main_body.endswith(public_footer(head)))
+                self.assertEqual(follow_up.comments, ())
+                self.assertEqual(
+                    sum(follow_up.main_body.count(variant) for variant in PUBLIC_FOOTER_VARIANTS),
+                    1,
+                )
 
     def test_ordinary_projection_remains_the_existing_payload_shape(self):
         final = _publishable_review()
@@ -303,7 +322,7 @@ class LifecyclePublicationPrimitiveTests(unittest.TestCase):
                 for phrase in banned:
                     self.assertNotIn(phrase, visible)
                 self.assertEqual(prepared.comments, ())
-                self.assertEqual(prepared.main_body.count(PUBLIC_FOOTER_MARKER), 1)
+                self.assertEqual(sum(prepared.main_body.count(variant) for variant in PUBLIC_FOOTER_VARIANTS), 1)
                 if state["retrieval_outcome"] in {"partial", "error"}:
                     self.assertIn(state["retrieval_outcome"], visible)
 
@@ -340,7 +359,7 @@ class LifecyclePublicationPrimitiveTests(unittest.TestCase):
             pipeline_publication.MERGED_CANCELLATION_BODY,
         )
         self.assertEqual(prepared.comments, ())
-        self.assertNotIn(PUBLIC_FOOTER_MARKER, prepared.main_body)
+        self.assertFalse(any(variant in prepared.main_body for variant in PUBLIC_FOOTER_VARIANTS))
         self.assertNotIn("mermaid", prepared.main_body.casefold())
         self.assertEqual(
             captured["terminal"]["review_generation_status"],

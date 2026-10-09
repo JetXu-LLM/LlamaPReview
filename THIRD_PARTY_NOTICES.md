@@ -18,13 +18,13 @@ inside the corresponding wheels.
 | idna | 3.18 | BSD-3-Clause |
 | pycparser | 3.0 | BSD-3-Clause |
 | PyGithub | 2.9.1 | LGPL-3.0-or-later |
-| PyJWT | 2.13.0 | MIT |
+| PyJWT | 2.15.1 | MIT |
 | PyNaCl | 1.6.2 | Apache-2.0; its bundled libsodium is ISC |
 | python-dateutil | 2.9.0.post0 | Apache-2.0 OR BSD-3-Clause |
 | requests | 2.33.0 | Apache-2.0 |
 | six | 1.17.0 | MIT |
 | typing-extensions | 4.16.0 | PSF-2.0 |
-| urllib3 | 2.7.0 | MIT |
+| urllib3 | 2.8.0 | MIT |
 
 The Layer build preserves each installed distribution's license files. In
 particular, the PyGithub wheel includes the GNU GPLv3 and LGPLv3 texts, PyNaCl

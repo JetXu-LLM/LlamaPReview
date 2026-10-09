@@ -4,7 +4,7 @@
 
 The official GitHub App reviews supported pull request events from public repositories. Its running Webhook, Pipeline, and dependency bytes are independently verified against one exact attested semantic release from this repository. Each deployment records that exact release identity; this guide deliberately does not hard-code a version that will become stale.
 
-- Installation: [GitHub App](https://github.com/apps/llamapreview)
+- Installation: [GitHub App](https://github.com/marketplace/llamapreview)
 - Product site: [jetxu-llm.github.io/LlamaPReview-site](https://jetxu-llm.github.io/LlamaPReview-site/)
 - Source and releases: [JetXu-LLM/LlamaPReview](https://github.com/JetXu-LLM/LlamaPReview)
 

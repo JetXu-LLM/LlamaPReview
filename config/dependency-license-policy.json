@@ -46,7 +46,7 @@
       "review": "copyleft dependency; version confirmed by wheel source headers and exact license files retained"
     },
     "pyjwt": {
-      "version": "2.13.0",
+      "version": "2.15.1",
       "evidence_contains": "MIT",
       "sbom_expression": "MIT"
     },
@@ -79,7 +79,7 @@
       "sbom_expression": "PSF-2.0"
     },
     "urllib3": {
-      "version": "2.7.0",
+      "version": "2.8.0",
       "evidence_contains": "MIT",
       "sbom_expression": "MIT"
     }
