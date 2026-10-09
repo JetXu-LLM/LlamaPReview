@@ -9,7 +9,15 @@ GitHub release notes may provide more detail, but they do not replace this
 maintained summary. Numeric AWS Lambda versions are deployment identities and
 do not appear as project versions.
 
-## [Unreleased]
+## [0.1.9] - 2026-10-09
+
+### Security
+
+- Upgrade the locked Pipeline Layer to PyJWT 2.15.1 and urllib3 2.8.0.
+  Regenerate the complete Linux wheel hash lock and manifest binding while
+  retaining every other dependency version. CI uses the same urllib3 version.
+  The secret scanner recognizes the public JWT usage example in the new
+  hash-bound PyJWT metadata; vulnerability audit policy remains unchanged.
 
 ### Changed
 
