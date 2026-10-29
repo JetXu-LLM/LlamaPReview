@@ -13,6 +13,10 @@ do not appear as project versions.
 
 ### Fixed
 
+- Large-file evidence reads retain exact quoted data keys containing slashes
+  when the same target's patch or cached source grounds them. Selectors still
+  address only the already-selected file; path safety and read bounds are
+  unchanged. Unobserved, URL and traversal-like values remain excluded.
 - Code search preserves the locked SDK's unavailable and partial outcomes
   instead of treating failed requests or content reads as no matches. Bounded
   positive hits remain usable hints with incomplete-coverage labeling and the

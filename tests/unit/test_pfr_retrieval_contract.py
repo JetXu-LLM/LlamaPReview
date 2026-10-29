@@ -59,6 +59,23 @@ class _TypedOutcomeRuntime(_Runtime):
         }
 
 
+class _LiteralRuntime(_Runtime):
+    def __init__(self, content):
+        super().__init__()
+        self.content = content
+
+    def read_text_file_bounded(self, repo, path, *, sha=None, opt_in=None):
+        self.read_calls.append((repo, path, sha, opt_in))
+        size = len(self.content.encode("utf-8"))
+        return {
+            "outcome": "success",
+            "content": self.content,
+            "source_size_bytes": size,
+            "bytes_read": size,
+            "max_bytes": 2 * 1024 * 1024,
+        }
+
+
 def _inventory(*, path="src/large.py", size=100_000, status="complete"):
     return RepoInventory(
         repository="owner/repo",
@@ -630,6 +647,177 @@ class PfrRetrievalContractTest(unittest.TestCase):
 
         self.assertNotIn("symbols", steps[0]["args"])
         self.assertEqual(diagnostics, ["large_read_unaddressable:src/large.py"])
+
+    def test_target_patch_scoped_literal_selects_only_its_same_file_window(self):
+        path, literal = "data/registry.json", "packages/@catalog/signal-handler"
+        content = (
+            '"packages/@other/signal-handler": "unrelated early record",\n'
+            + ('"padding": "unrelated record outside the requested window",\n' * 1200)
+            + f'"{literal}": "changed exact-head value",\n'
+            + ('"padding": "unrelated trailing record",\n' * 1200)
+        )
+        self.assertGreater(len(content.encode()), 50 * 1024)
+        for supplied in (False, True):
+            with self.subTest(supplied=supplied):
+                runtime = _LiteralRuntime(content)
+                state = _state(runtime, _inventory(path=path, size=len(content.encode())))
+                state.pr_content["file_changes"] = [
+                    {
+                        "file_path": path,
+                        "diff": f'-"{literal}": "old",\n+"{literal}": "changed exact-head value",\n',
+                    }
+                ]
+                args = {"path": path, "reason": f"Inspect '{literal}'."}
+                if supplied:
+                    args["symbols"] = [literal]
+                steps = [
+                    {"tool": "read_file", "question": "Inspect the changed key.", "args": args}
+                ]
+                _address_large_read_steps(steps, state=state, entities={}, named_hints=[])
+                self.assertIn(literal, steps[0]["args"]["symbols"])
+                self.assertEqual(steps[0]["args"]["symbols"][0], literal)
+                if not supplied:
+                    continue
+                result = ToolExecutor(state).read_file(steps[0]["args"])
+                self.assertEqual(result.outcome, "hit")
+                self.assertEqual(result.metadata["coverage_type"], "file_slice")
+                self.assertFalse(result.metadata["backend_full_file_fetched"])
+                self.assertEqual(runtime.read_calls, [("owner/repo", path, state.head_sha, None)])
+                self.assertEqual(len(state.collected_snippets), 1)
+                snippet = state.collected_snippets[0]
+                self.assertEqual(snippet["path"], path)
+                self.assertIn(literal, snippet["code"])
+                self.assertIn("changed exact-head value", snippet["code"])
+                self.assertNotIn("unrelated early record", snippet["code"])
+                self.assertGreater(snippet["start"], 1000)
+                self.assertLessEqual(snippet["end"] - snippet["start"] + 1, 7)
+                self.assertTrue(snippet["exact_head_admitted"])
+
+    def test_target_cached_text_grounds_scoped_literal_without_a_patch(self):
+        path, literal = "data/registry.json", "packages/@catalog/signal-handler"
+        state = _state(_Runtime(), _inventory(path=path))
+        state.source_text_cache[path] = {"content": f'"{literal}": "observed"'}
+        steps = [
+            {
+                "tool": "read_file",
+                "question": f"Inspect '{literal}'.",
+                "args": {"path": path, "symbols": [literal]},
+            }
+        ]
+        _address_large_read_steps(steps, state=state, entities={}, named_hints=[])
+        self.assertEqual(steps[0]["args"]["symbols"], [literal])
+
+    def test_model_or_different_file_cannot_ground_a_scoped_literal(self):
+        path, literal = "data/registry.json", "packages/@catalog/signal-handler"
+        for other_evidence in (False, True):
+            with self.subTest(other_evidence=other_evidence):
+                state = _state(_Runtime(), _inventory(path=path))
+                if other_evidence:
+                    state.source_text_cache["data/other.json"] = {
+                        "content": f'"{literal}": "elsewhere"'
+                    }
+                    state.pr_content["file_changes"] = [
+                        {"file_path": "data/other.json", "diff": f'+["{path}", "{literal}"]\n'}
+                    ]
+                steps = [
+                    {
+                        "tool": "read_file",
+                        "question": f"Inspect '{literal}'.",
+                        "args": {"path": path, "symbols": [literal]},
+                    }
+                ]
+                _address_large_read_steps(steps, state=state, entities={}, named_hints=[literal])
+                self.assertNotIn(literal, steps[0]["args"].get("symbols", []))
+
+    def test_slash_literal_requires_exact_quoted_membership_not_substring(self):
+        path, literal = "data/registry.json", "packages/@catalog/signal-handler"
+        for observed in (literal, f'"prefix-{literal}"', f'"{literal}-suffix"'):
+            for source in ("patch", "cache"):
+                with self.subTest(source=source, observed=observed):
+                    state = _state(_Runtime(), _inventory(path=path))
+                    if source == "patch":
+                        state.pr_content["file_changes"] = [
+                            {"file_path": path, "diff": "+" + observed}
+                        ]
+                    else:
+                        state.source_text_cache[path] = {"content": observed}
+                    steps = [
+                        {
+                            "tool": "read_file",
+                            "question": f"Inspect '{literal}'.",
+                            "args": {"path": path, "symbols": [literal]},
+                        }
+                    ]
+                    _address_large_read_steps(steps, state=state, entities={}, named_hints=[])
+                    self.assertNotIn(literal, steps[0]["args"].get("symbols", []))
+
+    def test_observed_unsafe_or_target_filename_literals_still_cannot_be_selectors(self):
+        path = "data/registry.json"
+        for literal in (
+            "https://example.invalid/key",
+            "https:example.invalid/key",
+            "mailto:user@example.invalid/path",
+            "/absolute/key",
+            "../parent/key",
+            "scope/../key",
+            "scope/./key",
+            "scope\\key",
+            path,
+            "@catalog/" + "x" * 121,
+        ):
+            with self.subTest(literal=literal):
+                state = _state(_Runtime(), _inventory(path=path))
+                state.source_text_cache[path] = {"content": literal}
+                state.pr_content["file_changes"] = [
+                    {"file_path": path, "diff": f'+"{literal}": "observed"\n'}
+                ]
+                steps = [
+                    {
+                        "tool": "read_file",
+                        "question": f"Inspect '{literal}'.",
+                        "args": {"path": path, "symbols": [literal]},
+                    }
+                ]
+                _address_large_read_steps(steps, state=state, entities={}, named_hints=[])
+                self.assertNotIn(literal, steps[0]["args"].get("symbols", []))
+
+    def test_grounded_scoped_literals_keep_the_existing_five_selector_cap(self):
+        path = "data/registry.json"
+        literals = [f"@catalog/key{number}" for number in range(7)]
+        state = _state(_Runtime(), _inventory(path=path))
+        state.pr_content["file_changes"] = [
+            {
+                "file_path": path,
+                "diff": "\n".join(f'+"{literal}": "observed"' for literal in literals),
+            }
+        ]
+        steps = [
+            {
+                "tool": "read_file",
+                "question": "Inspect the changed keys.",
+                "args": {"path": path, "symbols": literals},
+            }
+        ]
+        _address_large_read_steps(steps, state=state, entities={}, named_hints=[])
+        self.assertEqual(steps[0]["args"]["symbols"], literals[:5])
+
+    def test_automatic_scoped_selectors_prefer_keys_not_opaque_values(self):
+        path, key = "data/registry.json", "packages/@catalog/signal-handler"
+        for value in ("sha512-AbCdEfGhIjKlMnOpQrStUv/WxYz0123456789==", "AbCdEfGhIjKlMnOpQrStUv/WxYz0123456789"):
+            with self.subTest(value=value):
+                state = _state(_Runtime(), _inventory(path=path))
+                state.pr_content["file_changes"] = [
+                    {"file_path": path, "diff": f'+"integrity": "{value}",\n+"{key}": "changed"\n'}
+                ]
+                steps = [{"tool": "read_file", "question": "Inspect the changed entry.", "args": {"path": path}}]
+                _address_large_read_steps(steps, state=state, entities={}, named_hints=[])
+                self.assertEqual(steps[0]["args"]["symbols"][0], key)
+                self.assertNotIn(value, steps[0]["args"]["symbols"])
+                # Explicit observed values remain valid literal selectors; only
+                # automatic key priority is constrained, not file access.
+                steps[0]["args"]["symbols"] = [value]
+                _address_large_read_steps(steps, state=state, entities={}, named_hints=[])
+                self.assertEqual(steps[0]["args"]["symbols"], [value])
 
     def test_fetch_health_counts_unaddressable_content_as_failed_retrieval(self):
         runtime = _Runtime()

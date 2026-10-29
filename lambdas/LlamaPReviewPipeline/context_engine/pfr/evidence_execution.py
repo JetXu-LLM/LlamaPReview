@@ -33,13 +33,27 @@ def _high_signal_literal_shape(token: str) -> bool:
         or any(char.isdigit() for char in token)
     )
 
+def _bounded_slash_literal(value: str) -> bool:
+    """A possible content selector, never a path to retrieve."""
+
+    return bool(
+        3 <= len(value) <= 120
+        and "/" in value
+        and not value.startswith("/")
+        and not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value)
+        and "://" not in value
+        and not any(char in value for char in ("\\", "'", '"', "\n", "\r"))
+        and all(part not in {"", ".", ".."} for part in value.split("/"))
+    )
+
 def _diff_literals_from_change(change: Dict[str, Any]) -> List[str]:
     """Extract bounded literal anchors already present in one changed diff.
 
     This is intentionally syntax-agnostic.  It does not infer package names or
     invent search terms; it merely retains identifier-like atoms and quoted
     values from changed lines. Bounded shape checks exclude numeric atoms,
-    hashes, URLs, and path material without imposing language or domain words.
+    hashes and URLs without imposing language or domain words. Slash-containing
+    quoted values still need independent target-file grounding before use.
     """
 
     literals: List[str] = []
@@ -54,7 +68,11 @@ def _diff_literals_from_change(change: Dict[str, Any]) -> List[str]:
             or "://" in text
         ):
             return
-        if quoted and "/" not in text and "\\" not in text and text not in literals:
+        if (
+            quoted
+            and (("/" not in text and "\\" not in text) or _bounded_slash_literal(text))
+            and text not in literals
+        ):
             literals.append(text)
         for token in literal_identifier_tokens(text):
             # Quoted strings are explicit values (for example a dependency
@@ -140,7 +158,7 @@ def _companion_diff_literals_for_target(
             line = raw_line[1:]
             values: List[str] = []
             for quoted in re.findall(r"['\"]([^'\"\r\n]{3,120})['\"]", line):
-                if "/" not in quoted and "\\" not in quoted:
+                if ("/" not in quoted and "\\" not in quoted) or _bounded_slash_literal(quoted):
                     values.append(quoted)
                 values.extend(
                     token
@@ -168,7 +186,7 @@ def _companion_diff_literals_for_target(
     )[:24]
 
 def _large_read_path_tokens(path: str) -> set[str]:
-    tokens: set[str] = set()
+    tokens: set[str] = {str(path or "").casefold()}
     for component in str(path or "").split("/"):
         tokens.update(
             token.casefold()
@@ -180,6 +198,7 @@ def _usable_large_read_literal(
     value: str,
     *,
     path_tokens: set[str],
+    grounded_slash_literals: set[str],
 ) -> bool:
     text = str(value or "").strip()
     folded = text.casefold()
@@ -189,9 +208,46 @@ def _usable_large_read_literal(
         and not re.fullmatch(r"[0-9._+~-]+", text)
         and not re.fullmatch(r"[0-9a-fA-F]{16,}", text)
         and "://" not in text
-        and "/" not in text
+        and ("/" not in text or text in grounded_slash_literals)
         and "\\" not in text
     )
+
+def _grounded_large_read_slash_literals(
+    state, path: str, candidates: List[str]
+) -> Tuple[set[str], set[str]]:
+    """Require an exact quoted value in this target's patch or cached source.
+
+    Model-authored questions, hints and other files cannot supply this evidence.
+    No new fetch is made, and the selector is used only within the existing file.
+    """
+
+    sources = [
+        str(change.get("diff") or change.get("patch") or "")
+        for change in state.pr_content.get("file_changes") or []
+        if isinstance(change, dict) and str(change.get("file_path") or "") == path
+    ]
+    sources.append(str((state.source_text_cache.get(path) or {}).get("content") or ""))
+    grounded = {
+        value
+        for value in candidates
+        if _bounded_slash_literal(value)
+        and value != path
+        and any(
+            f'"{value}"' in source or f"'{value}'" in source
+            for source in sources
+        )
+    }
+    # Prefer whole keys automatically, not arbitrary slash-bearing values such
+    # as encoded integrity data. An explicitly requested observed value remains
+    # a valid same-file selector; this distinction changes ranking, not access.
+    keys = {
+        value for value in grounded
+        if any(
+            re.search(r"(['\"])" + re.escape(value) + r"\1\s*:", source)
+            for source in sources
+        )
+    }
+    return grounded, keys
 
 def _address_large_read_steps(
     steps: List[Dict[str, Any]],
@@ -232,15 +288,24 @@ def _address_large_read_steps(
             state.pr_content,
             path,
         )
+        supplied_symbols = [
+            str(symbol).strip()
+            for symbol in args.get("symbols") or []
+            if isinstance(symbol, str) and str(symbol).strip()
+        ]
+        grounded_slash_literals, grounded_slash_keys = _grounded_large_read_slash_literals(
+            state, path, [*supplied_symbols, *path_diff_literals, *companion_diff_literals]
+        )
         step_deterministic_tokens = set(base_deterministic_tokens)
         step_deterministic_tokens.update(path_diff_literals)
         step_deterministic_tokens.update(companion_diff_literals)
+        step_deterministic_tokens.update(grounded_slash_literals)
         step_deterministic_casefold = {
             token.casefold() for token in step_deterministic_tokens
         }
         diff_literal_casefold = {
             token.casefold()
-            for token in [*path_diff_literals, *companion_diff_literals]
+            for token in [*path_diff_literals, *companion_diff_literals, *grounded_slash_literals]
         }
         path_tokens = _large_read_path_tokens(path)
         named_text = " ".join(
@@ -254,11 +319,6 @@ def _address_large_read_steps(
         allowed_named_text = "\n".join(
             [named_text, *sorted(step_deterministic_tokens)]
         ).casefold()
-        supplied_symbols = [
-            str(symbol).strip()
-            for symbol in args.get("symbols") or []
-            if isinstance(symbol, str) and str(symbol).strip()
-        ]
         if supplied_symbols:
             grounded_symbols = [
                 symbol
@@ -267,6 +327,7 @@ def _address_large_read_steps(
                 and _usable_large_read_literal(
                     symbol,
                     path_tokens=path_tokens,
+                    grounded_slash_literals=grounded_slash_literals,
                 )
                 and (
                     _high_signal_literal_shape(symbol)
@@ -290,16 +351,24 @@ def _address_large_read_steps(
                 "read_file.large_symbols_dropped_ungrounded"
             )
         candidates: List[str] = []
-        candidate_tokens = list(literal_identifier_tokens(named_text))
+        automatic_diff_literals = [
+            token for token in [*path_diff_literals, *companion_diff_literals]
+            if "/" not in token or token in grounded_slash_keys
+        ]
+        candidate_tokens = [
+            token for token in automatic_diff_literals
+            if token in grounded_slash_keys
+        ]
+        candidate_tokens.extend(literal_identifier_tokens(named_text))
         candidate_tokens.extend(
             token
-            for token in [*path_diff_literals, *companion_diff_literals]
+            for token in automatic_diff_literals
             if _high_signal_literal_shape(token)
             and token not in candidate_tokens
         )
         candidate_tokens.extend(
             token
-            for token in [*path_diff_literals, *companion_diff_literals]
+            for token in automatic_diff_literals
             if token not in candidate_tokens
         )
         for token in candidate_tokens:
@@ -307,6 +376,7 @@ def _address_large_read_steps(
                 _usable_large_read_literal(
                     token,
                     path_tokens=path_tokens,
+                    grounded_slash_literals=grounded_slash_literals,
                 )
                 and (
                     _high_signal_literal_shape(token)
