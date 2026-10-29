@@ -9,6 +9,16 @@ GitHub release notes may provide more detail, but they do not replace this
 maintained summary. Numeric AWS Lambda versions are deployment identities and
 do not appear as project versions.
 
+## Unreleased
+
+### Fixed
+
+- Code search preserves the locked SDK's unavailable and partial outcomes
+  instead of treating failed requests or content reads as no matches. Bounded
+  positive hits remain usable hints with incomplete-coverage labeling and the
+  existing exact-head checks. The built-Layer check exercises these outcomes
+  offline through the SDK and review evidence ledger.
+
 ## [0.1.9] - 2026-10-09
 
 ### Security

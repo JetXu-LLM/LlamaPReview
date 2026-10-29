@@ -72,6 +72,43 @@ class _Runtime:
 
 
 class TestPRIngestPipeline(unittest.TestCase):
+    def test_code_search_retains_typed_sdk_failure_and_definitive_absence(self):
+        runtime = GitHubRuntime.__new__(GitHubRuntime)
+        runtime.github = MagicMock()
+        runtime.api = MagicMock()
+        for outcome, items, truncated, error in (
+            ("error", [], False, True),
+            ("partial", [], False, True),
+            ("partial", [{"path": "kept.py"}], True, False),
+            ("no_hit", [], True, True),
+            ("ok", [], False, True),
+            ("no_hit", [], False, False),
+            ("ok", [{"path": "kept.py"}], True, False),
+        ):
+            with self.subTest(outcome=outcome, items=items, truncated=truncated):
+                runtime.api.search_code_with_status.return_value = SimpleNamespace(
+                    items=items,
+                    to_meta=lambda: {
+                        "outcome": outcome, "truncated": truncated,
+                        "status_code": 503 if outcome == "error" else 200,
+                        "error_type": "upstream_unavailable" if error else None,
+                    },
+                )
+                observed = runtime.search_code_with_status("entrypoint", "owner/repo")
+                self.assertEqual(bool(observed.get("error")), error)
+                self.assertEqual(observed["results"], items)
+                self.assertEqual(observed["outcome"], outcome)
+        runtime.github.search_code.assert_not_called()
+        runtime.api.search_code_with_status.assert_called_with("entrypoint", "owner/repo")
+
+    def test_code_search_unknown_sdk_shape_fails_closed_without_body_leak(self):
+        runtime = GitHubRuntime.__new__(GitHubRuntime)
+        runtime.api = MagicMock()
+        runtime.api.search_code_with_status.side_effect = RuntimeError("sensitive-body-sentinel")
+        observed = runtime.search_code_with_status("entrypoint", "owner/repo")
+        self.assertEqual(observed, {"results": [], "outcome": "error", "error": "RuntimeError"})
+        self.assertNotIn("sensitive-body-sentinel", str(observed))
+
     def test_github_runtime_enforces_bounded_changed_source_ingestion(self):
         repository = MagicMock()
         pull = SimpleNamespace(

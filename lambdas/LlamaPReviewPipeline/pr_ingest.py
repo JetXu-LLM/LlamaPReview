@@ -687,48 +687,28 @@ class GitHubRuntime:
             close_github()
 
     def search_code_with_status(self, query: str, repo_full_name: str) -> Dict[str, Any]:
+        """Preserve the locked SDK's fetch and content-expansion outcomes."""
         try:
-            from github import GithubException
-            from llama_github.config.config import config as llama_config
-        except Exception:
-            GithubException = Exception  # type: ignore[assignment]
-            llama_config = None
-
-        full_query = f"{query} repo:{repo_full_name}" if repo_full_name else query
-        try:
-            per_page = int(llama_config.get("code_search_max_hits") if llama_config is not None else 10)
-            code_results = self.github.search_code(query=full_query, per_page=per_page)
-            results = []
-            for index, code_result in enumerate(code_results):
-                if index >= per_page:
-                    break
-                try:
-                    repository_obj, file_content = self.api._get_file_content_through_repository(code_result)
-                    if repository_obj and file_content:
-                        results.append(
-                            {
-                                "index": index,
-                                "name": code_result["name"],
-                                "path": code_result["path"],
-                                "repository_full_name": code_result["repository"]["full_name"],
-                                "url": code_result["html_url"],
-                                "content": file_content,
-                                "stargazers_count": repository_obj.stargazers_count,
-                                "watchers_count": repository_obj.watchers_count,
-                                "language": repository_obj.language,
-                                "description": repository_obj.description,
-                                "updated_at": repository_obj.updated_at,
-                            }
-                        )
-                except Exception:
-                    logger.debug("Unable to expand code search result for %s", full_query, exc_info=True)
-            return {"results": sorted(results, key=lambda item: item["index"])}
-        except GithubException as exc:  # type: ignore[misc]
-            status = getattr(exc, "status", None)
-            data = getattr(exc, "data", None)
-            return {"results": [], "error": str(data or exc), "status": status}
+            result = self.api.search_code_with_status(query, repo_full_name)
+            meta = result.to_meta()
+            outcome = str(meta.get("outcome") or "")
+            if outcome not in {"ok", "no_hit", "partial", "error"}:
+                raise ValueError("Unknown SDK code-search outcome")
+            payload = {
+                "results": result.items,
+                "outcome": outcome,
+                "status": meta.get("status_code"),
+                "incomplete": outcome == "partial" or bool(meta.get("truncated")),
+            }
+            # Partial fetch/content expansion cannot establish absence. The
+            # existing ToolExecutor treats a truthy error as content-unobserved.
+            if outcome == "error" or (
+                not result.items and (outcome != "no_hit" or meta.get("truncated"))
+            ):
+                payload["error"] = str(meta.get("error_type") or "incomplete_search")
+            return payload
         except Exception as exc:
-            return {"results": [], "error": str(exc)}
+            return {"results": [], "outcome": "error", "error": type(exc).__name__}
 
     def search_code(self, query: str, repo_full_name: str) -> List[Dict[str, Any]]:
         status = self.search_code_with_status(query, repo_full_name)

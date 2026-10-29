@@ -1212,6 +1212,37 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
         self.assertEqual(state.tool_events[0]["outcome"], "search_error")
         self.assertEqual(state.search_error_queries[0]["query"], "WidgetManager(")
 
+    def test_partial_search_keeps_positive_hints_but_never_filtered_absence(self):
+        for path, expected in (("src/service.py", "hit"), (".env", "search_error")):
+            with self.subTest(path=path):
+                class Runtime(_Runtime):
+                    def search_code_with_status(self, query, repo):
+                        return {
+                            "outcome": "partial", "incomplete": True,
+                            "results": [{"index": 0, "path": path,
+                                         "content": "def run():\n    return do_work()\n"}],
+                        }
+                state = CollectionState(
+                    pr_details="details", pr_content={"file_changes": []},
+                    repo_full_name="owner/repo", head_sha="a" * 40,
+                    default_branch="main", runtime=Runtime(),
+                    accessible_files={"src/service.py"},
+                )
+                rendered = ToolExecutor(state).execute({
+                    "id": "partial-search", "function": {"name": "search_code",
+                    "arguments": json.dumps({"query": "do_work(", "reason": "Find caller."})},
+                })
+                self.assertEqual(state.tool_events[0]["outcome"], expected)
+                self.assertNotIn("No default-branch search hits", rendered)
+                if expected == "hit":
+                    self.assertIn("partial search", rendered)
+                    self.assertIn("do_work", rendered)
+                    self.assertEqual(state.tool_events[0]["metadata"]["retrieval_outcome"], "partial")
+                    self.assertTrue(state.collected_snippets[0]["exact_head_admitted"])
+                else:
+                    self.assertIn("absence is unverified", rendered)
+                    self.assertEqual(state.collected_snippets, [])
+
     def test_pfr_executes_plan_and_reconcile_with_owner_docs(self):
         runtime = _Runtime()
         client = _FakePfrClient(
