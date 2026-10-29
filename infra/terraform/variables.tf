@@ -125,14 +125,37 @@ variable "openrouter_api_key" {
   }
 }
 
+variable "direct_openai" {
+  description = "Opt-in Direct OpenAI credentials and compact JSON profile/budget. Stored in encrypted Lambda configuration and Terraform state; runtime validates authorization and exact semantics."
+  type = object({
+    api_key = optional(string, "")
+    profile = optional(string, "")
+    budget  = optional(string, "")
+  })
+  default   = {}
+  nullable  = false
+  sensitive = true
+
+  validation {
+    condition = var.model_provider != "direct_openai" || (
+      length(trimspace(var.direct_openai.api_key)) > 0 &&
+      length(trimspace(var.direct_openai.profile)) > 0 &&
+      length(trimspace(var.direct_openai.budget)) > 0 &&
+      can(keys(jsondecode(var.direct_openai.profile))) &&
+      can(keys(jsondecode(var.direct_openai.budget)))
+    )
+    error_message = "direct_openai requires a nonempty api_key and JSON object text for profile and budget when selected."
+  }
+}
+
 variable "model_provider" {
   description = "One setting chooses the complete runtime model profile and provider endpoint."
   type        = string
   default     = "openrouter"
 
   validation {
-    condition     = contains(["openrouter", "deepseek"], var.model_provider)
-    error_message = "model_provider must be openrouter or deepseek."
+    condition     = contains(["openrouter", "deepseek", "direct_openai"], var.model_provider)
+    error_message = "model_provider must be openrouter, deepseek, or direct_openai."
   }
 }
 

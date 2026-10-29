@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import Iterable, List
 
+from .provider_model_routing import parse_direct_openai_profile
+
 
 def env(name: str, default: str = "") -> str:
     value = os.environ.get(name)
@@ -52,14 +54,31 @@ GITHUB_PRIVATE_KEY = env("GITHUB_PRIVATE_KEY")
 GITHUB_WEBHOOK_SECRET = env("GITHUB_WEBHOOK_SECRET")
 
 MODEL_PROVIDER = env("MODEL_PROVIDER", "openrouter")
-if MODEL_PROVIDER not in {"openrouter", "deepseek"}:
-    raise ValueError("MODEL_PROVIDER must be openrouter or deepseek")
+if MODEL_PROVIDER not in {"openrouter", "deepseek", "direct_openai"}:
+    raise ValueError("MODEL_PROVIDER must be openrouter, deepseek, or direct_openai")
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY")
 DEEPSEEK_API_KEY = env("DEEPSEEK_API_KEY")
+OPENAI_API_KEY = env("OPENAI_API_KEY")
+# No implicit profile or winner: actual model quality and grant/traffic must be
+# qualified separately before a maintainer activates this provider.
+DIRECT_OPENAI_PROFILE = (
+    parse_direct_openai_profile(env("DIRECT_OPENAI_PROFILE"))
+    if MODEL_PROVIDER == "direct_openai"
+    else None
+)
+
+
+def stage_selection(stage: str, tier: str = ""):
+    if MODEL_PROVIDER != "direct_openai":
+        return None
+    if DIRECT_OPENAI_PROFILE is None:
+        raise ValueError("Direct OpenAI requires an explicit stage profile")
+    return DIRECT_OPENAI_PROFILE.select(stage, tier)
 # The provider switch selects a complete, coherent model profile. Legacy
 # DeepSeek per-phase overrides remain available only in the rollback profile;
 # stale DeepSeek environment values cannot silently dilute the Luna profile.
 _LUNA = MODEL_PROVIDER == "openrouter"
+_REASONING_PROVIDER = MODEL_PROVIDER in {"openrouter", "direct_openai"}
 DEEPSEEK_MODEL = (
     "openai/gpt-6-luna" if _LUNA else env("DEEPSEEK_MODEL", "deepseek-v4-pro")
 )
@@ -89,6 +108,26 @@ PFR_NORMAL_EFFORT = "max" if _LUNA else env("PFR_NORMAL_EFFORT", "high")
 NORMAL_REVIEW_MODEL = "openai/gpt-6-luna" if _LUNA else env("NORMAL_REVIEW_MODEL", "deepseek-v4-pro")
 NORMAL_REVIEW_EFFORT = "max" if _LUNA else env("NORMAL_REVIEW_EFFORT", "high")
 
+if DIRECT_OPENAI_PROFILE is not None:
+    # Compatibility aliases for constructing the single provider client and
+    # historical telemetry. Every actual stage resolves the explicit table.
+    _ROUTE = DIRECT_OPENAI_PROFILE.select("route")
+    _HIGH_PLAN = DIRECT_OPENAI_PROFILE.select("pfr_plan", "high")
+    _HIGH_RECONCILE = DIRECT_OPENAI_PROFILE.select("pfr_reconcile", "high")
+    _HIGH_DEEP = DIRECT_OPENAI_PROFILE.select("deep", "high")
+    _NORMAL_RECONCILE = DIRECT_OPENAI_PROFILE.select("pfr_reconcile", "normal")
+    _NORMAL_DEEP = DIRECT_OPENAI_PROFILE.select("deep", "normal")
+    _LOW_DEEP = DIRECT_OPENAI_PROFILE.select("deep", "low")
+    DEEPSEEK_MODEL = ANALYZER_MODEL = _ROUTE.model
+    DEEPSEEK_EFFORT = ANALYZER_EFFORT = _ROUTE.reasoning_effort
+    DEEPSEEK_TRANSPORT_MODEL_OVERRIDE = ""
+    PFR_MODEL, PFR_EFFORT = _HIGH_RECONCILE.model, _HIGH_RECONCILE.reasoning_effort
+    PFR_HIGH_PLAN_EFFORT = _HIGH_PLAN.reasoning_effort
+    REVIEW_MODEL, REVIEW_EFFORT = _HIGH_DEEP.model, _HIGH_DEEP.reasoning_effort
+    PFR_NORMAL_MODEL, PFR_NORMAL_EFFORT = _NORMAL_RECONCILE.model, _NORMAL_RECONCILE.reasoning_effort
+    NORMAL_REVIEW_MODEL, NORMAL_REVIEW_EFFORT = _NORMAL_DEEP.model, _NORMAL_DEEP.reasoning_effort
+    LOW_REVIEW_MODEL, LOW_REVIEW_EFFORT = _LOW_DEEP.model, _LOW_DEEP.reasoning_effort
+
 DEEPSEEK_TIMEOUT_SECONDS = env_int("DEEPSEEK_TIMEOUT_SECONDS", 460)
 PFR_HIGH_TIME_BUDGET_SECONDS = env_int(
     "PFR_HIGH_TIME_BUDGET_SECONDS",
@@ -104,10 +143,10 @@ PIPELINE_REVIEW_PHASE_MAX_SECONDS = env_int(
     "PIPELINE_REVIEW_PHASE_MAX_SECONDS", 780
 )
 PFR_HIGH_SOFT_TIME_BUDGET_SECONDS = env_int(
-    "PFR_HIGH_SOFT_TIME_BUDGET_SECONDS", 600 if _LUNA else 420
+    "PFR_HIGH_SOFT_TIME_BUDGET_SECONDS", 600 if _REASONING_PROVIDER else 420
 )
 PFR_NORMAL_SOFT_TIME_BUDGET_SECONDS = env_int(
-    "PFR_NORMAL_SOFT_TIME_BUDGET_SECONDS", 600 if _LUNA else 180
+    "PFR_NORMAL_SOFT_TIME_BUDGET_SECONDS", 600 if _REASONING_PROVIDER else 180
 )
 PFR_HIGH_MAX_TOOL_ROUNDS = env_int("PFR_HIGH_MAX_TOOL_ROUNDS", 8)
 PFR_HIGH_TOKEN_BUDGET = env_int("PFR_HIGH_TOKEN_BUDGET", 750_000)
@@ -121,7 +160,7 @@ PFR_HIGH_MAX_CONTEXT_CHARS = env_int(
 REVIEW_INPUT_MAX_CHARS = env_int("REVIEW_INPUT_MAX_CHARS", 850_000)
 PFR_NORMAL_TIME_BUDGET_SECONDS = env_int(
     "PFR_NORMAL_TIME_BUDGET_SECONDS",
-    780 if _LUNA else 240,
+    780 if _REASONING_PROVIDER else 240,
 )
 PFR_NORMAL_MAX_TOOL_ROUNDS = env_int("PFR_NORMAL_MAX_TOOL_ROUNDS", 3)
 PFR_NORMAL_TOKEN_BUDGET = env_int("PFR_NORMAL_TOKEN_BUDGET", 200_000)

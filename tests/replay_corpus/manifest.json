@@ -26,7 +26,10 @@
     "tests.unit.test_openrouter_luna_transport.OpenRouterLunaTransportTests.test_request_and_ledger_preserve_max_reasoning_and_reported_cost",
     "tests.unit.test_publication_recovery.PublicationTransactionTests.test_prepared_recovery_rechecks_then_dispatches_exactly_once",
     "tests.unit.test_publication_recovery.PublicationTransactionTests.test_takeover_after_dispatch_fences_old_receipt_then_adopts_once",
-    "tests.unit.test_pipeline_lambda_dispatch.TestPipelineLambdaDispatch.test_live_phase_record_without_event_id_fails_closed"
+    "tests.unit.test_pipeline_lambda_dispatch.TestPipelineLambdaDispatch.test_live_phase_record_without_event_id_fails_closed",
+    "tests.unit.test_direct_openai_transport_budget.DirectOpenAITransportBudgetTests.test_real_adapter_deep_final_render_and_serialized_github_surface",
+    "tests.unit.test_direct_openai_transport_budget.DirectOpenAITransportBudgetTests.test_retry_reserves_each_http_attempt_unknown_first_retained",
+    "tests.unit.test_direct_openai_transport_budget.DirectOpenAITransportBudgetTests.test_late_settlement_after_takeover_and_expiry"
   ],
   "sealed": [
     "tests.unit.test_semantic_replays.SemanticReplayTests.test_causal_finding_survives_and_gets_one_inline",

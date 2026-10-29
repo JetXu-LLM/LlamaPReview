@@ -214,6 +214,11 @@ def collect_context_pfr(
     state.add_usage(pfr_route_usage)
     plan_question_cap = _plan_question_cap(route)
     plan_model, plan_effort = _plan_model_selection(route)
+    profile_tier = str(route.get("complexity") or "")
+    plan_selection = config.stage_selection("pfr_plan", profile_tier)
+    reconcile_selection = config.stage_selection("pfr_reconcile", profile_tier)
+    if reconcile_selection is not None:
+        model, reasoning_effort = reconcile_selection.model, reconcile_selection.reasoning_effort
     # Inventory has been constructed by initialize_collection above. Import at this
     # continuation boundary because Analyzer itself uses context-engine evidence
     # types; an eager reverse import would make a direct Analyzer import depend
@@ -240,7 +245,8 @@ def collect_context_pfr(
         "same_conversation_prefix_used": bool(route_conversation),
         "max_questions": plan_question_cap,
         "plan_model_tier": (
-            "luna" if config.MODEL_PROVIDER == "openrouter"
+            plan_model if config.MODEL_PROVIDER == "direct_openai"
+            else "luna" if config.MODEL_PROVIDER == "openrouter"
             else "pro" if plan_model == config.DEEPSEEK_MODEL else "flash"
         ),
         "plan_reasoning_effort": plan_effort,
@@ -312,18 +318,21 @@ def collect_context_pfr(
             plan_messages,
             model=plan_model,
             reasoning_effort=plan_effort,
+            **({"max_tokens": 12000} if plan_selection else {}),
             thinking=True,
             response_format={"type": "json_object"},
             trace_phase="pfr_plan",
             trace_metadata={
                 **trace_metadata,
+                **(plan_selection.metadata() if plan_selection else {}),
                 "route_plan_lineage": {
                     "same_conversation_prefix_used": bool(
                         route_conversation
                     ),
                     "max_questions": plan_question_cap,
                     "plan_model_tier": (
-                        "luna" if config.MODEL_PROVIDER == "openrouter"
+                        plan_model if config.MODEL_PROVIDER == "direct_openai"
+                        else "luna" if config.MODEL_PROVIDER == "openrouter"
                         else "pro"
                         if plan_model == config.DEEPSEEK_MODEL
                         else "flash"
@@ -522,7 +531,10 @@ def collect_context_pfr(
                     plan=plan,
                     context_text=context_snapshot,
                     evidence_index_envelope=evidence_index_envelope,
-                    trace_metadata=trace_metadata,
+                    trace_metadata={
+                        **trace_metadata,
+                        **(reconcile_selection.metadata() if reconcile_selection else {}),
+                    },
                     round_index=round_index + 1,
                     allow_representation_repair=(
                         not pfr_reconcile_representation_repair_consumed

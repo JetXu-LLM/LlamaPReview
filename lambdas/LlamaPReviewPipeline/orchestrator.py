@@ -601,6 +601,9 @@ def _handle_phase_failure(
 
 
 def _review_model_for_mode(review_mode: str) -> Dict[str, str]:
+    selected = config.stage_selection("deep", review_mode)
+    if selected is not None:
+        return {"model": selected.model, "reasoning_effort": selected.reasoning_effort}
     if review_mode == "low":
         return {"model": config.LOW_REVIEW_MODEL, "reasoning_effort": config.LOW_REVIEW_EFFORT}
     if review_mode == "normal":

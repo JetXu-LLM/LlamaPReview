@@ -2,7 +2,7 @@
   "schema_version": 1,
   "packages": {
     "certifi": {
-      "version": "2026.6.17",
+      "version": "2026.10.19",
       "evidence_contains": "MPL-2.0",
       "sbom_expression": "MPL-2.0",
       "required_license_basenames": ["LICENSE"],

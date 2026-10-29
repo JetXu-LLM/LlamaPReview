@@ -976,6 +976,7 @@ def _reconcile(
             reasoning_effort=reasoning_effort,
             thinking=True,
             response_format={"type": "json_object"},
+            **({"max_tokens": 12000} if config.MODEL_PROVIDER == "direct_openai" else {}),
             trace_phase="pfr_reconcile",
             trace_metadata={**trace_metadata, "round": round_index},
             deadline=deadline,
@@ -1200,7 +1201,7 @@ def _reconcile(
             repair_messages,
             model=model,
             reasoning_effort=reasoning_effort,
-            thinking=False,
+            thinking=config.MODEL_PROVIDER == "direct_openai",
             max_tokens=config.PFR_RECONCILE_REPAIR_MAX_TOKENS or None,
             timeout_seconds=repair_timeout,
             response_format={"type": "json_object"},
@@ -1219,7 +1220,7 @@ def _reconcile(
             _pfr_model_phase(
                 "pfr_reconcile_representation_repair",
                 model=model,
-                thinking=False,
+                thinking=config.MODEL_PROVIDER == "direct_openai",
                 reasoning_effort=reasoning_effort,
                 attempt=2,
                 elapsed_seconds=time.monotonic() - repair_started,
@@ -1281,7 +1282,7 @@ def _reconcile(
                 _pfr_model_phase(
                     "pfr_reconcile_representation_repair",
                     model=model,
-                    thinking=False,
+                    thinking=config.MODEL_PROVIDER == "direct_openai",
                     reasoning_effort=reasoning_effort,
                     attempt=2,
                     elapsed_seconds=(

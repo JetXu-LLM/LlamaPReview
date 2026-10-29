@@ -1,0 +1,22 @@
+{
+  "version": "unqualified-luna-max-baseline-v1",
+  "route": ["gpt-6-luna", "max"],
+  "tiers": {
+    "low": {
+      "deep": ["gpt-6-luna", "max"],
+      "final": ["gpt-6-luna", "max"]
+    },
+    "normal": {
+      "pfr_plan": ["gpt-6-luna", "max"],
+      "pfr_reconcile": ["gpt-6-luna", "max"],
+      "deep": ["gpt-6-luna", "max"],
+      "final": ["gpt-6-luna", "max"]
+    },
+    "high": {
+      "pfr_plan": ["gpt-6-luna", "max"],
+      "pfr_reconcile": ["gpt-6-luna", "max"],
+      "deep": ["gpt-6-luna", "max"],
+      "final": ["gpt-6-luna", "max"]
+    }
+  }
+}

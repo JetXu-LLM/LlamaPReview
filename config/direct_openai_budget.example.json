@@ -1,0 +1,13 @@
+{
+  "authorization": "unapproved",
+  "cycle_id": null,
+  "valid_from": null,
+  "expires_at": null,
+  "allocation_nanousd": null,
+  "verified_available_nanousd": null,
+  "organization_id": null,
+  "project_id": null,
+  "profile_sha256": null,
+  "pricing_version": "openai-standard-text-2026-10-29",
+  "pricing_verified_until": null
+}

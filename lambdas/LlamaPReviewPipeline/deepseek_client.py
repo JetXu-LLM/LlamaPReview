@@ -1,4 +1,4 @@
-"""One fenced provider client for OpenRouter Luna and DeepSeek rollback."""
+"""One fenced provider client with explicit OpenAI, OpenRouter and DeepSeek dialects."""
 
 from __future__ import annotations
 
@@ -20,7 +20,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 from . import config
 from .deadline import Deadline, DeadlineExceeded
-from .provider_model_routing import resolve_provider_model
+from .provider_model_routing import resolve_provider_model, parse_direct_openai_profile
+from .direct_openai import build_request as build_direct_request, normalize_response as normalize_direct_response
+from .direct_openai_budget import load_policy as load_budget_policy, reservation as budget_reservation, actual_cost as direct_actual_cost
 from .provider_usage import normalize_openrouter_usage, validate_complete_token_usage
 
 logger = logging.getLogger(__name__)
@@ -33,7 +35,7 @@ except ModuleNotFoundError:  # local offline mock scripts may not need HTTP
 
 _REDACTED_KEYS = {
     "authorization", "api_key", "apikey", "openrouter_api_key",
-    "deepseek_api_key", "token", "access_token", "private_key",
+    "deepseek_api_key", "openai_api_key", "token", "access_token", "private_key",
 }
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
@@ -454,6 +456,7 @@ class DeepSeekClient:
     API_BETA_BASE = "https://api.deepseek.com/beta"
     OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
     CHAT_PATH = "/chat/completions"
+    DIRECT_OPENAI_API_BASE = "https://api.openai.com/v1"
 
     def __init__(
         self,
@@ -465,10 +468,14 @@ class DeepSeekClient:
         transport_model_override: str = config.DEEPSEEK_TRANSPORT_MODEL_OVERRIDE,
         provider: str = config.MODEL_PROVIDER,
     ):
-        if provider not in {"openrouter", "deepseek"}:
-            raise ValueError("provider must be openrouter or deepseek")
+        if provider not in {"direct_openai", "openrouter", "deepseek"}:
+            raise ValueError("Unsupported provider")
         self.provider = provider
-        key_name = "OPENROUTER_API_KEY" if provider == "openrouter" else "DEEPSEEK_API_KEY"
+        self.direct_profile = (
+            (config.DIRECT_OPENAI_PROFILE or parse_direct_openai_profile(os.environ.get("DIRECT_OPENAI_PROFILE", "")))
+            if provider == "direct_openai" else None
+        )
+        key_name = {"direct_openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}[provider]
         self.api_key = api_key or os.environ.get(key_name)
         if not self.api_key:
             raise ValueError(f"{key_name} is not set.")
@@ -539,6 +546,7 @@ class DeepSeekClient:
         }
         return {
             **identity,
+            **{key: metadata[key] for key in ("profile_version", "profile_sha256", "stage", "tier") if key in metadata},
             "operation_id": hashlib.sha256(
                 json.dumps(
                     identity,
@@ -600,6 +608,8 @@ class DeepSeekClient:
         usage_reported = not usage_errors
         record: Dict[str, Any] = {
             "schema_version": 2,
+            **{key: operation[key] for key in ("profile_version", "profile_sha256", "stage", "tier") if key in operation},
+            **({"budget": deepcopy(payload["_llamapreview_budget"])} if "_llamapreview_budget" in payload else {}),
             "provider": self.provider,
             "call_id": call_id,
             "operation_id": operation_id,
@@ -652,6 +662,13 @@ class DeepSeekClient:
                 gateway_usage = result.get("usage")
                 if isinstance(gateway_usage, Mapping) and isinstance(gateway_usage.get("is_byok"), bool):
                     record["is_byok"] = gateway_usage["is_byok"]
+        if self.provider == "direct_openai" and "budget" in record:
+            cost = direct_actual_cost(record, record["budget"])
+            if cost is not None:
+                record["budget"].update(state="settled", actual_nanousd=int(cost))
+            else:
+                record["usage_state"] = "unreported"
+                usage_errors = [*usage_errors, "direct_openai_cost_unreconciled"]
         if usage_errors:
             record["usage_validation_errors"] = usage_errors
         if http_status is not None:
@@ -691,6 +708,8 @@ class DeepSeekClient:
         ).hexdigest()
         return {
             "schema_version": 2,
+            **{key: operation[key] for key in ("profile_version", "profile_sha256", "stage", "tier") if key in operation},
+            **({"budget": deepcopy(payload["_llamapreview_budget"])} if "_llamapreview_budget" in payload else {}),
             "provider": self.provider,
             "call_id": call_id,
             "operation_id": operation_id,
@@ -769,6 +788,13 @@ class DeepSeekClient:
         model: Optional[str] = None,
         api_variant: str = "stable",
     ) -> Dict[str, Any]:
+        if self.provider == "direct_openai":
+            return build_direct_request(
+                messages, model=self.model if model is None else model,
+                effort=reasoning_effort or self.reasoning_effort, max_tokens=max_tokens,
+                response_format=response_format, tools=tools, tool_choice=tool_choice,
+                api_variant=api_variant,
+            )
         if api_variant not in {"stable", "beta"}:
             raise ValueError("DeepSeek api_variant must be stable or beta")
         if self.provider == "openrouter" and api_variant != "stable":
@@ -862,10 +888,35 @@ class DeepSeekClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        budget_policy = None
+        if self.provider == "direct_openai":
+            if type(max_retries) is not int or not 1 <= max_retries <= 3:
+                raise ValueError("Direct OpenAI permits at most three explicit HTTP attempts")
+            if not callable(self._provider_dispatch_fence_sink) or not callable(self._provider_call_sink):
+                raise ValueError("Direct OpenAI requires durable dispatch and settlement sinks")
+            metadata = trace_metadata or {}
+            if not all(metadata.get(key) for key in ("profile_version", "profile_sha256", "stage")) or "tier" not in metadata:
+                raise ValueError("Direct OpenAI requires an exact stage/tier profile selection")
+            selected = self.direct_profile.select(metadata["stage"], metadata["tier"])
+            expected_stage = {
+                "route": "route", "route_adjudication": "route", "pfr_plan": "pfr_plan",
+                "pfr_reconcile": "pfr_reconcile", "pfr_reconcile_representation_repair": "pfr_reconcile",
+                "deep_thinking": "deep", "deep_judgment": "deep", "final_output": "final",
+                "final_presentation": "final", "final_presentation_repair": "final",
+            }.get(canonical_provider_phase(trace_phase))
+            if (selected.metadata() != {key: metadata[key] for key in selected.metadata()}
+                    or expected_stage != selected.stage
+                    or payload.get("model") != selected.model
+                    or _payload_effort(payload) != selected.reasoning_effort):
+                raise ValueError("Direct OpenAI dispatch differs from its exact stage/tier profile")
+            budget_policy = load_budget_policy(profile_sha256=metadata["profile_sha256"])
+            headers["OpenAI-Organization"] = budget_policy["organization_id"]
+            headers["OpenAI-Project"] = budget_policy["project_id"]
         if self.provider == "openrouter":
             headers["X-OpenRouter-Metadata"] = "enabled"
         api_variant = str(payload.get("_llamapreview_api_variant") or "stable")
         api_base = (
+            self.DIRECT_OPENAI_API_BASE if self.provider == "direct_openai" else
             self.OPENROUTER_API_BASE
             if self.provider == "openrouter"
             else self.API_BETA_BASE if api_variant == "beta" else self.API_BASE
@@ -888,7 +939,7 @@ class DeepSeekClient:
             "_llamapreview_logical_model": model_selection.logical_model,
             "_llamapreview_billed_model": model_selection.billed_model,
         }
-        url = f"{api_base}{self.CHAT_PATH}"
+        url = f"{api_base}/responses" if self.provider == "direct_openai" else f"{api_base}{self.CHAT_PATH}"
         last_error: Optional[Exception] = None
         last_status: Optional[int] = None
         configured_timeout = timeout_seconds if timeout_seconds and timeout_seconds > 0 else self.timeout
@@ -918,6 +969,12 @@ class DeepSeekClient:
                     if deadline is not None
                     else operation_remaining
                 )
+                if budget_policy is not None:
+                    load_budget_policy(budget_policy, request_seconds=request_timeout)
+                    evidence_payload["_llamapreview_budget"] = budget_reservation(
+                        budget_policy, model=model_selection.billed_model,
+                        max_output_tokens=transport_payload["max_output_tokens"],
+                    )
                 transport_attempt_count += 1
                 dispatch_index = transport_attempt_count
                 dispatch_fence = self._build_provider_dispatch_fence(
@@ -941,6 +998,7 @@ class DeepSeekClient:
                         headers=headers,
                         json=transport_payload,
                         timeout=request_timeout,
+                        **({"allow_redirects": False} if self.provider == "direct_openai" else {}),
                     )
                     # With stream=False, Requests reads the body in post();
                     # keep JSON decoding under the same absolute wall fence.
@@ -957,6 +1015,8 @@ class DeepSeekClient:
                     last_status = 200
                     if not isinstance(result, dict):
                         raise DeepSeekResponseError("Provider success response must be a JSON object")
+                    if self.provider == "direct_openai":
+                        result = normalize_direct_response(result)
                     if self.provider == "openrouter":
                         result["usage"] = normalize_openrouter_usage(result.get("usage"))
                     self._log_success(result)
@@ -985,6 +1045,8 @@ class DeepSeekClient:
                     self._persist_provider_call_record(call_record)
                     dispatch_recorded = True
                     result[PROVIDER_CALL_RECORD_KEY] = call_record
+                    if self.provider == "direct_openai" and call_record["usage_state"] != "reported":
+                        result["choices"] = [{"finish_reason": "error", "message": {"role": "assistant", "content": ""}}]
                     return result
                 if response.status_code == 429 or response.status_code >= 500:
                     last_status = int(response.status_code)

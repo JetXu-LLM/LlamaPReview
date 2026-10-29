@@ -1204,6 +1204,7 @@ def _route_model_phases(
     routes persist a token total that omits a completed provider call.
     """
 
+    selected = config.stage_selection("route")
     initial_record = initial_response.get(PROVIDER_CALL_RECORD_KEY)
     if isinstance(initial_record, dict):
         initial_phase = dict(initial_record)
@@ -1212,9 +1213,9 @@ def _route_model_phases(
     else:
         initial_phase = {
             "phase": "route",
-            "model": str(config.ANALYZER_MODEL or ""),
+            "model": selected.model if selected else str(config.ANALYZER_MODEL or ""),
             "thinking": True,
-            "reasoning_effort": str(config.ANALYZER_EFFORT or ""),
+            "reasoning_effort": selected.reasoning_effort if selected else str(config.ANALYZER_EFFORT or ""),
             "attempt": 1,
             "elapsed_seconds": round(
                 max(0.0, float(initial_elapsed_seconds)), 3
@@ -1241,9 +1242,9 @@ def _route_model_phases(
         else:
             adjudication_phase = {
                 "phase": "route_adjudication",
-                "model": str(config.DEEPSEEK_MODEL or ""),
+                "model": selected.model if selected else str(config.DEEPSEEK_MODEL or ""),
                 "thinking": True,
-                "reasoning_effort": str(config.DEEPSEEK_EFFORT or ""),
+                "reasoning_effort": selected.reasoning_effort if selected else str(config.DEEPSEEK_EFFORT or ""),
                 "attempt": 2,
                 "elapsed_seconds": round(
                     max(0.0, float(adjudication_elapsed_seconds)), 3
@@ -1311,7 +1312,11 @@ def analyze_pr_complexity(
             "Route input changed after provider source capture",
             stage="context.route_input_identity",
         )
-    client = client or DeepSeekClient(model=config.ANALYZER_MODEL, reasoning_effort=config.ANALYZER_EFFORT)
+    selected = config.stage_selection("route")
+    route_model = selected.model if selected else config.ANALYZER_MODEL
+    route_effort = selected.reasoning_effort if selected else config.ANALYZER_EFFORT
+    trace_metadata = {**(trace_metadata or {}), **(selected.metadata() if selected else {})}
+    client = client or DeepSeekClient(model=route_model, reasoning_effort=route_effort)
     _clear_route_conversation(client)
     route_messages = [
         {"role": "system", "content": PR_ANALYZER_SYSTEM_PROMPT},
@@ -1325,8 +1330,9 @@ def analyze_pr_complexity(
     initial_started = time.monotonic()
     initial_response = client.chat(
         route_messages,
-        model=config.ANALYZER_MODEL,
-        reasoning_effort=config.ANALYZER_EFFORT,
+        model=route_model,
+        reasoning_effort=route_effort,
+        **({"max_tokens": 8192} if selected else {}),
         thinking=True,
         response_format={"type": "json_object"},
         trace_phase="pr_analyzer",
@@ -1376,8 +1382,9 @@ def analyze_pr_complexity(
             adjudication_started = time.monotonic()
             adjudication_response = client.chat(
                 route_messages,
-                model=config.DEEPSEEK_MODEL,
-                reasoning_effort=config.DEEPSEEK_EFFORT,
+                model=selected.model if selected else config.DEEPSEEK_MODEL,
+                reasoning_effort=selected.reasoning_effort if selected else config.DEEPSEEK_EFFORT,
+                **({"max_tokens": 8192} if selected else {}),
                 thinking=True,
                 response_format={"type": "json_object"},
                 trace_phase="pr_analyzer_adjudication",

@@ -556,6 +556,15 @@ def generate_review(
 ) -> Dict[str, Any]:
     """Run the sole production Deep/Final judgment path."""
 
+    tier = str((trace_metadata or {}).get("review_mode") or "")
+    deep_selection = config.stage_selection("deep", tier)
+    final_selection = config.stage_selection("final", tier)
+    if deep_selection is not None:
+        model, reasoning_effort = deep_selection.model, deep_selection.reasoning_effort
+    final_model = final_selection.model if final_selection else model
+    final_effort = final_selection.reasoning_effort if final_selection else _FINAL_REASONING_EFFORT
+    final_thinking = True if final_selection else _FINAL_THINKING
+
     active_client = client or DeepSeekClient(
         model=model,
         reasoning_effort=reasoning_effort,
@@ -564,6 +573,8 @@ def generate_review(
         **dict(trace_metadata or {}),
         "review_protocol": PRESENTATION_VERSION,
     }
+    deep_metadata = {**metadata, **(deep_selection.metadata() if deep_selection else {})}
+    final_metadata = {**metadata, **(final_selection.metadata() if final_selection else {})}
     phases: list[Dict[str, Any]] = (
         phase_sink if phase_sink is not None else []
     )
@@ -602,7 +613,7 @@ def generate_review(
                 deadline=deadline,
             ),
             deadline=deadline,
-            trace_metadata=metadata,
+            trace_metadata=deep_metadata,
         )
         _append_phase(phases, deep.telemetry)
         finish_reasons["deep_judgment"] = str(
@@ -650,13 +661,13 @@ def generate_review(
             active_client,
             phase="final_presentation",
             messages=final_messages,
-            model=model,
-            reasoning_effort=_FINAL_REASONING_EFFORT,
-            thinking=_FINAL_THINKING,
+            model=final_model,
+            reasoning_effort=final_effort,
+            thinking=final_thinking,
             max_tokens=config.REVIEW_FINAL_OUTPUT_MAX_TOKENS or None,
             timeout_seconds=final_timeout,
             deadline=deadline,
-            trace_metadata=metadata,
+            trace_metadata=final_metadata,
             response_format=dict(_JSON_OBJECT_RESPONSE),
         )
         _append_phase(phases, final.telemetry)
@@ -669,9 +680,9 @@ def generate_review(
             phases,
             error,
             phase="final_presentation",
-            model=model,
-            reasoning_effort=_FINAL_REASONING_EFFORT,
-            thinking=_FINAL_THINKING,
+            model=final_model,
+            reasoning_effort=final_effort,
+            thinking=final_thinking,
             elapsed_seconds=time.monotonic() - final_started,
         )
         finish_reasons["final_presentation"] = (
@@ -745,9 +756,9 @@ def generate_review(
                 active_client,
                 phase=_FINAL_REPAIR_PHASE,
                 messages=repair_messages,
-                model=model,
-                reasoning_effort=_FINAL_REASONING_EFFORT,
-                thinking=_FINAL_THINKING,
+                model=final_model,
+                reasoning_effort=final_effort,
+                thinking=final_thinking,
                 max_tokens=config.REVIEW_FINAL_OUTPUT_MAX_TOKENS or None,
                 timeout_seconds=phase_timeout_seconds(
                     config.REVIEW_FINAL_OUTPUT_TIMEOUT_SECONDS,
@@ -756,7 +767,7 @@ def generate_review(
                     deadline=deadline,
                 ),
                 deadline=deadline,
-                trace_metadata=metadata,
+                trace_metadata=final_metadata,
                 response_format=dict(_JSON_OBJECT_RESPONSE),
             )
             _append_phase(phases, repaired.telemetry)
@@ -768,9 +779,9 @@ def generate_review(
                 phases,
                 error,
                 phase=_FINAL_REPAIR_PHASE,
-                model=model,
-                reasoning_effort=_FINAL_REASONING_EFFORT,
-                thinking=_FINAL_THINKING,
+                model=final_model,
+                reasoning_effort=final_effort,
+                thinking=final_thinking,
                 elapsed_seconds=time.monotonic() - repair_started,
             )
             finish_reasons[_FINAL_REPAIR_PHASE] = (

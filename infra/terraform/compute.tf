@@ -82,36 +82,41 @@ resource "aws_lambda_function" "pipeline" {
   publish           = true
 
   environment {
-    variables = {
+    variables = merge({
+      CONTEXT_S3_BUCKET           = aws_s3_bucket.artifacts.id
+      DEEPSEEK_TRACE_MODE         = var.provider_trace_mode
+      DEEPSEEK_TRACE_S3_BUCKET    = aws_s3_bucket.artifacts.id
+      MODEL_PROVIDER              = var.model_provider
+      DRY_RUN                     = tostring(var.pipeline_dry_run)
+      DYNAMODB_PIPELINE_TABLE     = aws_dynamodb_table.pipeline.name
+      GITHUB_APP_ID               = var.github_app_id
+      GITHUB_PRIVATE_KEY          = var.github_private_key
+      PERSIST_REVIEW_ARTIFACT     = "true"
+      PIPELINE_CAPACITY_POLICY    = var.pipeline_capacity_policy
+      PIPELINE_TTL_DAYS           = tostring(var.pipeline_ttl_days)
+      PUBLICATION_ARTIFACT_BUCKET = aws_s3_bucket.artifacts.id
+      RUN_ARTIFACT_BUCKET         = aws_s3_bucket.artifacts.id
+      RUN_ARTIFACT_PREFIX         = local.runtime_prefix
+      RUN_ARTIFACT_SCHEMA_VERSION = "1"
+      }, var.model_provider == "direct_openai" ? {
+      OPENAI_API_KEY        = var.direct_openai.api_key
+      DIRECT_OPENAI_PROFILE = var.direct_openai.profile
+      DIRECT_OPENAI_BUDGET  = var.direct_openai.budget
+      } : {
       ANALYZER_EFFORT                   = var.model_routing.analyzer_effort
       ANALYZER_MODEL                    = var.model_routing.analyzer_model
-      CONTEXT_S3_BUCKET                 = aws_s3_bucket.artifacts.id
       DEEPSEEK_API_KEY                  = var.deepseek_api_key
       DEEPSEEK_MODEL                    = var.model_routing.deep_model
       DEEPSEEK_REASONING_EFFORT         = var.model_routing.deep_effort
-      DEEPSEEK_TRACE_MODE               = var.provider_trace_mode
-      DEEPSEEK_TRACE_S3_BUCKET          = aws_s3_bucket.artifacts.id
       DEEPSEEK_TRANSPORT_MODEL_OVERRIDE = var.model_routing.transport_model_override
-      MODEL_PROVIDER                    = var.model_provider
       OPENROUTER_API_KEY                = var.openrouter_api_key
-      DRY_RUN                           = tostring(var.pipeline_dry_run)
-      DYNAMODB_PIPELINE_TABLE           = aws_dynamodb_table.pipeline.name
-      GITHUB_APP_ID                     = var.github_app_id
-      GITHUB_PRIVATE_KEY                = var.github_private_key
       LOW_REVIEW_EFFORT                 = var.model_routing.low_review_effort
       LOW_REVIEW_MODEL                  = var.model_routing.low_review_model
       NORMAL_REVIEW_EFFORT              = var.model_routing.normal_review_effort
       NORMAL_REVIEW_MODEL               = var.model_routing.normal_review_model
-      PERSIST_REVIEW_ARTIFACT           = "true"
       PFR_NORMAL_EFFORT                 = var.model_routing.normal_pfr_effort
       PFR_NORMAL_MODEL                  = var.model_routing.normal_pfr_model
-      PIPELINE_CAPACITY_POLICY          = var.pipeline_capacity_policy
-      PIPELINE_TTL_DAYS                 = tostring(var.pipeline_ttl_days)
-      PUBLICATION_ARTIFACT_BUCKET       = aws_s3_bucket.artifacts.id
-      RUN_ARTIFACT_BUCKET               = aws_s3_bucket.artifacts.id
-      RUN_ARTIFACT_PREFIX               = local.runtime_prefix
-      RUN_ARTIFACT_SCHEMA_VERSION       = "1"
-    }
+    })
   }
 
   depends_on = [
