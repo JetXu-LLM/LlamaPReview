@@ -52,6 +52,7 @@ class BudgetUnavailable(ValueError):
 
     provider_dispatch_not_started = True
     provider_call_control_failure = True
+    provider_budget_unavailable = True
 
 
 def digest(value: Any) -> str:

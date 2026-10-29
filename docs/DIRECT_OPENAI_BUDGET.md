@@ -71,6 +71,13 @@ must reserve its own maximum cost before HTTP. Refusal, incomplete/truncated
 output, unsupported output items, malformed usage and errors cannot become a
 clean review. Reasoning items are not exposed as review prose.
 
+Typed provider billing/quota rejection is terminal, not transient throttling.
+HTTP402 and documented direct-OpenAI billing/quota429 codes stop after that
+attempt; ordinary rate-limit429 retains bounded backoff. The original HTTP
+status is preserved and unknown usage stays reserved. No error-message keyword
+matching or body logging is used. Budget/admission failures stop the direct run;
+PFR/Final cannot convert them into a repair or additional paid stage.
+
 ## Atomic reservation and exact-once settlement
 
 Before each actual HTTP attempt, one DynamoDB transaction writes:

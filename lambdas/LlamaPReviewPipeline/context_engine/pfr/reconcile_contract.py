@@ -1041,6 +1041,8 @@ def _reconcile(
         DeepSeekTimeoutError,
         DeepSeekTransportError,
     ) as exc:
+        if getattr(exc, "provider_call_control_failure", False) is True:
+            raise
         if not model_phases:
             model_phases.append(
                 _pfr_model_phase(
@@ -1273,6 +1275,8 @@ def _reconcile(
         json.JSONDecodeError,
         PFRStructuredOutputError,
     ) as repair_error:
+        if getattr(repair_error, "provider_call_control_failure", False) is True:
+            raise
         if repair_call_attempted and not any(
             item.get("phase") == "pfr_reconcile_representation_repair"
             and item.get("round") == round_index

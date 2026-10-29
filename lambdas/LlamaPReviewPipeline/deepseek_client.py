@@ -70,6 +70,42 @@ class DeepSeekHTTPError(DeepSeekError):
         super().__init__(message)
 
 
+class ProviderBillingError(DeepSeekHTTPError):
+    """A typed provider billing/quota rejection, not transient throttling."""
+
+    provider_billing_failure = True
+    provider_call_control_failure = True
+
+
+_BILLING_ERROR_CODES = frozenset(
+    {
+        "insufficient_quota",
+        "credit_balance_exhausted",
+        "organization_spend_limit_exceeded",
+        "project_spend_limit_exceeded",
+        "organization_usage_limit_exceeded",
+    }
+)
+
+
+def _direct_billing_rejection(response) -> bool:
+    """Read bounded typed error fields only; never persist the provider body."""
+    body = getattr(response, "content", b"")
+    if not isinstance(body, bytes) or not body or len(body) > 65_536:
+        return False
+    try:
+        decoded = json.loads(body)
+    except (ValueError, UnicodeError):
+        return False
+    error = decoded.get("error") if isinstance(decoded, dict) else None
+    if not isinstance(error, dict):
+        return False
+    return any(
+        isinstance(error.get(field), str) and error[field] in _BILLING_ERROR_CODES
+        for field in ("code", "type")
+    )
+
+
 class DeepSeekResponseError(DeepSeekError):
     """The service response could not be decoded as a response object."""
 
@@ -106,6 +142,8 @@ class ProviderCallFenceError(DeepSeekError):
     def __init__(self, message: str, *, provider_call_record: Dict[str, Any]):
         self.provider_call_record = deepcopy(provider_call_record)
         self.telemetry = deepcopy(provider_call_record)
+        # Direct grant admission must not schedule a second paid phase attempt.
+        self.provider_budget_unavailable = provider_call_record.get("provider") == "direct_openai"
         super().__init__(message)
 
 
@@ -989,6 +1027,7 @@ class DeepSeekClient:
                 # dispatch on stream redelivery.
                 self._persist_provider_dispatch_fence(dispatch_fence)
                 started = time.monotonic()
+                billing_rejection = False
                 with _absolute_request_timeout(
                     request_timeout,
                     stage=f"provider.{trace_phase or 'unknown'}.http",
@@ -1009,8 +1048,15 @@ class DeepSeekClient:
                             raise DeepSeekResponseError(
                                 "Provider returned a non-JSON success response"
                             ) from exc
+                    elif self.provider == "direct_openai" and response.status_code == 429:
+                        billing_rejection = _direct_billing_rejection(response)
                 elapsed = time.monotonic() - started
                 dispatch_http_status = int(response.status_code)
+                if response.status_code == 402 or billing_rejection:
+                    raise ProviderBillingError(
+                        "Provider billing or quota authorization rejected the request",
+                        status_code=dispatch_http_status,
+                    )
                 if response.status_code == 200:
                     last_status = 200
                     if not isinstance(result, dict):

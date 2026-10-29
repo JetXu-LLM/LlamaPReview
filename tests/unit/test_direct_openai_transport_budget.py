@@ -98,6 +98,7 @@ class Response:
         self.status_code = code
         self.headers = {}
         self.body = response() if body is None else body
+        self.content = json.dumps(self.body).encode()
 
     def json(self):
         return deepcopy(self.body)
@@ -377,14 +378,17 @@ class DirectOpenAITransportBudgetTests(unittest.TestCase):
         no_post.assert_not_called()
 
     def test_retry_reserves_each_http_attempt_unknown_first_retained(self):
+        limited = Response(
+            429, {"error": {"type": "rate_limit_error", "code": "rate_limit_exceeded"}}
+        )
+        limited.headers["Retry-After"] = "1"
         with (
-            patch.object(
-                transport.requests, "post", side_effect=[Response(429), Response()]
-            ) as post,
-            patch.object(transport.time, "sleep"),
+            patch.object(transport.requests, "post", side_effect=[limited, Response()]) as post,
+            patch.object(transport.time, "sleep") as sleep,
         ):
             self.chat(max_retries=2)
         self.assertEqual(post.call_count, 2)
+        sleep.assert_called_once_with(1)
         records = self.records()
         self.assertEqual([r["transport_attempt_index"] for r in records], [1, 2])
         self.assertEqual(len({r["operation_id"] for r in records}), 1)
@@ -395,6 +399,89 @@ class DirectOpenAITransportBudgetTests(unittest.TestCase):
         self.assertEqual(
             self.counter()["charged_nanousd"], self.counter()["reserved_nanousd"] + 20_000
         )
+
+    def test_typed_quota_rejections_never_retry_or_refund_unknown_cost(self):
+        from lambdas.LlamaPReviewPipeline.errors import classify_failure
+
+        errors = [{"code": code} for code in transport._BILLING_ERROR_CODES]
+        errors.append({"type": "insufficient_quota"})
+        client = self.client()
+        for error in errors:
+            with self.subTest(error=error):
+                error["message"] = "private-response-canary-do-not-retain"
+                with (
+                    patch.object(
+                        transport.requests, "post", return_value=Response(429, {"error": error})
+                    ) as post,
+                    patch.object(transport.time, "sleep") as sleep,
+                    self.assertLogs(transport.logger, level="WARNING") as logs,
+                    self.assertRaises(transport.ProviderBillingError) as raised,
+                ):
+                    self.chat(client, max_retries=3)
+                post.assert_called_once()
+                sleep.assert_not_called()
+                self.assertEqual(raised.exception.status_code, 429)
+                self.assertTrue(raised.exception.provider_call_control_failure)
+                self.assertFalse(classify_failure(raised.exception, stage="context").retryable)
+                record = self.records()[-1]
+                self.assertEqual(record["http_status"], 429)
+                self.assertEqual(record["budget"]["state"], "reserved")
+                self.assertEqual(
+                    self.counter()["charged_nanousd"], self.counter()["reserved_nanousd"]
+                )
+                self.assertNotIn(
+                    "private-response-canary",
+                    json.dumps(self.records(), default=str)
+                    + str(raised.exception)
+                    + str(logs.output),
+                )
+
+    def test_error_decode_is_bounded_typed_and_never_matches_message_words(self):
+        for body in (
+            b"not-json",
+            b"[]",
+            b'{"error":"insufficient_quota"}',
+            b'{"error":{"message":"insufficient_quota credit_balance_exhausted"}}',
+            b'{"error":{"code":[]}}',
+            json.dumps({"error": {"code": "insufficient_quota", "message": "x" * 65_536}}).encode(),
+        ):
+            with self.subTest(body_size=len(body)):
+                reply = Response(429)
+                reply.content = body
+                self.assertFalse(transport._direct_billing_rejection(reply))
+        with (
+            patch.object(
+                transport.requests,
+                "post",
+                side_effect=[Response(429, {"error": {"message": "quota"}}), Response()],
+            ) as post,
+            patch.object(transport.time, "sleep"),
+        ):
+            self.chat(max_retries=2)
+        self.assertEqual(post.call_count, 2)
+
+    def test_payment_required_is_terminal_for_legacy_and_direct_transport(self):
+        from lambdas.LlamaPReviewPipeline.errors import classify_failure
+
+        for provider in ("deepseek", "direct_openai"):
+            client = (
+                self.client()
+                if provider == "direct_openai"
+                else transport.DeepSeekClient(
+                    api_key="synthetic", provider="deepseek", transport_model_override=""
+                )
+            )
+            with (
+                self.subTest(provider=provider),
+                patch.object(transport.requests, "post", return_value=Response(402)) as post,
+                patch.object(transport.time, "sleep") as sleep,
+                self.assertRaises(transport.ProviderBillingError) as raised,
+            ):
+                self.chat(client, max_retries=3)
+            post.assert_called_once()
+            sleep.assert_not_called()
+            self.assertEqual(raised.exception.status_code, 402)
+            self.assertFalse(classify_failure(raised.exception, stage="context").retryable)
 
     def test_unresolved_dispatch_redelivery_never_reposts(self):
         def fail_after_fence(*args, **kwargs):

@@ -24,6 +24,7 @@ class EvaluationPlanTests(unittest.TestCase):
     def test_example_is_bounded_but_never_authorizes_execution(self):
         receipt = validator.validate_plan(self.plan)
         self.assertEqual(receipt["planned_call_ceiling"], 141)
+        self.assertIsNone(receipt["http_attempt_ceiling"])
         self.assertEqual(receipt["unresolved_case_placeholders"], 12)
         self.assertEqual(receipt["provider_calls_made"], 0)
         self.assertEqual(receipt["github_product_writes"], 0)
@@ -105,7 +106,7 @@ class EvaluationPlanTests(unittest.TestCase):
         self.assert_invalid(self.plan, "ceiling")
 
     def test_phase_calls_and_tiers_preserve_existing_path(self):
-        self.plan["batches"][0]["max_calls_per_case_candidate"] = 2
+        self.plan["batches"][0]["max_calls_per_case_candidate"] = 3
         self.assert_invalid(self.plan, "phase call cap")
         self.plan = validator.load_plan()
         self.plan["batches"][0]["tiers"] = ["low"]

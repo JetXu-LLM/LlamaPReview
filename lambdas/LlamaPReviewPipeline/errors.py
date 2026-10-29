@@ -187,7 +187,7 @@ class GitHubAuthConfigurationError(TerminalPipelineFailure):
 
 
 _RETRYABLE_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
-_TERMINAL_HTTP_STATUSES = {400, 401, 403, 404, 405, 409, 410, 422}
+_TERMINAL_HTTP_STATUSES = {400, 401, 402, 403, 404, 405, 409, 410, 422}
 _RETRYABLE_SERVICE_CODES = {
     "InternalServerError",
     "LimitExceededException",
@@ -306,6 +306,12 @@ def _rate_limit_headers(exc: BaseException) -> dict[str, Any]:
 def classify_failure(exc: BaseException, *, stage: str) -> FailureClassification:
     """Classify by typed signals and status codes, never error-message keywords."""
     explicit_stage = str(getattr(exc, "stage", "") or stage)
+    for signal, kind in (
+        ("provider_billing_failure", "provider_billing_rejected"),
+        ("provider_budget_unavailable", "provider_budget_unavailable"),
+    ):
+        if getattr(exc, signal, False) is True:
+            return FailureClassification(kind, False, explicit_stage, str(exc))
     # These explicit typed signals are owned by the provider transport boundary
     # without making the general failure module import the HTTP client.
     if getattr(exc, "provider_dispatch_outcome_unknown", False) is True:

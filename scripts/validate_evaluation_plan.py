@@ -23,9 +23,9 @@ MODEL_EFFORTS = {
     "gpt-6.1-terra": {"low", "medium", "high", "xhigh", "max"},
 }
 PHASE_CALL_CAPS = {
-    "route": 1,
+    "route": 2,
     "pfr_plan": 1,
-    "pfr_reconcile": 2,
+    "pfr_reconcile": 3,
     "deep": 1,
     "final": 1,
     "correction": 1,
@@ -277,6 +277,7 @@ def validate_plan(plan):
         "github_product_writes": 0,
         "aws_product_writes": 0,
         "planned_call_ceiling": planned_calls,
+        "http_attempt_ceiling": None,
         "batch_call_ceilings": batch_bounds,
         "unresolved_case_placeholders": unresolved,
         "source_binding_complete": all(

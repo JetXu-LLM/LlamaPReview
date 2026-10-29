@@ -27,11 +27,16 @@ Coverage tags organize evaluation; they are not production routing rules.
 
 The example's token, call, and wall-time ceilings are illustrative planning
 bounds, not measured needs or new production limits. The sum includes all
-listed conditional comparisons and is a worst-case planning count, not a
+listed conditional comparisons and is a listed-cell planning count, not a
 command to run a Cartesian product. `max_repeats` bounds separate experimental
-observations, not automatic transport retries. The proposed phase-call caps
-preserve one Route/Plan/Deep/Final/correction and at most two Reconcile calls per
-case/candidate observation. They do not increase the runtime's existing caps.
+observations, not automatic transport retries. The example lists main stage
+cells; its count is **not an HTTP-attempt or complete-pipeline ceiling**.
+Existing Route may adjudicate once; PFR may use two Reconcile rounds plus one
+shared representation repair. A normal/high full path can therefore require
+up to nine logical calls including Final correction, before transport retries.
+The validator permits these existing logical caps but cannot authorize or
+enforce an execution budget (`http_attempt_ceiling=null`). A real runner must
+reserve every actual attempt under a separately approved hard bound.
 
 Materialize future case inputs only from permitted public repositories. Bind
 each public snapshot to a canonical repository URL, full head SHA, and input
