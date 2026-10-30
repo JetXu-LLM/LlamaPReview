@@ -11,6 +11,8 @@ do not appear as project versions.
 
 ## Unreleased
 
+- Add a separate default-off public-template 30m cache option for exact Route/continuation-Plan constants and Deep’s trusted literal prefix, preserving PR isolation, original text and cold-write accounting.
+
 - Add default-off, profile-bound same-run Reconcile prefix caching with exact text preservation, isolated scope, cold-write reservations and strict original-fence cache accounting.
 
 ### Fixed

@@ -1086,6 +1086,7 @@ def begin_provider_call_dispatch(
     ):
         raise ValueError("provider dispatch fence call identity is invalid")
     budget = None
+    cache_mode = None
     if record.get("provider") == "direct_openai":
         from .direct_openai_budget import load_policy, reservation
         policy = load_policy(profile_sha256=record.get("profile_sha256"))
@@ -1107,14 +1108,18 @@ def begin_provider_call_dispatch(
             )
             request = direct_request_context["request"]
             if (receipt is None or receipt != proof or profile.sha256 != record.get("profile_sha256")
-                    or profile.version != record.get("profile_version") or record.get("stage") != "pfr_reconcile"
+                    or profile.version != record.get("profile_version")
+                    or record.get("stage") != receipt.get("stage", "pfr_reconcile")
                     or request.get("model") != record.get("billed_model")
                     or request.get("reasoning") != {"effort": record.get("reasoning_effort")}
-                    or type(record.get("call_index")) is not int or record["call_index"] != proof.get("round")):
+                    or ("round" in receipt and (type(record.get("call_index")) is not int
+                        or record["call_index"] != receipt["round"]))):
                 raise ArtifactIntegrityError("Direct cache proof differs from actual wire/profile")
             if direct_request_context["request"].get("max_output_tokens") != supplied.get("max_output_tokens"):
                 raise ArtifactIntegrityError("Direct cache output cap differs from actual wire")
-            cache_mode = CACHE_RECONCILE
+            cache_mode = receipt.get("mode", CACHE_RECONCILE)
+            if cache_mode != CACHE_RECONCILE and direct_request_context["scope"] != {}:
+                raise ArtifactIntegrityError("Public static cache must not carry tenant scope")
         elif "cache_request" in record:
             raise ArtifactIntegrityError("Direct cache requires actual wire proof")
         budget = reservation(policy, model=record.get("billed_model"),
@@ -1132,7 +1137,7 @@ def begin_provider_call_dispatch(
     )
     if not current or str(current.get("status") or "") != str(expected_status):
         return False
-    if direct_request_context is not None:
+    if direct_request_context is not None and cache_mode == "same_run_30m":
         scope = direct_request_context["scope"]
         if (scope.get("repo") != repo or scope.get("pr_number") != pr_number
                 or any(scope.get(key) != current.get(key) for key in ("installation_id", "head_sha", "run_id"))

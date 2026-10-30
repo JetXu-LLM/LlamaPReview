@@ -14,7 +14,7 @@ import re
 import time
 from typing import Any, Mapping
 
-from .direct_openai import MAX_INPUT_TOKENS, CACHE_OFF, CACHE_RECONCILE
+from .direct_openai import MAX_INPUT_TOKENS, CACHE_OFF, CACHE_WRITE_MODES
 
 PRICING_VERSION = "openai-standard-text-2026-10-29"
 # Nano-USD per token, standard non-regional, no tools. The long-context rates
@@ -127,7 +127,7 @@ def reservation(
     policy: Mapping[str, Any], *, model: str, max_output_tokens: int, cache_mode: str = CACHE_OFF
 ) -> dict[str, Any]:
     if (
-        cache_mode not in (CACHE_OFF, CACHE_RECONCILE)
+        cache_mode not in ({CACHE_OFF} | CACHE_WRITE_MODES)
         or model not in PRICES
         or type(max_output_tokens) is not int
         or not 1 <= max_output_tokens <= 128_000
@@ -137,7 +137,7 @@ def reservation(
     # Both approved models share the documented context cap. Reserving that
     # full input limit (even for tiny requests) is conservative without a paid
     # token-count call or an unproven tokenizer-overhead assumption.
-    input_price = price["write_30m"] if cache_mode == CACHE_RECONCILE else price["input"]
+    input_price = price["write_30m"] if cache_mode in CACHE_WRITE_MODES else price["input"]
     amount = MAX_INPUT_TOKENS * input_price * 2 + max_output_tokens * price["output"] * 3 // 2
     key = "_OPENAI_GRANT_" + digest(
         {key: policy[key] for key in ("cycle_id", "organization_id", "project_id")}
@@ -156,7 +156,7 @@ def reservation(
         "max_output_tokens": max_output_tokens,
         "reserved_nanousd": amount,
         "cache_mode": cache_mode,
-        **({"cache_ttl": "30m"} if cache_mode == CACHE_RECONCILE else {}),
+        **({"cache_ttl": "30m"} if cache_mode in CACHE_WRITE_MODES else {}),
     }
 
 
@@ -179,7 +179,7 @@ def cache_usage_parts(usage, cache_mode):
     Reused on durable Decimal records. No coercion, inferred TTL or missing-zero
     default may turn contradictory provider accounting into a refund.
     """
-    if not isinstance(usage, Mapping) or cache_mode not in (CACHE_OFF, CACHE_RECONCILE):
+    if not isinstance(usage, Mapping) or cache_mode not in ({CACHE_OFF} | CACHE_WRITE_MODES):
         return None
     details, output_details = usage.get("input_tokens_details"), usage.get("output_tokens_details")
     if not isinstance(details, Mapping) or not isinstance(output_details, Mapping):
@@ -227,7 +227,7 @@ def actual_cost(record: Mapping[str, Any], original: Mapping[str, Any]) -> int |
     if record.get("response_model") != record.get("billed_model"):
         return None
     mode = original.get("cache_mode")
-    if mode == CACHE_RECONCILE and original.get("cache_ttl") != "30m":
+    if mode in CACHE_WRITE_MODES and original.get("cache_ttl") != "30m":
         return None
     usage = record.get("usage")
     parts = cache_usage_parts(usage, mode)

@@ -53,6 +53,7 @@ class DirectOpenAIProfile:
     sha256: str
     entries: tuple[tuple[str, str, str, str], ...]
     reconcile_cache: str = "off"
+    static_prefix_cache: str = "off"
 
     def select(self, stage: str, tier: str = "") -> StageModelSelection:
         for entry_stage, entry_tier, model, effort in self.entries:
@@ -92,11 +93,14 @@ def parse_direct_openai_profile(raw: str) -> DirectOpenAIProfile:
     value = json.loads(raw, object_pairs_hook=unique_object)
     if (not isinstance(value, dict)
             or not {"version", "route", "tiers"} <= set(value)
-            or set(value) - {"version", "route", "tiers", "reconcile_cache"}):
+            or set(value) - {"version", "route", "tiers", "reconcile_cache", "static_prefix_cache"}):
         raise ValueError("Direct OpenAI profile fields are missing or unsupported")
     cache = value.get("reconcile_cache", "off")
     if cache not in ("off", "same_run_30m"):
         raise ValueError("Direct OpenAI Reconcile cache mode is unsupported")
+    static_cache = value.get("static_prefix_cache", "off")
+    if static_cache not in ("off", "public_static_30m_v1"):
+        raise ValueError("Direct OpenAI public static cache mode is unsupported")
     version = value["version"]
     if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", version):
         raise ValueError("Direct OpenAI profile version is invalid")
@@ -124,7 +128,7 @@ def parse_direct_openai_profile(raw: str) -> DirectOpenAIProfile:
             add(stage, tier, cells[stage])
     canonical = json.dumps(value, sort_keys=True, separators=(",", ":"))
     return DirectOpenAIProfile(
-        version, hashlib.sha256(canonical.encode("utf-8")).hexdigest(), tuple(entries), cache
+        version, hashlib.sha256(canonical.encode("utf-8")).hexdigest(), tuple(entries), cache, static_cache
     )
 
 

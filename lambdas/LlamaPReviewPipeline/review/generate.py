@@ -61,6 +61,7 @@ from .presentation import (
 from .prompts import (
     REVIEW_SYSTEM_PROMPT,
     render_deep_judgment_prompt,
+    split_deep_judgment_prompt,
     render_final_presentation_prompt,
 )
 
@@ -602,6 +603,8 @@ def generate_review(
             active_client,
             phase="deep_judgment",
             messages=deep_messages,
+            **({"public_static_prefix": split_deep_judgment_prompt(deep_prompt)}
+               if deep_selection and config.DIRECT_OPENAI_PROFILE.static_prefix_cache != "off" else {}),
             model=model,
             reasoning_effort=reasoning_effort,
             thinking=True,

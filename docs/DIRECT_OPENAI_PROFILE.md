@@ -33,6 +33,14 @@ requires separate qualification and a matching approved budget policy. The
 shipped example remains unchanged and cache-off. Missing-field profiles retain
 their original digest and request bytes. Explicit `off` also uses the original
 cache-off wire, but, as with any explicit profile-field change, has its own digest.
+An independent optional `static_prefix_cache` field accepts only `off` (absent
+by default) or `public_static_30m_v1`. It permits only the versioned public
+Route developer constant (also used by continuation Plan), and Deep's literal
+public template prefix before its first PR field. It never shares PR content,
+changes the selected models, or enables Final/representation-repair caching.
+Absent profiles keep the old digest and wire; explicit opt-in requires a newly
+authorized full profile digest and separate qualification.
+
 See [the bounded cache contract](DIRECT_OPENAI_BUDGET.md#opt-in-same-run-reconcile-prefix).
 
 The JSON parser rejects duplicate keys, omitted or extra cells, aliases,

@@ -122,8 +122,8 @@ ones or prove shared credits are unspent.
 
 `reconcile_cache: "same_run_30m"` in the strict profile enables only the initial
 Reconcile calls in existing rounds 1 and 2. It does not select a model, add a
-round/call, change a prompt, or enable a deployment. Route, Plan, Deep, Final and
-representation corrections remain cache-off. The approved profile digest must
+round/call, change a prompt, or enable a deployment. This option alone leaves
+Route, Plan, Deep, Final and representation corrections cache-off. The approved profile digest must
 change; old qualification approvals are not authority for this new wire.
 
 The trusted Reconcile builder keeps its own prefix through its generated
@@ -159,6 +159,41 @@ request is permitted. Thirty minutes is a minimum retention, not a deletion
 promise. A missing second round or cache miss can cost more than cache-off;
 actual first-write plus second-read usage and quality/latency must be measured
 under separately approved qualification before claiming savings.
+
+## Opt-in public static templates
+
+`static_prefix_cache: "public_static_30m_v1"` is an independent, default-off
+profile option. Its versioned allowlist contains only already-public product
+constants: the exact Route developer message (including Route adjudication and
+four-message continuation Plan), and the exact Deep developer plus literal user
+prefix before the first `pr_details` field. The latter boundary comes from the
+code-owned format template, never a tag search or empirical common-prefix cut.
+Canonical role/order/text/options and call counts are unchanged. Standalone
+Plan, unknown/custom templates, Final and representation corrections stay off.
+
+The single explicit breakpoint can share **only these public constants** across
+runs/repositories/installations in the verified OpenAI organization/project.
+No PR, repository, tenant, head, run, evidence, or customer-specific byte occurs
+before this public boundary. Reconcile's PR-bearing prefix remains in its
+separate same-run namespace and retains its scope/round checks.
+
+The opaque public key binds strategy/version, public-prefix kind/hash, verified
+organization/project, actual model/effort and text format. It deliberately does
+not include tenant identities or the whole profile digest: unrelated stage edits
+do not change an identical public prefix. This reuse key is **not authorization**;
+each dispatch still binds the entire approved profile, operation, current owner,
+head/run and budget. Transport and the original durable fence independently
+recompute the public proof from the actual wire. No extra identity read, SDK
+request, credentials, counter, implicit suffix write or prewarming is added.
+
+The same original-fence cold-write reservation and strict raw partition checks
+apply. At 8,192 output tokens Terra reserves $2.68644 and Luna $0.268644; 12k and
+64k bounds are unchanged from the 30m table above. Unknown usage keeps its full
+hold; late settlement uses the original price/cycle even after profile changes.
+The provider's 1,024-token minimum is not proved by character/byte counts; short
+prefixes may not cache and are never padded. No real cache hit, latency, quality,
+monthly saving or production enablement is established by offline tests. Live
+qualification requires separate explicit budget/run authority.
 
 ## Price evidence and qualification limits
 

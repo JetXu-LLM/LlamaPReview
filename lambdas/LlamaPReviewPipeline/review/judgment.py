@@ -260,6 +260,7 @@ def run_model_phase(
     trace_metadata: Optional[Mapping[str, Any]],
     response_format: Optional[Dict[str, str]] = None,
     attempt: int = 1,
+    public_static_prefix=None,
 ) -> ModelPhaseResult:
     """Run and validate one model phase without interpreting its substance."""
 
@@ -281,6 +282,8 @@ def run_model_phase(
         }
         if response_format is not None:
             call_options["response_format"] = response_format
+        if public_static_prefix is not None:
+            call_options["public_static_prefix"] = public_static_prefix
         response = _chat_with_wall_timeout(
             client,
             phase,

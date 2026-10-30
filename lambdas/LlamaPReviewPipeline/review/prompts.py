@@ -7,6 +7,7 @@ Deterministic code owns public identities, safety, validation, and publication.
 from __future__ import annotations
 
 import json
+from string import Formatter
 from typing import Any
 
 
@@ -542,6 +543,26 @@ def _render_untrusted(value: Any, fallback: str) -> str:
             separators=(",", ":"),
         )
     return fallback
+
+
+def deep_judgment_public_prefix() -> str:
+    """Derive the literal boundary from the code template, never rendered PR text."""
+    literals = []
+    for literal, field, spec, conversion in Formatter().parse(DEEP_JUDGMENT_PROMPT):
+        literals.append(literal)
+        if field is not None:
+            return "".join(literals) if field == "pr_details" and not spec and conversion is None else ""
+    return ""
+
+
+def split_deep_judgment_prompt(prompt: str):
+    """Keep canonical strings intact while exposing the trusted builder boundary."""
+    from ..direct_openai import PublicStaticPrefix
+
+    prefix = deep_judgment_public_prefix()
+    if not prefix or not prompt.startswith(prefix) or len(prompt) <= len(prefix):
+        return None
+    return PublicStaticPrefix(prefix, prompt[len(prefix):])
 
 
 def render_deep_judgment_prompt(

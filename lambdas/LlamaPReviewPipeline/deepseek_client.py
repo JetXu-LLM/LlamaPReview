@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional
 from . import config
 from .deadline import Deadline, DeadlineExceeded
 from .provider_model_routing import resolve_provider_model, parse_direct_openai_profile
-from .direct_openai import build_request as build_direct_request, normalize_response as normalize_direct_response, apply_reconcile_cache, request_cache_receipt, CACHE_OFF, CACHE_RECONCILE, valid_cache_scope
+from .direct_openai import build_request as build_direct_request, normalize_response as normalize_direct_response, apply_reconcile_cache, apply_public_static_cache, request_cache_receipt, CACHE_OFF, CACHE_RECONCILE, valid_cache_scope
 from .direct_openai_budget import load_policy as load_budget_policy, reservation as budget_reservation, actual_cost as direct_actual_cost, cache_usage_parts
 from .provider_usage import normalize_openrouter_usage, validate_complete_token_usage
 
@@ -902,6 +902,7 @@ class DeepSeekClient:
         timeout_seconds: Optional[float] = None,
         deadline: Optional[Deadline] = None,
         reconcile_prefix=None,
+        public_static_prefix=None,
         trace_phase: Optional[str] = None,
         trace_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -922,6 +923,7 @@ class DeepSeekClient:
             timeout_seconds=timeout_seconds,
             deadline=deadline,
             reconcile_prefix=reconcile_prefix,
+            public_static_prefix=public_static_prefix,
             trace_phase=trace_phase,
             trace_metadata=trace_metadata,
         )
@@ -934,6 +936,7 @@ class DeepSeekClient:
         timeout_seconds: Optional[float] = None,
         deadline: Optional[Deadline] = None,
         reconcile_prefix=None,
+        public_static_prefix=None,
         trace_phase: Optional[str] = None,
         trace_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -985,12 +988,16 @@ class DeepSeekClient:
                 phase=canonical_provider_phase(trace_phase), round_index=metadata.get("round"),
                 scope=scope, policy=budget_policy,
             )
+            payload = apply_public_static_cache(
+                payload, public_static_prefix, profile=self.direct_profile,
+                phase=canonical_provider_phase(trace_phase), policy=budget_policy,
+            )
             cache_receipt = request_cache_receipt(
                 payload, profile=self.direct_profile, phase=canonical_provider_phase(trace_phase),
                 round_index=metadata.get("round"), tier=metadata["tier"], scope=scope, policy=budget_policy,
             )
             if cache_receipt is not None:
-                direct_context = {"request": deepcopy(payload), "scope": dict(scope)}
+                direct_context = {"request": deepcopy(payload), "scope": dict(scope) if "round" in cache_receipt else {}}
             headers["OpenAI-Organization"] = budget_policy["organization_id"]
             headers["OpenAI-Project"] = budget_policy["project_id"]
         if self.provider == "openrouter":
@@ -1031,7 +1038,7 @@ class DeepSeekClient:
             trace_metadata=trace_metadata,
         )
         if cache_receipt is not None:
-            if operation["call_index"] != cache_receipt["round"]:
+            if "round" in cache_receipt and operation["call_index"] != cache_receipt["round"]:
                 raise ValueError("Cache round differs from canonical operation ordinal")
             operation["cache_request"] = cache_receipt
         transport_attempt_count = 0
@@ -1059,7 +1066,7 @@ class DeepSeekClient:
                     evidence_payload["_llamapreview_budget"] = budget_reservation(
                         budget_policy, model=model_selection.billed_model,
                         max_output_tokens=transport_payload["max_output_tokens"],
-                        cache_mode=CACHE_RECONCILE if cache_receipt is not None else CACHE_OFF,
+                        cache_mode=cache_receipt.get("mode", CACHE_RECONCILE) if cache_receipt is not None else CACHE_OFF,
                     )
                 transport_attempt_count += 1
                 dispatch_index = transport_attempt_count

@@ -73,6 +73,8 @@ def build_request(
 
 CACHE_OFF = "explicit_no_breakpoints"
 CACHE_RECONCILE = "same_run_30m"
+CACHE_PUBLIC_STATIC = "public_static_30m_v1"
+CACHE_WRITE_MODES = frozenset({CACHE_RECONCILE, CACHE_PUBLIC_STATIC})
 
 
 @dataclass(frozen=True)
@@ -170,6 +172,129 @@ def apply_reconcile_cache(payload, descriptor, *, profile, phase, round_index, s
     return result
 
 
+@dataclass(frozen=True)
+class PublicStaticPrefix:
+    """Deep's template-owned boundary; neither field modifies canonical messages."""
+
+    prefix: str
+    suffix: str
+
+
+def _public_static_template(phase):
+    # Versioned allowlist of already public application constants. A template
+    # edit is not implicitly qualified for sharing by this strategy.
+    if phase in {"route", "route_adjudication", "pfr_plan"}:
+        from .review.analyzer import PR_ANALYZER_SYSTEM_PROMPT
+        developer = PR_ANALYZER_SYSTEM_PROMPT
+        if hashlib.sha256(developer.encode()).hexdigest() != "bc414821edb519837157c07e37a1154618f7a9de58d9c61d6a3e2bd9ae1b03c4":
+            return None
+        roles = ["developer", "user", "assistant", "user"] if phase == "pfr_plan" else ["developer", "user"]
+        return "router_developer_v1", developer, "", roles, "pfr_plan" if phase == "pfr_plan" else "route"
+    if phase in {"deep_judgment", "deep_thinking"}:
+        from .review.prompts import REVIEW_SYSTEM_PROMPT, deep_judgment_public_prefix
+        developer, prefix = REVIEW_SYSTEM_PROMPT, deep_judgment_public_prefix()
+        if (hashlib.sha256(developer.encode()).hexdigest() != "dce259a76570692b44847103ebae7421f28e2a79e951bdea0d4bf8ed9035e3c6"
+                or hashlib.sha256(prefix.encode()).hexdigest() != "a41794b9e8dee4f365ddd4d9c9caf95a8dd237b4652a7134083d7ac46af4a4d5"):
+            return None
+        return "deep_user_v1", developer, prefix, ["developer", "user"], "deep"
+    return None
+
+
+def _public_static_key(payload, policy, template):
+    kind, developer, prefix, _roles, _stage = template
+    before_marker = [{"role": "developer", "content": developer}]
+    if prefix:
+        before_marker.append({"role": "user", "content": prefix})
+    prefix_hash = _digest(before_marker)
+    key = _digest({
+        "strategy": CACHE_PUBLIC_STATIC, "prefix_kind": kind,
+        "prefix_sha256": prefix_hash, "organization_id": policy["organization_id"],
+        "project_id": policy["project_id"], "model": payload["model"],
+        "effort": payload["reasoning"]["effort"], "text": payload.get("text"),
+    })
+    return key, prefix_hash
+
+
+def apply_public_static_cache(payload, descriptor, *, profile, phase, policy):
+    """Share only exact public constants; no tenant scope or rendered-tag search."""
+    if profile.static_prefix_cache == "off":
+        return payload
+    template = _public_static_template(phase)
+    if template is None:
+        return payload
+    kind, developer, prefix, roles, _stage = template
+    inputs = payload.get("input")
+    if (not isinstance(inputs, list) or len(inputs) != len(roles)
+            or any(not isinstance(m, dict) or set(m) != {"role", "content"}
+                   or m["role"] != role or not isinstance(m["content"], str)
+                   for m, role in zip(inputs, roles))
+            or inputs[0]["content"] != developer):
+        return payload
+    result = deepcopy(payload)
+    if kind == "deep_user_v1":
+        if descriptor is None:
+            return payload
+        if (type(descriptor) is not PublicStaticPrefix or descriptor.prefix != prefix
+                or not isinstance(descriptor.suffix, str) or not descriptor.suffix
+                or descriptor.prefix + descriptor.suffix != inputs[1]["content"]):
+            raise ValueError("Public Deep boundary differs from its exact template/text")
+        result["input"][1]["content"] = [
+            {"type": "input_text", "text": prefix, "prompt_cache_breakpoint": {"mode": "explicit"}},
+            {"type": "input_text", "text": descriptor.suffix},
+        ]
+    else:
+        if descriptor is not None:
+            raise ValueError("Public Deep descriptor supplied outside Deep")
+        result["input"][0]["content"] = [
+            {"type": "input_text", "text": developer, "prompt_cache_breakpoint": {"mode": "explicit"}}
+        ]
+    result["prompt_cache_options"] = {"mode": "explicit", "ttl": "30m"}
+    result["prompt_cache_key"] = _public_static_key(result, policy, template)[0]
+    return result
+
+
+def _public_static_receipt(payload, *, profile, phase, tier, policy):
+    template = _public_static_template(phase)
+    if profile.static_prefix_cache != CACHE_PUBLIC_STATIC or template is None:
+        raise ValueError("Public static cache is not approved for this phase/template")
+    kind, developer, prefix, roles, stage = template
+    selected = profile.select(stage, tier)
+    inputs = payload.get("input")
+    if (not isinstance(inputs, list) or len(inputs) != len(roles)
+            or any(not isinstance(m, dict) or set(m) != {"role", "content"}
+                   or m["role"] != role for m, role in zip(inputs, roles))
+            or payload.get("model") != selected.model
+            or payload.get("reasoning") != {"effort": selected.reasoning_effort}
+            or policy["profile_sha256"] != profile.sha256):
+        raise ValueError("Public cache wire differs from approved profile/shape")
+    index = 1 if prefix else 0
+    blocks = inputs[index]["content"]
+    if (not isinstance(blocks, list) or len(blocks) != (2 if prefix else 1)
+            or not all(isinstance(b, dict) for b in blocks)
+            or set(blocks[0]) != {"type", "text", "prompt_cache_breakpoint"}
+            or blocks[0].get("type") != "input_text"
+            or blocks[0].get("text") != (prefix or developer)
+            or blocks[0].get("prompt_cache_breakpoint") != {"mode": "explicit"}
+            or (prefix and (set(blocks[1]) != {"type", "text"}
+                            or blocks[1].get("type") != "input_text"
+                            or not isinstance(blocks[1].get("text"), str) or not blocks[1]["text"]))):
+        raise ValueError("Only the exact public-template breakpoint is supported")
+    flattened = deepcopy(inputs)
+    flattened[index]["content"] = "".join(b["text"] for b in blocks)
+    if flattened[0]["content"] != developer:
+        raise ValueError("Public cache developer differs from its exact public constant")
+    canonical = build_request(flattened, model=selected.model, effort=selected.reasoning_effort,
+                              max_tokens=payload.get("max_output_tokens"),
+                              response_format=(payload.get("text") or {}).get("format"))
+    key, prefix_hash = _public_static_key(payload, policy, template)
+    expected = {**canonical, "input": inputs, "prompt_cache_options": {"mode": "explicit", "ttl": "30m"},
+                "prompt_cache_key": key}
+    if payload != expected:
+        raise ValueError("Public cache wire contains unsupported fields or key")
+    return {"mode": CACHE_PUBLIC_STATIC, "stage": stage, "prefix_kind": kind,
+            "wire_sha256": _digest(payload), "key_sha256": key, "prefix_sha256": prefix_hash}
+
+
 def request_cache_receipt(payload, *, profile, phase, round_index, tier, scope, policy):
     """Independently derive the mode from approved profile AND actual wire.
 
@@ -187,6 +312,8 @@ def request_cache_receipt(payload, *, profile, phase, round_index, tier, scope, 
         )
     ):
         return None
+    if phase != "pfr_reconcile":
+        return _public_static_receipt(payload, profile=profile, phase=phase, tier=tier, policy=policy)
     if (
         profile.reconcile_cache != CACHE_RECONCILE
         or phase != "pfr_reconcile"
