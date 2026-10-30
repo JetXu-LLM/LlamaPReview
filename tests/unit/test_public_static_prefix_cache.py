@@ -267,6 +267,24 @@ class PublicStaticPrefixCacheTests(unittest.TestCase):
             self.assertNotIn("round", record["cache_request"])
             self.assertNotIn("untrusted PR", json.dumps(record, default=str))
 
+    def test_route_16k_reaches_wire_and_each_attempt_reservation(self):
+        client, wires = self.client(), []
+        expected = reservation(self.policy, model="gpt-6-luna", max_output_tokens=16384, cache_mode=CACHE_PUBLIC_STATIC)["reserved_nanousd"]
+
+        def post(_url, **kwargs):
+            wires.append(deepcopy(kwargs["json"]))
+            self.assertEqual(self.counter()["reserved_nanousd"], expected)
+            return base.Response(body=base.response(usage=usage(write=60 if len(wires) == 1 else 0, cache=0 if len(wires) == 1 else 60)))
+
+        with patch.object(transport.requests, "post", side_effect=post):
+            for phase in ("route", "route_adjudication"):
+                client.chat(self.messages, max_tokens=16384, max_retries=1,
+                            trace_phase=phase, trace_metadata=self.metadata,
+                            response_format={"type": "json_object"})
+        self.assertEqual([wire["max_output_tokens"] for wire in wires], [16384, 16384])
+        self.assertEqual([r["budget"]["max_output_tokens"] for r in self.records()], [16384, 16384])
+        self.assertEqual(self.counter()["reserved_nanousd"], 0)
+
     def test_review_client_uses_trusted_deep_builder_and_final_stays_off(self):
         from lambdas.LlamaPReviewPipeline.review.generate import generate_review
         from tests.unit.test_review_generation_v1 import (
