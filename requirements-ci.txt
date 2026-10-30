@@ -10,6 +10,14 @@ idna==3.18
 requests==2.33.0
 urllib3==2.8.0
 
+# The lazy-object cache-scope regression exercises the real, Layer-pinned
+# PyGithub object offline. Its exact additional dependency pins keep this test
+# runnable in the clean CI environment; no GitHub request is made.
+PyGithub==2.9.1
+PyJWT[crypto]==2.15.1
+PyNaCl==1.6.2
+typing-extensions==4.16.0
+
 # Offline DynamoDB transaction contract only; never included in Lambda assets.
 # Moto intercepts AWS in-process. Exact pins keep the real SDK serializer path
 # reproducible without any account/credentials or network calls.
