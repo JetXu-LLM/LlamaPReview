@@ -2,8 +2,8 @@
 # llama-github==0.4.6 is supplied as a separately verified wheel and installed
 # with --no-deps. Regenerate all hashes together; never hand-upgrade one line.
 
-certifi==2026.6.17 \
-    --hash=sha256:2227dcbaafe0d2f59279d1762ddddc37783ed4354594f194ffc31d20f41fc3db
+certifi==2026.10.19 \
+    --hash=sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b
 cffi==2.1.0 \
     --hash=sha256:1e9f50d192a3e525b15a75ab5114e442d83d657b7ec29182a991bc9a88fd3a66
 charset-normalizer==3.4.9 \

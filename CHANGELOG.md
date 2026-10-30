@@ -9,6 +9,33 @@ GitHub release notes may provide more detail, but they do not replace this
 maintained summary. Numeric AWS Lambda versions are deployment identities and
 do not appear as project versions.
 
+## Unreleased
+
+- Add a separate default-off public-template 30m cache option for exact Route/continuation-Plan constants and Deep’s trusted literal prefix, preserving PR isolation, original text and cold-write accounting.
+
+- Add default-off, profile-bound same-run Reconcile prefix caching with exact text preservation, isolated scope, cold-write reservations and strict original-fence cache accounting.
+
+### Fixed
+
+- PR evidence formatting preserves literal backslash escapes in source patches
+  and text instead of decoding them again. Full and bounded views keep actual
+  source-line boundaries without changing retrieval or model-call limits.
+- Exact JSON member reads retain bounded object or array contents rather than
+  only a short header, preserving original source lines and existing fallback
+  behavior for invalid or oversized members.
+- Incomplete terminal reconciliation can use the existing one-read rescue for
+  the first eligible content follow-up. Other requests remain explicitly
+  unexecuted; read/time limits and the number of model calls are unchanged.
+- Large-file evidence reads retain exact quoted data keys containing slashes
+  when the same target's patch or cached source grounds them. Selectors still
+  address only the already-selected file; path safety and read bounds are
+  unchanged. Unobserved, URL and traversal-like values remain excluded.
+- Code search preserves the locked SDK's unavailable and partial outcomes
+  instead of treating failed requests or content reads as no matches. Bounded
+  positive hits remain usable hints with incomplete-coverage labeling and the
+  existing exact-head checks. The built-Layer check exercises these outcomes
+  offline through the SDK and review evidence ledger.
+
 ## [0.1.9] - 2026-10-09
 
 ### Security

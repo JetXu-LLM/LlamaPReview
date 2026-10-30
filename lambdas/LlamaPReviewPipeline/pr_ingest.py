@@ -313,7 +313,16 @@ class GitHubRuntime:
     def get_repository(self, repo_full_name: str):
         return self.pool.get_repository(repo_full_name, github_instance=self.github)
 
+    def reconcile_cache_identity(self, repo_full_name: str, pr_number: int, head_sha: str):
+        """Reuse only IDs from the already fetched native PR; never do a lookup."""
+        identity = getattr(self, "_reconcile_cache_identity", None)
+        if (isinstance(identity, dict) and identity.get("repo") == repo_full_name
+                and identity.get("pr_number") == pr_number and identity.get("head_sha") == head_sha):
+            return dict(identity)
+        return {}
+
     def get_pr_content(self, repo_full_name: str, pr_number: int, *, context_lines: int = 10, force_update: bool = True) -> Dict[str, Any]:
+        self._reconcile_cache_identity = {}
         repo = self.get_repository(repo_full_name)
         # Resolve the native PullRequest exactly once and pass it through to the
         # SDK. Repository.get_pr_content otherwise performs this same get_pull
@@ -357,6 +366,23 @@ class GitHubRuntime:
                 if isinstance(raw_base_sha, str)
                 else ""
             )
+            # CompletableGithubObject.raw_data may fetch on a lazy object.
+            # Read it only when already complete; missing scope stays off.
+            # Keep identity out of PR text, trace metadata and persisted content.
+            raw = getattr(pull, "raw_data", None) if getattr(pull, "completed", False) is True else None
+            base_repo = ((raw.get("base") or {}).get("repo")
+                         if isinstance(raw, dict) and isinstance(raw.get("base"), dict) else None)
+            owner = base_repo.get("owner") if isinstance(base_repo, dict) else None
+            if (isinstance(base_repo, dict) and isinstance(owner, dict)
+                    and base_repo.get("full_name") == repo_full_name
+                    and base_repo.get("private") is False
+                    and raw.get("number") == int(pr_number)
+                    and type(base_repo.get("id")) is int and base_repo["id"] > 0
+                    and type(owner.get("id")) is int and owner["id"] > 0):
+                self._reconcile_cache_identity = {
+                    "repo": repo_full_name, "pr_number": int(pr_number), "head_sha": head_sha,
+                    "repository_id": base_repo["id"], "account_id": owner["id"],
+                }
             if head_sha:
                 metadata["head_sha"] = head_sha
             if base_sha:
@@ -687,48 +713,28 @@ class GitHubRuntime:
             close_github()
 
     def search_code_with_status(self, query: str, repo_full_name: str) -> Dict[str, Any]:
+        """Preserve the locked SDK's fetch and content-expansion outcomes."""
         try:
-            from github import GithubException
-            from llama_github.config.config import config as llama_config
-        except Exception:
-            GithubException = Exception  # type: ignore[assignment]
-            llama_config = None
-
-        full_query = f"{query} repo:{repo_full_name}" if repo_full_name else query
-        try:
-            per_page = int(llama_config.get("code_search_max_hits") if llama_config is not None else 10)
-            code_results = self.github.search_code(query=full_query, per_page=per_page)
-            results = []
-            for index, code_result in enumerate(code_results):
-                if index >= per_page:
-                    break
-                try:
-                    repository_obj, file_content = self.api._get_file_content_through_repository(code_result)
-                    if repository_obj and file_content:
-                        results.append(
-                            {
-                                "index": index,
-                                "name": code_result["name"],
-                                "path": code_result["path"],
-                                "repository_full_name": code_result["repository"]["full_name"],
-                                "url": code_result["html_url"],
-                                "content": file_content,
-                                "stargazers_count": repository_obj.stargazers_count,
-                                "watchers_count": repository_obj.watchers_count,
-                                "language": repository_obj.language,
-                                "description": repository_obj.description,
-                                "updated_at": repository_obj.updated_at,
-                            }
-                        )
-                except Exception:
-                    logger.debug("Unable to expand code search result for %s", full_query, exc_info=True)
-            return {"results": sorted(results, key=lambda item: item["index"])}
-        except GithubException as exc:  # type: ignore[misc]
-            status = getattr(exc, "status", None)
-            data = getattr(exc, "data", None)
-            return {"results": [], "error": str(data or exc), "status": status}
+            result = self.api.search_code_with_status(query, repo_full_name)
+            meta = result.to_meta()
+            outcome = str(meta.get("outcome") or "")
+            if outcome not in {"ok", "no_hit", "partial", "error"}:
+                raise ValueError("Unknown SDK code-search outcome")
+            payload = {
+                "results": result.items,
+                "outcome": outcome,
+                "status": meta.get("status_code"),
+                "incomplete": outcome == "partial" or bool(meta.get("truncated")),
+            }
+            # Partial fetch/content expansion cannot establish absence. The
+            # existing ToolExecutor treats a truthy error as content-unobserved.
+            if outcome == "error" or (
+                not result.items and (outcome != "no_hit" or meta.get("truncated"))
+            ):
+                payload["error"] = str(meta.get("error_type") or "incomplete_search")
+            return payload
         except Exception as exc:
-            return {"results": [], "error": str(exc)}
+            return {"results": [], "outcome": "error", "error": type(exc).__name__}
 
     def search_code(self, query: str, repo_full_name: str) -> List[Dict[str, Any]]:
         status = self.search_code_with_status(query, repo_full_name)
@@ -780,6 +786,8 @@ def trim_pr_data(pr_data: dict, max_size: int = 50_000) -> dict:
 
 
 def json_to_markdown(pr_data: Dict[str, Any]) -> str:
+    # Values are already JSON-decoded. Literal backslash escapes are source
+    # content, not Markdown separators; only the joins/fences below add lines.
     def format_value(value: Any, indent: int = 0) -> str:
         if value is None:
             return "N/A"
@@ -787,7 +795,7 @@ def json_to_markdown(pr_data: Dict[str, Any]) -> str:
             return "\n".join(f"{'  ' * indent}- **{k}**: {format_value(v, indent + 1)}" for k, v in value.items())
         if isinstance(value, list):
             return "\n".join(f"{'  ' * indent}- {format_value(item, indent + 1)}" for item in value)
-        return str(value).replace("\\n", "\n").replace("\\r", "")
+        return str(value)
 
     def format_file_change(file_change: Dict[str, Any]) -> str:
         md = f"### {file_change.get('file_path', 'Unknown file')}\n"
@@ -799,7 +807,7 @@ def json_to_markdown(pr_data: Dict[str, Any]) -> str:
         md += f"**Change Categories:** {', '.join(file_change.get('change_categories', []))}\n"
         diff = file_change.get("diff") or ""
         if diff:
-            rendered_diff = diff.replace("\\n", "\n").replace("\\r", "")
+            rendered_diff = diff
             if rendered_diff.lstrip().startswith("[SKIPPED]"):
                 coverage_note = rendered_diff.lstrip()[len("[SKIPPED]") :].strip()
                 md += f"\n**Diff coverage:** unavailable ({coverage_note})\n\n"
@@ -816,7 +824,7 @@ def json_to_markdown(pr_data: Dict[str, Any]) -> str:
                 start_pos = issue_text.find("\n\n")
                 if start_pos != -1:
                     issue_text = issue_text[start_pos + 2 :]
-            md += issue_text.replace("\\n", "\n").replace("\\r", "")
+            md += issue_text
         else:
             md += "No issue content available"
         return md + "\n\n"
@@ -854,7 +862,7 @@ def json_to_markdown(pr_data: Dict[str, Any]) -> str:
             md += f"### {item.get('file_path', 'Unknown file')}\n"
             md += "```\n"
             content = item.get("content")
-            md += str(content).replace("\\n", "\n").replace("\\r", "") if content is not None else "No content available"
+            md += str(content) if content is not None else "No content available"
             md += "\n```\n\n"
         return md
 
@@ -928,7 +936,7 @@ def json_to_markdown(pr_data: Dict[str, Any]) -> str:
 def _complete_line_excerpt(value: Any, limit: int) -> tuple[str, bool]:
     """Return a bounded prefix without manufacturing a partial source line."""
 
-    text = str(value or "").replace("\\n", "\n").replace("\\r", "")
+    text = str(value or "")
     if len(text) <= limit:
         return text, True
     if limit <= 0:

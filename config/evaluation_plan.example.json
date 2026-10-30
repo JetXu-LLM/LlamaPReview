@@ -1,0 +1,424 @@
+{
+  "schema_version": "llamapreview.evaluation-plan/v1",
+  "status": "unapproved",
+  "execution": {
+    "mode": "offline_plan_only",
+    "approved_provider_calls": 0,
+    "approved_budget_usd": "0.00",
+    "github_product_writes": false,
+    "aws_product_writes": false
+  },
+  "baseline": {
+    "candidate_source_commit": null,
+    "sdk_wheel_sha256": null,
+    "production_identity": "unverified",
+    "traffic_window_utc": null,
+    "observed_monthly_admitted_runs": null,
+    "credit_grant_verified": false
+  },
+  "limits": {
+    "max_planned_provider_calls": 180,
+    "max_input_tokens_per_call": 262144,
+    "max_output_tokens_per_call": 64000,
+    "max_call_wall_seconds": 540
+  },
+  "candidates": [
+    {
+      "id": "luna_medium",
+      "model": "gpt-6-luna",
+      "effort": "medium",
+      "availability": "initial"
+    },
+    {
+      "id": "luna_max",
+      "model": "gpt-6-luna",
+      "effort": "max",
+      "availability": "initial"
+    },
+    {
+      "id": "terra_medium",
+      "model": "gpt-6.1-terra",
+      "effort": "medium",
+      "availability": "initial"
+    },
+    {
+      "id": "terra_high",
+      "model": "gpt-6.1-terra",
+      "effort": "high",
+      "availability": "initial"
+    },
+    {
+      "id": "terra_xhigh",
+      "model": "gpt-6.1-terra",
+      "effort": "xhigh",
+      "availability": "conditional"
+    },
+    {
+      "id": "terra_max",
+      "model": "gpt-6.1-terra",
+      "effort": "max",
+      "availability": "conditional"
+    },
+    {
+      "id": "terra_low",
+      "model": "gpt-6.1-terra",
+      "effort": "low",
+      "availability": "conditional"
+    }
+  ],
+  "cases": [
+    {
+      "id": "low_clean",
+      "scope": "synthetic_placeholder",
+      "split": "development",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "clean_control",
+        "low"
+      ]
+    },
+    {
+      "id": "low_local_bug",
+      "scope": "synthetic_placeholder",
+      "split": "development",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "local_defect",
+        "low"
+      ]
+    },
+    {
+      "id": "small_high_consequence",
+      "scope": "synthetic_placeholder",
+      "split": "development",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "small_diff_high_risk",
+        "route_underrouting"
+      ]
+    },
+    {
+      "id": "normal_caller",
+      "scope": "synthetic_placeholder",
+      "split": "development",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "caller_contract",
+        "normal"
+      ]
+    },
+    {
+      "id": "normal_dependency",
+      "scope": "synthetic_placeholder",
+      "split": "development",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "dependency_lockfile",
+        "normal"
+      ]
+    },
+    {
+      "id": "normal_json",
+      "scope": "synthetic_placeholder",
+      "split": "development",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "json_escaping",
+        "normal"
+      ]
+    },
+    {
+      "id": "confirm_ci_wiring",
+      "scope": "synthetic_placeholder",
+      "split": "confirmation",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "validation_execution_chain",
+        "normal"
+      ]
+    },
+    {
+      "id": "hard_security",
+      "scope": "synthetic_placeholder",
+      "split": "development",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "authorization_boundary",
+        "high"
+      ]
+    },
+    {
+      "id": "hard_state",
+      "scope": "synthetic_placeholder",
+      "split": "development",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "state_concurrency",
+        "high"
+      ]
+    },
+    {
+      "id": "hard_negative_control",
+      "scope": "synthetic_placeholder",
+      "split": "development",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "test_only_negative_control",
+        "high"
+      ]
+    },
+    {
+      "id": "confirm_contract",
+      "scope": "synthetic_placeholder",
+      "split": "confirmation",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "cross_layer_contract",
+        "high"
+      ]
+    },
+    {
+      "id": "confirm_parser",
+      "scope": "synthetic_placeholder",
+      "split": "confirmation",
+      "repository_url": null,
+      "head_sha": null,
+      "input_sha256": null,
+      "coverage": [
+        "parser_escaping",
+        "high"
+      ]
+    }
+  ],
+  "batches": [
+    {
+      "id": "route_screen",
+      "phase": "route",
+      "tiers": [
+        "unrouted"
+      ],
+      "cases": [
+        "low_clean",
+        "low_local_bug",
+        "small_high_consequence",
+        "normal_caller",
+        "normal_dependency",
+        "normal_json",
+        "hard_security",
+        "hard_state",
+        "hard_negative_control"
+      ],
+      "candidates": [
+        "luna_max",
+        "terra_medium"
+      ],
+      "max_repeats": 1,
+      "max_calls_per_case_candidate": 1,
+      "requires": "initial_screen"
+    },
+    {
+      "id": "low_deep_screen",
+      "phase": "deep",
+      "tiers": [
+        "low"
+      ],
+      "cases": [
+        "low_clean",
+        "low_local_bug",
+        "small_high_consequence"
+      ],
+      "candidates": [
+        "luna_medium",
+        "luna_max"
+      ],
+      "max_repeats": 1,
+      "max_calls_per_case_candidate": 1,
+      "requires": "initial_screen"
+    },
+    {
+      "id": "plan_screen",
+      "phase": "pfr_plan",
+      "tiers": [
+        "normal",
+        "high"
+      ],
+      "cases": [
+        "normal_caller",
+        "normal_dependency",
+        "normal_json",
+        "hard_security",
+        "hard_state",
+        "hard_negative_control"
+      ],
+      "candidates": [
+        "luna_max",
+        "terra_medium",
+        "terra_high"
+      ],
+      "max_repeats": 1,
+      "max_calls_per_case_candidate": 1,
+      "requires": "initial_screen"
+    },
+    {
+      "id": "reconcile_screen",
+      "phase": "pfr_reconcile",
+      "tiers": [
+        "normal",
+        "high"
+      ],
+      "cases": [
+        "normal_caller",
+        "normal_dependency",
+        "normal_json",
+        "hard_security",
+        "hard_state",
+        "hard_negative_control"
+      ],
+      "candidates": [
+        "luna_max",
+        "terra_medium",
+        "terra_high"
+      ],
+      "max_repeats": 1,
+      "max_calls_per_case_candidate": 2,
+      "requires": "initial_screen"
+    },
+    {
+      "id": "deep_screen",
+      "phase": "deep",
+      "tiers": [
+        "normal",
+        "high"
+      ],
+      "cases": [
+        "normal_caller",
+        "normal_dependency",
+        "normal_json",
+        "hard_security",
+        "hard_state",
+        "hard_negative_control"
+      ],
+      "candidates": [
+        "luna_max",
+        "terra_medium",
+        "terra_high"
+      ],
+      "max_repeats": 1,
+      "max_calls_per_case_candidate": 1,
+      "requires": "initial_screen"
+    },
+    {
+      "id": "low_final_screen",
+      "phase": "final",
+      "tiers": [
+        "low"
+      ],
+      "cases": [
+        "low_clean",
+        "low_local_bug",
+        "small_high_consequence"
+      ],
+      "candidates": [
+        "luna_medium",
+        "luna_max"
+      ],
+      "max_repeats": 1,
+      "max_calls_per_case_candidate": 1,
+      "requires": "initial_screen"
+    },
+    {
+      "id": "final_screen",
+      "phase": "final",
+      "tiers": [
+        "normal",
+        "high"
+      ],
+      "cases": [
+        "normal_caller",
+        "normal_dependency",
+        "normal_json",
+        "hard_security",
+        "hard_state",
+        "hard_negative_control"
+      ],
+      "candidates": [
+        "luna_max",
+        "terra_medium"
+      ],
+      "max_repeats": 1,
+      "max_calls_per_case_candidate": 1,
+      "requires": "initial_screen"
+    },
+    {
+      "id": "hard_deep_followup",
+      "phase": "deep",
+      "tiers": [
+        "high"
+      ],
+      "cases": [
+        "hard_security",
+        "hard_state",
+        "hard_negative_control"
+      ],
+      "candidates": [
+        "terra_high",
+        "terra_xhigh",
+        "terra_max"
+      ],
+      "max_repeats": 1,
+      "max_calls_per_case_candidate": 1,
+      "requires": "after_screening"
+    },
+    {
+      "id": "final_followup",
+      "phase": "final",
+      "tiers": [
+        "normal",
+        "high"
+      ],
+      "cases": [
+        "normal_caller",
+        "normal_dependency",
+        "normal_json",
+        "hard_security",
+        "hard_state",
+        "hard_negative_control"
+      ],
+      "candidates": [
+        "terra_low",
+        "terra_medium",
+        "terra_high"
+      ],
+      "max_repeats": 1,
+      "max_calls_per_case_candidate": 1,
+      "requires": "after_screening"
+    }
+  ],
+  "selection": {
+    "production_profile_selected": false,
+    "quality_claim": "not_evaluated",
+    "monthly_projection_usd": null
+  }
+}

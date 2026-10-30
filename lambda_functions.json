@@ -39,7 +39,7 @@
       "implementation": "cp",
       "abi": "cp312",
       "requirements_lock": "lambdas/LlamaPReviewPipeline/requirements-layer.lock",
-      "requirements_lock_sha256": "c274bfe3ac3bc61828dad7920a7ea6b79fcf529d9174f4aff95c615beb210925",
+      "requirements_lock_sha256": "6046b898b31b5d9a3b9e98591b3d412cd7a0625022a204c7fd4c4a8ff710ebae",
       "wheel_project": "llama-github",
       "wheel_version": "0.4.6",
       "wheel_filename": "llama_github-0.4.6-py3-none-any.whl",

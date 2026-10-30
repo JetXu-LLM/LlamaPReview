@@ -6,6 +6,7 @@ import base64
 import gzip
 import hashlib
 import json
+import os
 import logging
 import re
 import time
@@ -880,6 +881,12 @@ def _provider_call_attr(call_id: str) -> str:
 
 _PROVIDER_CALL_IDENTITY_FIELDS = (
     "schema_version",
+    "provider",
+    "profile_version",
+    "profile_sha256",
+    "stage",
+    "tier",
+    "cache_request",
     "call_id",
     "operation_id",
     "run_id",
@@ -966,6 +973,66 @@ def _provider_phase_claim_binding(
     )
 
 
+def _provider_transact_write(table, updates: list[Dict[str, Any]]) -> None:
+    """Use a low-level client (not a resource's document-transforming client).
+
+    The stable transaction token makes a transport retry of this exact atomic
+    write idempotent. It never authorizes another provider HTTP attempt.
+    """
+    from boto3.dynamodb.types import TypeSerializer
+
+    serializer = TypeSerializer()
+    wire = []
+    for update in updates:
+        entry = {"TableName": table.name, **update}
+        for field in ("Key", "ExpressionAttributeValues"):
+            if field in entry:
+                entry[field] = {key: serializer.serialize(value) for key, value in entry[field].items()}
+        wire.append({"Update": entry})
+    token = hashlib.sha256(_canonical_json(wire)).hexdigest()[:36]
+    try:
+        _boto3().client("dynamodb").transact_write_items(
+            TransactItems=wire, ClientRequestToken=token,
+        )
+    except Exception as exc:
+        if _client_error_code(exc) == "TransactionCanceledException":
+            reasons = getattr(exc, "response", {}).get("CancellationReasons", [])
+            if any(reason.get("Code") == "ConditionalCheckFailed" for reason in reasons):
+                raise ConditionalWriteLost("Atomic provider budget/fence condition rejected") from exc
+        raise
+
+
+def _write_provider_record(table, update: Dict[str, Any], *, budget=None, cost=None, settle=False) -> None:
+    """Extend the existing per-call fence with one small cycle amount counter."""
+    if budget is None:
+        table.update_item(**update)
+        return
+    reserve = int(budget["reserved_nanousd"])
+    names = {"#policy": "policy_sha256", "#charged": "charged_nanousd", "#reserved": "reserved_nanousd"}
+    values = {":policy": budget["policy_sha256"], ":reserve": reserve}
+    if not settle:
+        headroom = int(budget["allocation_nanousd"]) - reserve
+        if headroom < 0:
+            raise ConditionalWriteLost("Allocation cannot cover the bounded attempt")
+        values.update({":headroom": headroom, ":cycle": budget["cycle_id"], ":cap": int(budget["allocation_nanousd"]), ":expires": int(budget["expires_at"])})
+        expression = "SET #policy = if_not_exists(#policy, :policy), cycle_id = if_not_exists(cycle_id, :cycle), allocation_nanousd = if_not_exists(allocation_nanousd, :cap), expires_at = if_not_exists(expires_at, :expires) ADD #charged :reserve, #reserved :reserve"
+        condition = "(attribute_not_exists(#policy) OR #policy = :policy) AND (attribute_not_exists(#charged) OR #charged <= :headroom)"
+    else:
+        if cost is None:
+            # Outcome/price unknown: terminalize the existing attempt, but keep
+            # its full amount in the non-expiring counter. Never infer $0.
+            table.update_item(**update)
+            return
+        values.update({":delta": int(cost) - reserve, ":release": -reserve, ":cost": int(cost)})
+        names["#settled"] = "settled_nanousd"
+        expression = "ADD #charged :delta, #reserved :release, #settled :cost"
+        condition = "#policy = :policy AND #reserved >= :reserve AND #charged >= :reserve"
+    counter = {"Key": {"repo": budget["counter_repo"], "pr_number": 0},
+               "UpdateExpression": expression, "ConditionExpression": condition,
+               "ExpressionAttributeNames": names, "ExpressionAttributeValues": values}
+    _provider_transact_write(table, [update, counter])
+
+
 def begin_provider_call_dispatch(
     repo: str,
     pr_number: int,
@@ -974,6 +1041,7 @@ def begin_provider_call_dispatch(
     record: Mapping[str, Any],
     phase_claim: Optional[Mapping[str, Any]] = None,
     table=None,
+    direct_request_context=None,
 ) -> bool:
     """Persist one owner-bound attempt fence before provider HTTP begins.
 
@@ -1017,6 +1085,49 @@ def begin_provider_call_dispatch(
         or expected_call_id != call_id
     ):
         raise ValueError("provider dispatch fence call identity is invalid")
+    budget = None
+    cache_mode = None
+    if record.get("provider") == "direct_openai":
+        from .direct_openai_budget import load_policy, reservation
+        policy = load_policy(profile_sha256=record.get("profile_sha256"))
+        supplied = record.get("budget")
+        if not isinstance(supplied, Mapping):
+            raise ArtifactIntegrityError("Direct OpenAI dispatch requires a grant reservation")
+        from .direct_openai import CACHE_OFF, CACHE_RECONCILE, request_cache_receipt
+        from .provider_model_routing import parse_direct_openai_profile
+        cache_mode = CACHE_OFF
+        if direct_request_context is not None:
+            if not isinstance(direct_request_context, Mapping) or set(direct_request_context) != {"request", "scope"}:
+                raise ArtifactIntegrityError("Invalid ephemeral direct request proof")
+            profile = parse_direct_openai_profile(os.environ.get("DIRECT_OPENAI_PROFILE", ""))
+            proof = record.get("cache_request") or {}
+            receipt = request_cache_receipt(
+                direct_request_context["request"], profile=profile, phase=record.get("phase"),
+                round_index=proof.get("round"), tier=record.get("tier"),
+                scope=direct_request_context["scope"], policy=policy,
+            )
+            request = direct_request_context["request"]
+            if (receipt is None or receipt != proof or profile.sha256 != record.get("profile_sha256")
+                    or profile.version != record.get("profile_version")
+                    or record.get("stage") != receipt.get("stage", "pfr_reconcile")
+                    or request.get("model") != record.get("billed_model")
+                    or request.get("reasoning") != {"effort": record.get("reasoning_effort")}
+                    or ("round" in receipt and (type(record.get("call_index")) is not int
+                        or record["call_index"] != receipt["round"]))):
+                raise ArtifactIntegrityError("Direct cache proof differs from actual wire/profile")
+            if direct_request_context["request"].get("max_output_tokens") != supplied.get("max_output_tokens"):
+                raise ArtifactIntegrityError("Direct cache output cap differs from actual wire")
+            cache_mode = receipt.get("mode", CACHE_RECONCILE)
+            if cache_mode != CACHE_RECONCILE and direct_request_context["scope"] != {}:
+                raise ArtifactIntegrityError("Public static cache must not carry tenant scope")
+        elif "cache_request" in record:
+            raise ArtifactIntegrityError("Direct cache requires actual wire proof")
+        budget = reservation(policy, model=record.get("billed_model"),
+                             max_output_tokens=supplied.get("max_output_tokens"), cache_mode=cache_mode)
+        if dict(supplied) != budget:
+            raise ArtifactIntegrityError("Direct OpenAI reservation differs from verified policy")
+    elif "budget" in record:
+        raise ArtifactIntegrityError("Budget reservation on non-direct provider")
     safe_record = _dynamodb_safe(dict(record))
     current = get_item(
         repo,
@@ -1026,6 +1137,20 @@ def begin_provider_call_dispatch(
     )
     if not current or str(current.get("status") or "") != str(expected_status):
         return False
+    if direct_request_context is not None and cache_mode == "same_run_30m":
+        scope = direct_request_context["scope"]
+        if (scope.get("repo") != repo or scope.get("pr_number") != pr_number
+                or any(scope.get(key) != current.get(key) for key in ("installation_id", "head_sha", "run_id"))
+                or any(scope.get(key) != record.get(key) for key in ("head_sha", "run_id"))):
+            raise ArtifactIntegrityError("Direct cache scope differs from durable admission")
+    pinned_provider = current.get("provider_profile_provider")
+    pinned_profile = current.get("provider_profile_sha256")
+    if pinned_provider and (record.get("provider") != pinned_provider or record.get("profile_sha256") != pinned_profile):
+        raise ArtifactIntegrityError("Provider/profile changed during the admitted run")
+    if record.get("provider") == "direct_openai":
+        for previous in provider_call_records(current):
+            if previous.get("run_id") == record.get("run_id") and (previous.get("provider") != "direct_openai" or previous.get("profile_sha256") != record.get("profile_sha256")):
+                raise ArtifactIntegrityError("Direct OpenAI cannot replace a different in-flight profile")
     claim_binding = None
     if phase_claim:
         claim_binding = _provider_phase_claim_binding(
@@ -1087,13 +1212,19 @@ def begin_provider_call_dispatch(
                 " AND #run_id = :run_id"
                 " AND #head_sha = :head_sha"
             )
-        table.update_item(
-            Key={"repo": repo, "pr_number": int(pr_number)},
-            UpdateExpression="SET #call = :record, updated_at = :now",
-            ConditionExpression=condition,
-            ExpressionAttributeNames=names,
-            ExpressionAttributeValues=values,
-        )
+        expression = "SET #call = :record, updated_at = :now"
+        if budget is not None:
+            names.update({"#profile": "provider_profile_sha256", "#profile_provider": "provider_profile_provider"})
+            values.update({":profile": record["profile_sha256"], ":provider": "direct_openai"})
+            condition += " AND (attribute_not_exists(#profile) OR #profile = :profile) AND (attribute_not_exists(#profile_provider) OR #profile_provider = :provider)"
+            expression += ", #profile = if_not_exists(#profile, :profile), #profile_provider = if_not_exists(#profile_provider, :provider)"
+        _write_provider_record(table, {
+            "Key": {"repo": repo, "pr_number": int(pr_number)},
+            "UpdateExpression": expression,
+            "ConditionExpression": condition,
+            "ExpressionAttributeNames": names,
+            "ExpressionAttributeValues": values,
+        }, budget=budget)
         return True
     except Exception as exc:
         if _is_conditional_failure(exc):
@@ -1181,6 +1312,25 @@ def record_provider_call(
         return False
     claim_binding = None
     existing = current.get(attribute)
+    budget = None
+    cost = None
+    if record.get("provider") == "direct_openai":
+        from .direct_openai_budget import actual_cost
+        if not isinstance(existing, Mapping) or not isinstance(existing.get("budget"), Mapping):
+            raise ArtifactIntegrityError("Direct OpenAI settlement requires its original durable fence")
+        # Never accept refund coordinates, price, cap, or cycle from a terminal
+        # callback. They come only from the original durable record. Config may
+        # now be expired/replaced and ownership/lifecycle may have advanced.
+        budget = dict(existing["budget"])
+        budget.pop("actual_nanousd", None)
+        budget["state"] = "reserved"
+        cost = actual_cost(record, budget)
+        final_budget = dict(budget)
+        if cost is not None:
+            final_budget.update(state="settled", actual_nanousd=int(cost))
+        safe_record["budget"] = _dynamodb_safe(final_budget)
+    elif "budget" in record:
+        raise ArtifactIntegrityError("Budget settlement on non-direct provider")
     if isinstance(existing, Mapping):
         if (
             str(existing.get("call_id") or "").strip().lower()
@@ -1279,13 +1429,13 @@ def record_provider_call(
                 " AND #run_id = :run_id"
                 " AND #head_sha = :head_sha"
             )
-        table.update_item(
-            Key={"repo": repo, "pr_number": int(pr_number)},
-            UpdateExpression="SET #call = :record, updated_at = :now",
-            ConditionExpression=condition,
-            ExpressionAttributeNames=names,
-            ExpressionAttributeValues=values,
-        )
+        _write_provider_record(table, {
+            "Key": {"repo": repo, "pr_number": int(pr_number)},
+            "UpdateExpression": "SET #call = :record, updated_at = :now",
+            "ConditionExpression": condition,
+            "ExpressionAttributeNames": names,
+            "ExpressionAttributeValues": values,
+        }, budget=budget, cost=cost, settle=True)
         return True
     except Exception as exc:
         if _is_conditional_failure(exc):

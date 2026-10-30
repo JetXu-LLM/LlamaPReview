@@ -52,7 +52,24 @@ configured. The following controls apply only to that rollback profile:
 
 `DEEPSEEK_TRANSPORT_MODEL_OVERRIDE` changes the exact model identifier sent to DeepSeek without rewriting the logical routing tier. The provider ledger records both identities. Set it to the exact empty string only when direct logical-model dispatch has been deliberately validated.
 
-`MODEL_PROVIDER` must be exactly `openrouter` or `deepseek`. A missing key for
+`MODEL_PROVIDER=direct_openai` is a separate explicit opt-in, with
+`OPENAI_API_KEY`, `DIRECT_OPENAI_PROFILE` and `DIRECT_OPENAI_BUDGET` required.
+See the [bounded direct adapter and grant-window contract](DIRECT_OPENAI_BUDGET.md)
+and [stage profile](DIRECT_OPENAI_PROFILE.md). Examples are unqualified and do
+not activate a provider, approve API spending, or establish current grants.
+The generic Terraform input is the sensitive `direct_openai` object with
+`api_key`, `profile` and `budget` strings; profile/budget are compact JSON.
+These environment fields are included only when direct mode is selected.
+Direct mode omits unused DeepSeek/OpenRouter credentials and legacy phase
+model/effort environment overrides, while preserving trace settings. Other
+provider environments are unchanged; switching back deliberately reconstructs
+those settings from retained private Terraform inputs.
+Terraform checks presence and JSON-object syntax; runtime remains responsible
+for exact profile, authorization, pricing and grant-window validation.
+Keep the complete secret-bearing Lambda environment within 4KB; verify its
+actual size privately before any separately approved deployment.
+
+`MODEL_PROVIDER` must be exactly `openrouter`, `deepseek`, or `direct_openai`. A missing key for
 the selected provider fails before any HTTP dispatch; the transport never
 silently switches providers. Luna with function tools at `max` would require
 the Responses API, so the Chat transport rejects such a request instead of
@@ -63,7 +80,7 @@ migration guidance](https://developers.openai.com/api/docs/guides/latest-model).
 
 Context size, tool rounds, provider timeouts, and phase deadlines are bounded by the variables in [`config.py`](../lambdas/LlamaPReviewPipeline/config.py). Treat those defaults as a coherent tested profile. A larger value can raise Lambda duration, provider cost, DynamoDB/S3 pressure, and the probability that a head changes before publication.
 
-With `MODEL_PROVIDER=openrouter`, normal and high PFR both allow up to 600
+With `MODEL_PROVIDER=openrouter` or `direct_openai`, normal and high PFR both allow up to 600
 seconds for retrieval steps and use a 780-second PFR time budget. The context
 phase still has its separate 780-second limit and 30-second state-write
 reserve; tool, token, and context-size caps remain different by review tier.

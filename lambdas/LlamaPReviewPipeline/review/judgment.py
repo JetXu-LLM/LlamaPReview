@@ -260,6 +260,7 @@ def run_model_phase(
     trace_metadata: Optional[Mapping[str, Any]],
     response_format: Optional[Dict[str, str]] = None,
     attempt: int = 1,
+    public_static_prefix=None,
 ) -> ModelPhaseResult:
     """Run and validate one model phase without interpreting its substance."""
 
@@ -281,6 +282,8 @@ def run_model_phase(
         }
         if response_format is not None:
             call_options["response_format"] = response_format
+        if public_static_prefix is not None:
+            call_options["public_static_prefix"] = public_static_prefix
         response = _chat_with_wall_timeout(
             client,
             phase,
@@ -364,6 +367,10 @@ def model_phase_telemetry(
 def failure_kind(error: BaseException) -> str:
     """Map a model/service failure to a stable content-free artifact kind."""
 
+    if getattr(error, "provider_billing_failure", False) is True:
+        return "provider_billing_rejected"
+    if getattr(error, "provider_budget_unavailable", False) is True:
+        return "provider_budget_unavailable"
     if isinstance(error, (ReviewGenerationTimeout, DeadlineExceeded)):
         return "wall_timeout"
     if isinstance(error, ReviewOutputTruncated):
@@ -395,6 +402,11 @@ def failure_kind(error: BaseException) -> str:
 def failure_retryable(error: BaseException) -> bool:
     """Retry only provider/service completion failures, never review substance."""
 
+    if (
+        getattr(error, "provider_billing_failure", False) is True
+        or getattr(error, "provider_budget_unavailable", False) is True
+    ):
+        return False
     if isinstance(error, PresentationRepresentationError):
         return False
     if isinstance(
@@ -438,6 +450,8 @@ def artifact_failure_message(error: BaseException) -> str:
         "presentation_validation_error": (
             "The Final response could not yield a safe presentation."
         ),
+        "provider_billing_rejected": "The model provider rejected billing or quota authorization.",
+        "provider_budget_unavailable": "The approved model budget or durable admission could not be verified.",
         "model_http_error": "The model provider returned an HTTP error.",
         "model_transport_timeout": (
             "The model provider transport timed out."

@@ -62,6 +62,29 @@ repository events stop before durable product state. Current AWS Function URL
 behavior adds the two URL-only public invoke permissions required for
 `authorization_type = "NONE"`; do not broaden them into general invocation.
 
+## Optional Direct OpenAI configuration
+
+The default provider remains OpenRouter. Explicit `model_provider="direct_openai"`
+accepts the sensitive `direct_openai` object with `api_key`, `profile`, and
+`budget` strings. The latter two must contain compact JSON objects; missing or
+invalid inputs fail validation. Direct-only environment fields are absent for
+other providers and are never supplied to the Webhook. In direct mode, unused
+DeepSeek/OpenRouter keys and legacy model/effort overrides are omitted from the
+Lambda environment to conserve space; the compatible trace settings remain.
+Other provider environments are unchanged. A deliberately selected rollback
+reconstructs its environment from the retained private Terraform inputs, not
+from credentials left in the direct-mode Lambda.
+
+Terraform validates wiring, not model qualification or spend authorization.
+Read the [direct adapter and grant-window contract](../../docs/DIRECT_OPENAI_BUDGET.md)
+before preparing private operator inputs. The runtime additionally rejects
+unqualified, unapproved, missing or expired profile/budget facts. The shipped
+examples are not usable production authorizations. Check the full Lambda
+environment's 4KB size privately, including secrets, profile and budget.
+No provider choice changes the inert defaults, activates traffic, expands IAM,
+or creates another resource. Real API testing and deployment need separate
+authorization; mock Terraform tests make no AWS or model calls.
+
 ## Storage, privacy, and cost
 
 - Lambda encrypts environment configuration at rest with its AWS-managed key;

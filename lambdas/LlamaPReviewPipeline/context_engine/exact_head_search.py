@@ -214,6 +214,7 @@ class ExactHeadSearch:
         str,
         List[Dict[str, Any]],
         str,
+        bool,
     ]:
         query_key = canonical_search_key(query)
         if query_key in self.state.attempted_search_queries:
@@ -225,6 +226,7 @@ class ExactHeadSearch:
                 "repeats or only low-signal evidence remains.",
                 [],
                 "repeat",
+                False,
             )
         if self.state.search_calls >= self.state.max_search_calls:
             return (
@@ -235,9 +237,11 @@ class ExactHeadSearch:
                 "context is available.",
                 [],
                 "quota_exhausted",
+                False,
             )
         self.state.attempted_search_queries.add(query_key)
         self.state.search_calls += 1
+        incomplete = False
         try:
             if hasattr(self.state.runtime, "search_code_with_status"):
                 payload = self.state.runtime.search_code_with_status(
@@ -248,6 +252,7 @@ class ExactHeadSearch:
                     typed_outcome = str(
                         payload.get("outcome") or ""
                     ).strip().lower()
+                    incomplete = typed_outcome == "partial" or payload.get("incomplete") is True
                     if payload.get("error") or typed_outcome in {
                         "error",
                         "search_error",
@@ -279,6 +284,7 @@ class ExactHeadSearch:
                             f"{status_text}{error_text}",
                             [],
                             terminal_kind,
+                            incomplete,
                         )
                     results = (
                         []
@@ -304,6 +310,7 @@ class ExactHeadSearch:
                 f"search_code error: {exc}",
                 [],
                 "github_search_error",
+                True,
             )
 
         safe_results: List[Dict[str, Any]] = []
@@ -437,7 +444,15 @@ class ExactHeadSearch:
             )
         notes = [f"{phase} query `{query}`"]
         notes.extend(policy_notes)
-        return observed, default_snippets, notes, "", lineages, ""
+        if incomplete:
+            if not observed:
+                return (
+                    [], [], notes,
+                    "search_code error: incomplete search yielded no usable observations; absence is unverified.",
+                    lineages, "github_search_error", True,
+                )
+            notes.append("partial search: retained positive hints do not establish complete coverage or absence")
+        return observed, default_snippets, notes, "", lineages, "", incomplete
 
     def search_code(self, args: Dict[str, Any]) -> ToolResult:
         checked = validate_tool_invocation("search_code", args)
@@ -470,6 +485,7 @@ class ExactHeadSearch:
             terminal,
             search_hit_lineage,
             terminal_kind,
+            incomplete,
         ) = self._search_once(
             query,
             intent=intent,
@@ -532,7 +548,7 @@ class ExactHeadSearch:
                     "search_snippet" if has_observation else ""
                 ),
                 "retrieval_outcome": (
-                    "hit" if has_observation else "no_hit"
+                    "partial" if incomplete else "hit" if has_observation else "no_hit"
                 ),
                 "observed_state": (
                     "content_observed"

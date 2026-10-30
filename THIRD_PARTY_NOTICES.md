@@ -11,7 +11,7 @@ inside the corresponding wheels.
 | Component | Version | License |
 | --- | ---: | --- |
 | llama-github | 0.4.6 | Apache-2.0 |
-| certifi | 2026.6.17 | MPL-2.0 |
+| certifi | 2026.10.19 | MPL-2.0 |
 | cffi | 2.1.0 | MIT-0 |
 | charset-normalizer | 3.4.9 | MIT |
 | cryptography | 50.0.0 | Apache-2.0 OR BSD-3-Clause |

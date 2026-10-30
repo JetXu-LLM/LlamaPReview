@@ -494,6 +494,10 @@ def _plan_question_cap(route: Dict[str, Any]) -> int:
 def _plan_model_selection(route: Dict[str, Any]) -> Tuple[str, str]:
     """Use the selected provider's high-plan profile for consequential plans."""
 
+    if config.MODEL_PROVIDER == "direct_openai":
+        selected = config.stage_selection("pfr_plan", str(route.get("complexity") or ""))
+        return selected.model, selected.reasoning_effort
+
     risk_domains = route.get("risk_domains")
     risk_bearing = bool(
         isinstance(risk_domains, list)

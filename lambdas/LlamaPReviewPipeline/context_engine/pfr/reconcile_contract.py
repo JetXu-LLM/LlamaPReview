@@ -7,6 +7,7 @@ import re
 import time
 
 from ... import config
+from ...direct_openai import ReconcilePrefix
 from ...structured_repair import (
     ContractRepairIssue,
     RepairIssueSelection,
@@ -940,25 +941,22 @@ def _reconcile(
         "</CODE_GENERATED_EVIDENCE_EVENT_INDEX>"
     ),
 ) -> Dict[str, Any]:
+    # Split while composing trusted structure, not by finding an untrusted tag.
+    prefix = (
+        "<UNTRUSTED_PR_DETAILS>\n"
+        + truncate_preserving_current_ci(pr_details, 120000)
+        + "\n</UNTRUSTED_PR_DETAILS>\n\n<VERIFICATION_PLAN>\n"
+        + json.dumps(plan, ensure_ascii=False)
+        + "\n</VERIFICATION_PLAN>"
+    )
+    suffix = (
+        "\n\n" + evidence_index_envelope
+        + "\n\n<UNTRUSTED_FETCHED_CONTEXT>\n" + context_text
+        + "\n</UNTRUSTED_FETCHED_CONTEXT>"
+    )
     messages = [
-        {
-            "role": "system",
-            "content": RECONCILE_SYSTEM_PROMPT,
-        },
-        {
-            "role": "user",
-            "content": (
-                "<UNTRUSTED_PR_DETAILS>\n"
-                + truncate_preserving_current_ci(pr_details, 120000)
-                + "\n</UNTRUSTED_PR_DETAILS>\n\n<VERIFICATION_PLAN>\n"
-                + json.dumps(plan, ensure_ascii=False)
-                + "\n</VERIFICATION_PLAN>\n\n"
-                + evidence_index_envelope
-                + "\n\n<UNTRUSTED_FETCHED_CONTEXT>\n"
-                + context_text
-                + "\n</UNTRUSTED_FETCHED_CONTEXT>"
-            ),
-        },
+        {"role": "system", "content": RECONCILE_SYSTEM_PROMPT},
+        {"role": "user", "content": prefix + suffix},
     ]
     initial_usage: Dict[str, Any] = {}
     initial_finish_reason = ""
@@ -976,6 +974,8 @@ def _reconcile(
             reasoning_effort=reasoning_effort,
             thinking=True,
             response_format={"type": "json_object"},
+            **({"max_tokens": 12000, "reconcile_prefix": ReconcilePrefix(prefix, suffix)}
+               if config.MODEL_PROVIDER == "direct_openai" else {}),
             trace_phase="pfr_reconcile",
             trace_metadata={**trace_metadata, "round": round_index},
             deadline=deadline,
@@ -1040,6 +1040,8 @@ def _reconcile(
         DeepSeekTimeoutError,
         DeepSeekTransportError,
     ) as exc:
+        if getattr(exc, "provider_call_control_failure", False) is True:
+            raise
         if not model_phases:
             model_phases.append(
                 _pfr_model_phase(
@@ -1200,7 +1202,7 @@ def _reconcile(
             repair_messages,
             model=model,
             reasoning_effort=reasoning_effort,
-            thinking=False,
+            thinking=config.MODEL_PROVIDER == "direct_openai",
             max_tokens=config.PFR_RECONCILE_REPAIR_MAX_TOKENS or None,
             timeout_seconds=repair_timeout,
             response_format={"type": "json_object"},
@@ -1219,7 +1221,7 @@ def _reconcile(
             _pfr_model_phase(
                 "pfr_reconcile_representation_repair",
                 model=model,
-                thinking=False,
+                thinking=config.MODEL_PROVIDER == "direct_openai",
                 reasoning_effort=reasoning_effort,
                 attempt=2,
                 elapsed_seconds=time.monotonic() - repair_started,
@@ -1272,6 +1274,8 @@ def _reconcile(
         json.JSONDecodeError,
         PFRStructuredOutputError,
     ) as repair_error:
+        if getattr(repair_error, "provider_call_control_failure", False) is True:
+            raise
         if repair_call_attempted and not any(
             item.get("phase") == "pfr_reconcile_representation_repair"
             and item.get("round") == round_index
@@ -1281,7 +1285,7 @@ def _reconcile(
                 _pfr_model_phase(
                     "pfr_reconcile_representation_repair",
                     model=model,
-                    thinking=False,
+                    thinking=config.MODEL_PROVIDER == "direct_openai",
                     reasoning_effort=reasoning_effort,
                     attempt=2,
                     elapsed_seconds=(
