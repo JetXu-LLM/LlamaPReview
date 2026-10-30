@@ -92,7 +92,7 @@ new selection.
 
 ## Bounded calls
 
-Direct Route/adjudication requests cap output at 8,192 tokens; Plan and initial
+Direct Route/adjudication requests cap output at 16,384 tokens; Plan and initial
 Reconcile cap it at 12,000. Reconcile representation repair retains its existing
 12,000-token cap. Deep and Final retain their configured caps (defaults 64,000
 and 18,000). These are maximum output budgets **including reasoning**, not a

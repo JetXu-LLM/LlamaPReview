@@ -110,13 +110,29 @@ class DirectOpenAIProfileTests(unittest.TestCase):
         normal = {**low, "minimum_evidence_boundary": "bounded_repo", "complexity": "normal"}
         client = _ConversationClient([low, normal])
         inventory = RepoInventory(repository="owner/repo", requested_sha="head123456789", status="complete", discoverable_files={"src/changed.py", "scripts/bootstrap.sh"})
-        result = analyze_pr_complexity("details", pr_content=_pr_content(diff='+run("scripts/bootstrap.sh")\n'), repo_inventory=inventory, client=client)
+        deadline = object()
+        result = analyze_pr_complexity("details", pr_content=_pr_content(diff='+run("scripts/bootstrap.sh")\n'), repo_inventory=inventory, client=client, deadline=deadline)
         self.assertEqual(result["complexity"], "normal")
         self.assertEqual(len(client.calls), 2)
         for call in client.calls:
-            self.assertEqual((call["model"], call["reasoning_effort"], call["max_tokens"]), ("gpt-6.1-terra", "medium", 8192))
+            self.assertEqual((call["model"], call["reasoning_effort"], call["max_tokens"]), ("gpt-6.1-terra", "medium", 16384))
+            self.assertIs(call["deadline"], deadline)
             self.assertEqual(call["trace_metadata"]["stage"], "route")
             self.assertEqual(call["trace_metadata"]["profile_sha256"], self.profile.sha256)
+
+    def test_route_16k_truncation_keeps_single_call_high_fallback(self):
+        class TruncatedClient(_ConversationClient):
+            def chat(self, messages, **kwargs):
+                result = super().chat(messages, **kwargs)
+                result["choices"][0]["finish_reason"] = "length"
+                return result
+
+        client = TruncatedClient(["partial"])
+        result = analyze_pr_complexity("details", pr_content=_pr_content(), client=client)
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(client.calls[0]["max_tokens"], 16384)
+        self.assertEqual(result["complexity"], "high")
+        self.assertEqual(result["_route_plan_meta"]["contract_failure_kind"], "output_truncated")
 
     def test_route_plan_reconcile_reuses_existing_conversation_and_call_count(self):
         route = {"reviewable_semantic_delta": True, "minimum_evidence_boundary": "bounded_repo", "reason": "Caller evidence required", "complexity": "normal", "pr_type": "code", "risk_domains": ["api"]}
@@ -131,7 +147,7 @@ class DirectOpenAIProfileTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 3)
         self.assertEqual(client.calls[1]["messages"][:2], client.calls[0]["messages"])
         self.assertEqual([(c["model"], c["reasoning_effort"]) for c in client.calls], [("gpt-6.1-terra", "medium"), ("gpt-6.1-terra", "high"), ("gpt-6-luna", "max")])
-        self.assertEqual([c["max_tokens"] for c in client.calls], [8192, 12000, 12000])
+        self.assertEqual([c["max_tokens"] for c in client.calls], [16384, 12000, 12000])
         self.assertEqual([c["trace_metadata"]["stage"] for c in client.calls], ["route", "pfr_plan", "pfr_reconcile"])
 
     def test_reconcile_representation_repair_inherits_model_effort_and_stage(self):

@@ -64,7 +64,7 @@ every bounded input fits the provider context window. No provider tools,
 remote conversations, SDK retries, redirects, model fallback, second reviewer,
 confidence escalation, or new successful-path calls are enabled.
 
-Route/adjudication has an 8,192-output-token cap; Plan and Reconcile have 12,000;
+Route/adjudication has a 16,384-output-token cap; Plan and Reconcile have 12,000;
 Deep, Final, and existing correction retain their existing configured caps.
 Every retry is a separate existing `call_id` under the same `operation_id` and
 must reserve its own maximum cost before HTTP. Refusal, incomplete/truncated
