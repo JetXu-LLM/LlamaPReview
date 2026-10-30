@@ -760,6 +760,8 @@ def trim_pr_data(pr_data: dict, max_size: int = 50_000) -> dict:
 
 
 def json_to_markdown(pr_data: Dict[str, Any]) -> str:
+    # Values are already JSON-decoded. Literal backslash escapes are source
+    # content, not Markdown separators; only the joins/fences below add lines.
     def format_value(value: Any, indent: int = 0) -> str:
         if value is None:
             return "N/A"
@@ -767,7 +769,7 @@ def json_to_markdown(pr_data: Dict[str, Any]) -> str:
             return "\n".join(f"{'  ' * indent}- **{k}**: {format_value(v, indent + 1)}" for k, v in value.items())
         if isinstance(value, list):
             return "\n".join(f"{'  ' * indent}- {format_value(item, indent + 1)}" for item in value)
-        return str(value).replace("\\n", "\n").replace("\\r", "")
+        return str(value)
 
     def format_file_change(file_change: Dict[str, Any]) -> str:
         md = f"### {file_change.get('file_path', 'Unknown file')}\n"
@@ -779,7 +781,7 @@ def json_to_markdown(pr_data: Dict[str, Any]) -> str:
         md += f"**Change Categories:** {', '.join(file_change.get('change_categories', []))}\n"
         diff = file_change.get("diff") or ""
         if diff:
-            rendered_diff = diff.replace("\\n", "\n").replace("\\r", "")
+            rendered_diff = diff
             if rendered_diff.lstrip().startswith("[SKIPPED]"):
                 coverage_note = rendered_diff.lstrip()[len("[SKIPPED]") :].strip()
                 md += f"\n**Diff coverage:** unavailable ({coverage_note})\n\n"
@@ -796,7 +798,7 @@ def json_to_markdown(pr_data: Dict[str, Any]) -> str:
                 start_pos = issue_text.find("\n\n")
                 if start_pos != -1:
                     issue_text = issue_text[start_pos + 2 :]
-            md += issue_text.replace("\\n", "\n").replace("\\r", "")
+            md += issue_text
         else:
             md += "No issue content available"
         return md + "\n\n"
@@ -834,7 +836,7 @@ def json_to_markdown(pr_data: Dict[str, Any]) -> str:
             md += f"### {item.get('file_path', 'Unknown file')}\n"
             md += "```\n"
             content = item.get("content")
-            md += str(content).replace("\\n", "\n").replace("\\r", "") if content is not None else "No content available"
+            md += str(content) if content is not None else "No content available"
             md += "\n```\n\n"
         return md
 
@@ -908,7 +910,7 @@ def json_to_markdown(pr_data: Dict[str, Any]) -> str:
 def _complete_line_excerpt(value: Any, limit: int) -> tuple[str, bool]:
     """Return a bounded prefix without manufacturing a partial source line."""
 
-    text = str(value or "").replace("\\n", "\n").replace("\\r", "")
+    text = str(value or "")
     if len(text) <= limit:
         return text, True
     if limit <= 0:

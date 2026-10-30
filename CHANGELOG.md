@@ -13,6 +13,9 @@ do not appear as project versions.
 
 ### Fixed
 
+- PR evidence formatting preserves literal backslash escapes in source patches
+  and text instead of decoding them again. Full and bounded views keep actual
+  source-line boundaries without changing retrieval or model-call limits.
 - Exact JSON member reads retain bounded object or array contents rather than
   only a short header, preserving original source lines and existing fallback
   behavior for invalid or oversized members.
