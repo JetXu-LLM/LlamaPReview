@@ -13,6 +13,12 @@ do not appear as project versions.
 
 ### Fixed
 
+- Exact JSON member reads retain bounded object or array contents rather than
+  only a short header, preserving original source lines and existing fallback
+  behavior for invalid or oversized members.
+- Incomplete terminal reconciliation can use the existing one-read rescue for
+  the first eligible content follow-up. Other requests remain explicitly
+  unexecuted; read/time limits and the number of model calls are unchanged.
 - Large-file evidence reads retain exact quoted data keys containing slashes
   when the same target's patch or cached source grounds them. Selectors still
   address only the already-selected file; path safety and read bounds are

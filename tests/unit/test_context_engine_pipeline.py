@@ -1755,7 +1755,7 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
         self.assertEqual(meta["pfr_sweep_hit_count"], 0)
         self.assertEqual(meta["pfr_post_terminal_tool_call_count"], 0)
 
-    def test_pfr_sweep_hit_gets_one_terminal_reconcile_and_no_third_round(self):
+    def test_pfr_incomplete_terminal_followups_get_one_read_without_third_round(self):
         runtime = _Runtime()
         terminal_followup = {
             "question": "Inspect a possible third-round contract.",
@@ -1788,7 +1788,11 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
                     "summary": "The sweep evidence was consumed; one request remains diagnostic only.",
                     "answered": [],
                     "unresolved_gaps": [],
-                    "followups": [terminal_followup],
+                    "followups": [terminal_followup, {
+                        "question": "Inspect the other remaining contract.",
+                        "tool": "read_file",
+                        "args": {"path": "src/other_terminal.py"},
+                    }],
                     "complete": False,
                 },
             ]
@@ -1799,7 +1803,7 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
         with patch.object(
             initialization,
             "get_repo_structure_for_llm",
-            return_value=_repo_tree("src/service.py", "src/terminal.py"),
+            return_value=_repo_tree("src/service.py", "src/terminal.py", "src/other_terminal.py"),
         ), patch(
             "lambdas.LlamaPReviewPipeline.context_engine.pfr.evidence_execution._safety_sweep",
             return_value=1,
@@ -1821,14 +1825,31 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
         )
         sweep.assert_called_once()
         self.assertEqual(meta["pfr_terminal_reconcile_round"], 2)
-        self.assertEqual(meta["pfr_terminal_reconcile_trigger"], "sweep_hit")
+        self.assertEqual(meta["pfr_terminal_reconcile_trigger"], "terminal_evidence_read")
+        self.assertEqual(meta["pfr_terminal_evidence_read_count"], 1)
+        self.assertEqual(meta["pfr_terminal_evidence_outcome"], "hit")
+        self.assertFalse(meta["pfr_terminal_reconcile_covers_all_evidence"])
+        self.assertTrue(meta["pfr_direct_evidence_only"])
+        self.assertLessEqual(meta["read_calls"], 6)
+        self.assertEqual(client.responses, [])
         self.assertEqual(meta["pfr_sweep_hit_count"], 1)
         self.assertEqual(meta["pfr_post_terminal_tool_call_count"], 0)
         self.assertEqual(len(meta["terminal_unexecuted_followups"]), 1)
         terminal = meta["terminal_unexecuted_followups"][0]
         self.assertEqual(terminal["reason"], "terminal_round_reached")
-        self.assertEqual(terminal["path"], "src/terminal.py")
-        self.assertFalse(any(path == "src/terminal.py" for _repo, path, _sha in runtime.read_calls))
+        self.assertEqual(terminal["path"], "src/other_terminal.py")
+        self.assertEqual(
+            sum(path == "src/terminal.py" for _repo, path, _sha in runtime.read_calls), 1,
+        )
+        self.assertFalse(any(path == "src/other_terminal.py" for _repo, path, _sha in runtime.read_calls))
+        terminal_events = [
+            event for event in meta["evidence_ledger"]["evidence_events"]
+            if "src/terminal.py" in (event.get("paths") or [])
+        ]
+        self.assertEqual(len(terminal_events), 1)
+        self.assertEqual(terminal_events[0]["source_ref"], "pr_head:abcdef123456")
+        self.assertTrue(terminal_events[0]["backend_attempted"])
+        self.assertEqual(terminal_events[0]["coverage_type"], "full_file")
 
     def test_pfr_second_reconcile_gets_one_bounded_terminal_evidence_read(self):
         runtime = _Runtime()
@@ -2078,7 +2099,7 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
         )
         self.assertEqual(meta["pfr_post_terminal_tool_call_count"], 0)
 
-    def test_terminal_evidence_requires_an_incomplete_gap_and_content_read(self):
+    def test_terminal_evidence_requires_explicit_incomplete_and_content_read(self):
         from types import SimpleNamespace
 
         question_id = "q_existing"
@@ -2111,8 +2132,8 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
                     "complete": False,
                     "unresolved_gaps": [],
                 },
-                [{"tool": "read_file", "args": {"path": "src/a.py"}}],
-                "no_unresolved_gap",
+                [],
+                "no_content_read",
             ),
             (
                 {
@@ -2125,7 +2146,7 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
                     ],
                 },
                 [{"tool": "search_code", "args": {"query": "Caller"}}],
-                "no_single_content_read",
+                "no_content_read",
             ),
         ]
         for reconcile, followups, expected in cases:
@@ -2190,9 +2211,8 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
         self.assertIsNone(selected)
         self.assertEqual(outcome, "pipeline_deadline_reserve")
 
-    def test_terminal_evidence_refuses_ambiguous_reads(self):
-        from types import SimpleNamespace
-
+    def test_terminal_evidence_selects_first_ordered_read_without_duplicate_gaps(self):
+        executed = []
         state = SimpleNamespace(
             read_calls=0,
             max_read_calls=6,
@@ -2202,60 +2222,34 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
             repo_inventory=None,
             evidence_ledger=EvidenceLedger(expected_head_sha="head"),
         )
-        executor = SimpleNamespace(
-            state=state,
-            execute=lambda *_args, **_kwargs: self.fail(
-                "ambiguous terminal closure must not execute"
-            ),
-        )
-        reconcile = {
-            "complete": False,
-            "unresolved_gaps": [
-                {"claim": "First gap.", "question_id": "q_one"},
-                {"claim": "Second gap.", "question_id": "q_two"},
-            ],
-        }
 
-        selected, outcome = _terminal_evidence_read(
-            executor,
-            reconcile,
-            [
-                {
-                    "tool": "read_file",
-                    "args": {
-                        "path": "src/target.py",
-                        "mode": "content",
-                    },
-                },
-                {
-                    "tool": "read_file",
-                    "args": {
-                        "path": "src/other.py",
-                        "mode": "content",
-                    },
-                },
-            ],
-        )
-        self.assertIsNone(selected)
-        self.assertEqual(outcome, "no_single_content_read")
+        def execute_selected(tool_call, *, question_id):
+            executed.append((tool_call, question_id))
+            state.read_calls += 1
+            state.tool_events.append({"outcome": "hit"})
 
-        reconcile["unresolved_gaps"] = []
+        executor = SimpleNamespace(state=state, execute=execute_selected)
+        followups = [
+            {"tool": "search_code", "args": {"query": "Other"}},
+            {
+                "tool": "read_file",
+                "question": "Inspect the first requested content.",
+                "args": {"path": "src/first.py", "mode": "content"},
+            },
+            {
+                "tool": "read_file",
+                "question": "Inspect another candidate, if budget permits.",
+                "args": {"path": "src/second.py", "mode": "content"},
+            },
+        ]
         selected, outcome = _terminal_evidence_read(
-            executor,
-            reconcile,
-            [
-                {
-                    "tool": "read_file",
-                    "args": {
-                        "path": "src/target.py",
-                        "mode": "content",
-                        "symbols": ["Unrelated"],
-                    },
-                }
-            ],
+            executor, {"complete": False, "unresolved_gaps": []}, followups,
         )
-        self.assertIsNone(selected)
-        self.assertEqual(outcome, "no_unresolved_gap")
+        self.assertIs(selected, followups[1])
+        self.assertEqual(outcome, "hit")
+        self.assertEqual(len(executed), 1)
+        self.assertEqual(state.read_calls, 1)
+        self.assertIn(executed[0][1], state.evidence_ledger.questions)
 
     def test_terminal_evidence_executes_one_read_under_fresh_question(self):
         """A late-discovered file must not seal the boundary unread."""
@@ -2308,13 +2302,11 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
         self.assertNotEqual(executed["question_id"], prior_question_id)
         self.assertIn(executed["question_id"], ledger.questions)
 
-    def test_terminal_evidence_floor_stays_unambiguous(self):
-        from types import SimpleNamespace
-
+    def test_terminal_evidence_never_infers_incomplete_or_crosses_context_reserve(self):
         state = SimpleNamespace(
             read_calls=0,
             max_read_calls=6,
-            remaining_time=lambda: 120,
+            remaining_time=lambda: 29,
             deadline=SimpleNamespace(remaining_seconds=lambda: 120),
             tool_events=[],
             repo_inventory=None,
@@ -2322,36 +2314,21 @@ export async function getToken(scope: string = REQUIRED_SCOPE) {
         )
         executor = SimpleNamespace(
             state=state,
-            execute=lambda *_args, **_kwargs: self.fail(
-                "ambiguous terminal closure must not execute"
-            ),
+            execute=lambda *_args, **_kwargs: self.fail("guarded read must not execute"),
         )
-        reconcile = {
-            "complete": False,
-            "unresolved_gaps": [
-                {
-                    "claim": "The discovery result remains unresolved.",
-                    "question_id": "q_discovery",
-                }
-            ],
-        }
-
+        followups = [{"tool": "read_file", "args": {"path": "vite.config.ts"}}]
+        for complete in (None, True, 0, "false"):
+            with self.subTest(complete=complete):
+                selected, outcome = _terminal_evidence_read(
+                    executor, {"complete": complete, "unresolved_gaps": []}, followups,
+                )
+                self.assertIsNone(selected)
+                self.assertEqual(outcome, "reconcile_complete")
         selected, outcome = _terminal_evidence_read(
-            executor,
-            reconcile,
-            [
-                {
-                    "tool": "read_file",
-                    "args": {"path": "vite.config.ts", "mode": "content"},
-                },
-                {
-                    "tool": "read_file",
-                    "args": {"path": "rollup.config.ts", "mode": "content"},
-                },
-            ],
+            executor, {"complete": False, "unresolved_gaps": []}, followups,
         )
         self.assertIsNone(selected)
-        self.assertEqual(outcome, "no_single_content_read")
+        self.assertEqual(outcome, "context_time_reserve")
 
     def test_terminal_evidence_skips_an_unaddressable_large_read(self):
         from types import SimpleNamespace

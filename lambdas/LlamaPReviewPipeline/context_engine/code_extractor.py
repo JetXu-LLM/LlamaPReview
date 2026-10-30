@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
+
+_JSON_MEMBER = re.compile(r'^\s*("(?:[^"\\]|\\.)*")\s*:\s*')
+
+
+def _invalid_json_constant(value: str):
+    raise ValueError(f"Invalid JSON constant: {value}")
 
 
 class CodeContextExtractor:
@@ -66,6 +73,28 @@ class CodeContextExtractor:
         lines = content.splitlines()
         if line_index < 0 or line_index >= len(lines):
             return None, -1, -1
+        member = _JSON_MEMBER.match(lines[line_index])
+        if member and lines[line_index][member.end():].startswith(("{", "[")):
+            # A data member has no function declaration to find above it. Keep
+            # its own bounded container rather than exposing only a seven-line
+            # header. Decode only to locate a string/escape-aware boundary;
+            # evidence remains the exact original lines, never reserialized.
+            window = "\n".join(lines[line_index:line_index + max_block_lines])
+            try:
+                key = json.loads(member.group(1))
+                if symbol not in {key, member.group(1), member.group(1) + ":"}:
+                    return None, -1, -1
+                _value, end_offset = json.JSONDecoder(
+                    parse_constant=_invalid_json_constant,
+                ).raw_decode(window, member.end())
+            except (ValueError, RecursionError):
+                return None, -1, -1
+            end_index = window.count("\n", 0, end_offset)
+            trailing = window[end_offset:].split("\n", 1)[0].strip()
+            if trailing not in {"", ","}:
+                return None, -1, -1
+            end_line = line_index + end_index + 1
+            return "\n".join(lines[line_index:end_line]), line_index + 1, end_line
         def_idx = -1
         for idx in range(line_index, -1, -1):
             if self._is_definition_start_line(lines[idx]):
@@ -131,6 +160,21 @@ class CodeContextExtractor:
         return "\n".join(lines[start : end + 1]), start + 1, end + 1
 
     def pick_representative_line(self, candidate_lines: List[int], lines: List[str], symbol: str) -> int:
+        # A qualified JSON key is an exact selector when present. Do not let
+        # an earlier nested-key suffix or similarly named package win merely
+        # because both contain the requested literal substring.
+        for idx in candidate_lines:
+            member = _JSON_MEMBER.match(lines[idx])
+            if member:
+                try:
+                    if symbol in {
+                        json.loads(member.group(1)),
+                        member.group(1),
+                        member.group(1) + ":",
+                    }:
+                        return idx
+                except ValueError:
+                    pass
         for idx in candidate_lines:
             if "(" in lines[idx] and (not symbol or symbol in lines[idx]):
                 return idx

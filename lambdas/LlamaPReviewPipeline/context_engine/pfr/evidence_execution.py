@@ -473,13 +473,8 @@ def _terminal_evidence_read(
     """
 
     state = executor.state
-    if reconcile.get("complete") is True:
+    if reconcile.get("complete") is not False:
         return None, "reconcile_complete"
-    if not any(
-        isinstance(item, dict)
-        for item in reconcile.get("unresolved_gaps") or []
-    ):
-        return None, "no_unresolved_gap"
 
     def executable_content_read(step: Dict[str, Any]) -> bool:
         if step.get("tool") != "read_file":
@@ -499,9 +494,13 @@ def _terminal_evidence_read(
             or args.get("symbols")
         )
 
-    eligible = [step for step in followups if executable_content_read(step)]
-    if len(eligible) != 1:
-        return None, "no_single_content_read"
+    # A validated explicit follow-up is itself an unfinished evidence request;
+    # it need not be duplicated in unresolved_gaps. Spend the existing one-read
+    # rescue on the earliest eligible request in the model's semantic order,
+    # even when other requests must remain honestly unexecuted.
+    eligible = [step for step in _ordered_steps(followups) if executable_content_read(step)]
+    if not eligible:
+        return None, "no_content_read"
     if state.read_calls >= state.max_read_calls:
         return None, "hard_read_cap_reached"
     if state.remaining_time() < 30:
