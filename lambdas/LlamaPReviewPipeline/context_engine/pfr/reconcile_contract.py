@@ -7,6 +7,7 @@ import re
 import time
 
 from ... import config
+from ...direct_openai import ReconcilePrefix
 from ...structured_repair import (
     ContractRepairIssue,
     RepairIssueSelection,
@@ -940,25 +941,22 @@ def _reconcile(
         "</CODE_GENERATED_EVIDENCE_EVENT_INDEX>"
     ),
 ) -> Dict[str, Any]:
+    # Split while composing trusted structure, not by finding an untrusted tag.
+    prefix = (
+        "<UNTRUSTED_PR_DETAILS>\n"
+        + truncate_preserving_current_ci(pr_details, 120000)
+        + "\n</UNTRUSTED_PR_DETAILS>\n\n<VERIFICATION_PLAN>\n"
+        + json.dumps(plan, ensure_ascii=False)
+        + "\n</VERIFICATION_PLAN>"
+    )
+    suffix = (
+        "\n\n" + evidence_index_envelope
+        + "\n\n<UNTRUSTED_FETCHED_CONTEXT>\n" + context_text
+        + "\n</UNTRUSTED_FETCHED_CONTEXT>"
+    )
     messages = [
-        {
-            "role": "system",
-            "content": RECONCILE_SYSTEM_PROMPT,
-        },
-        {
-            "role": "user",
-            "content": (
-                "<UNTRUSTED_PR_DETAILS>\n"
-                + truncate_preserving_current_ci(pr_details, 120000)
-                + "\n</UNTRUSTED_PR_DETAILS>\n\n<VERIFICATION_PLAN>\n"
-                + json.dumps(plan, ensure_ascii=False)
-                + "\n</VERIFICATION_PLAN>\n\n"
-                + evidence_index_envelope
-                + "\n\n<UNTRUSTED_FETCHED_CONTEXT>\n"
-                + context_text
-                + "\n</UNTRUSTED_FETCHED_CONTEXT>"
-            ),
-        },
+        {"role": "system", "content": RECONCILE_SYSTEM_PROMPT},
+        {"role": "user", "content": prefix + suffix},
     ]
     initial_usage: Dict[str, Any] = {}
     initial_finish_reason = ""
@@ -976,7 +974,8 @@ def _reconcile(
             reasoning_effort=reasoning_effort,
             thinking=True,
             response_format={"type": "json_object"},
-            **({"max_tokens": 12000} if config.MODEL_PROVIDER == "direct_openai" else {}),
+            **({"max_tokens": 12000, "reconcile_prefix": ReconcilePrefix(prefix, suffix)}
+               if config.MODEL_PROVIDER == "direct_openai" else {}),
             trace_phase="pfr_reconcile",
             trace_metadata={**trace_metadata, "round": round_index},
             deadline=deadline,

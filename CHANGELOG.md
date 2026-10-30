@@ -11,6 +11,8 @@ do not appear as project versions.
 
 ## Unreleased
 
+- Add default-off, profile-bound same-run Reconcile prefix caching with exact text preservation, isolated scope, cold-write reservations and strict original-fence cache accounting.
+
 ### Fixed
 
 - PR evidence formatting preserves literal backslash escapes in source patches

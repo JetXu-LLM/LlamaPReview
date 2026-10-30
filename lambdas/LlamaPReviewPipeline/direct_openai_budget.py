@@ -14,11 +14,11 @@ import re
 import time
 from typing import Any, Mapping
 
-from .direct_openai import MAX_INPUT_TOKENS
+from .direct_openai import MAX_INPUT_TOKENS, CACHE_OFF, CACHE_RECONCILE
 
 PRICING_VERSION = "openai-standard-text-2026-10-29"
 # Nano-USD per token, standard non-regional, no tools. The long-context rates
-# are reserved for EVERY call. Explicit-only caching has no breakpoints.
+# are reserved for EVERY call; opt-in Reconcile reserves a cold 30m write.
 PRICES = {
     "gpt-6-luna": {"input": 100, "cached": 10, "write_30m": 125, "write_12h": 250, "output": 500},
     "gpt-6.1-terra": {
@@ -123,9 +123,12 @@ def load_policy(raw=None, *, now=None, request_seconds=0, profile_sha256=None) -
     return policy
 
 
-def reservation(policy: Mapping[str, Any], *, model: str, max_output_tokens: int) -> dict[str, Any]:
+def reservation(
+    policy: Mapping[str, Any], *, model: str, max_output_tokens: int, cache_mode: str = CACHE_OFF
+) -> dict[str, Any]:
     if (
-        model not in PRICES
+        cache_mode not in (CACHE_OFF, CACHE_RECONCILE)
+        or model not in PRICES
         or type(max_output_tokens) is not int
         or not 1 <= max_output_tokens <= 128_000
     ):
@@ -134,7 +137,8 @@ def reservation(policy: Mapping[str, Any], *, model: str, max_output_tokens: int
     # Both approved models share the documented context cap. Reserving that
     # full input limit (even for tiny requests) is conservative without a paid
     # token-count call or an unproven tokenizer-overhead assumption.
-    amount = MAX_INPUT_TOKENS * price["input"] * 2 + max_output_tokens * price["output"] * 3 // 2
+    input_price = price["write_30m"] if cache_mode == CACHE_RECONCILE else price["input"]
+    amount = MAX_INPUT_TOKENS * input_price * 2 + max_output_tokens * price["output"] * 3 // 2
     key = "_OPENAI_GRANT_" + digest(
         {key: policy[key] for key in ("cycle_id", "organization_id", "project_id")}
     )
@@ -151,73 +155,100 @@ def reservation(policy: Mapping[str, Any], *, model: str, max_output_tokens: int
         "max_input_tokens": MAX_INPUT_TOKENS,
         "max_output_tokens": max_output_tokens,
         "reserved_nanousd": amount,
-        "cache_mode": "explicit_no_breakpoints",
+        "cache_mode": cache_mode,
+        **({"cache_ttl": "30m"} if cache_mode == CACHE_RECONCILE else {}),
     }
 
 
-def actual_cost(record: Mapping[str, Any], original: Mapping[str, Any]) -> int | None:
-    """Price only complete validated usage with the ORIGINAL fence's tariff.
+def _integral(value):
+    if type(value) is int and value >= 0:
+        return value
+    if (
+        isinstance(value, Decimal)
+        and value.is_finite()
+        and value >= 0
+        and value == value.to_integral_value()
+    ):
+        return int(value)
+    return None
 
-    Reasoning is a subset of output, never added twice. Unexpected cache writes,
-    service tier, model, or token bounds retain the full reservation for manual
-    reconciliation instead of manufacturing a refund.
+
+def cache_usage_parts(usage, cache_mode):
+    """Validate RAW partitions before the generic numeric tree can drop bad leaves.
+
+    Reused on durable Decimal records. No coercion, inferred TTL or missing-zero
+    default may turn contradictory provider accounting into a refund.
     """
+    if not isinstance(usage, Mapping) or cache_mode not in (CACHE_OFF, CACHE_RECONCILE):
+        return None
+    details, output_details = usage.get("input_tokens_details"), usage.get("output_tokens_details")
+    if not isinstance(details, Mapping) or not isinstance(output_details, Mapping):
+        return None
+    values = tuple(
+        _integral(x)
+        for x in (
+            usage.get("input_tokens"),
+            usage.get("output_tokens"),
+            usage.get("total_tokens"),
+            details.get("cached_tokens"),
+            details.get("cache_write_tokens"),
+            output_details.get("reasoning_tokens"),
+        )
+    )
+    if any(x is None for x in values):
+        return None
+    inp, out, total, cache, write, reasoning = values
+    if total != inp + out or reasoning > out or cache + write > inp:
+        return None
+    ttl = details.get("cache_write_tokens_details")
+    if cache_mode == CACHE_OFF:
+        if (
+            cache
+            or write
+            or (
+                ttl is not None
+                and (not isinstance(ttl, Mapping) or any(_integral(v) != 0 for v in ttl.values()))
+            )
+        ):
+            return None
+        return inp, out, cache, 0
+    if not isinstance(ttl, Mapping) or set(ttl) != {"ttl_30m_tokens", "ttl_12h_tokens"}:
+        return None
+    short, long = _integral(ttl["ttl_30m_tokens"]), _integral(ttl["ttl_12h_tokens"])
+    if short is None or long != 0 or short != write:
+        return None
+    return inp, out, cache, short
+
+
+def actual_cost(record: Mapping[str, Any], original: Mapping[str, Any]) -> int | None:
+    """Settle valid partitions using only the original durable fence's tariff."""
     if record.get("usage_state") != "reported" or record.get("service_tier") != "default":
         return None
     if record.get("response_model") != record.get("billed_model"):
         return None
+    mode = original.get("cache_mode")
+    if mode == CACHE_RECONCILE and original.get("cache_ttl") != "30m":
+        return None
     usage = record.get("usage")
-    if not isinstance(usage, Mapping):
+    parts = cache_usage_parts(usage, mode)
+    if parts is None:
         return None
-    inp, out, total = (usage.get(key) for key in ("input_tokens", "output_tokens", "total_tokens"))
-    details = usage.get("input_tokens_details")
-    output_details = usage.get("output_tokens_details")
-    if not isinstance(details, Mapping) or not isinstance(output_details, Mapping):
-        return None
-    cache, write, reasoning = (
-        details.get("cached_tokens"),
-        details.get("cache_write_tokens"),
-        output_details.get("reasoning_tokens"),
-    )
-
-    def integral(value):
-        if type(value) is int and value >= 0:
-            return value
-        if (
-            isinstance(value, Decimal)
-            and value.is_finite()
-            and value >= 0
-            and value == value.to_integral_value()
-        ):
-            return int(value)
-        return None
-
-    numbers = tuple(integral(x) for x in (inp, out, total, cache, write, reasoning))
-    if any(x is None for x in numbers):
-        return None
-    inp, out, total, cache, write, reasoning = numbers
+    inp, out, cache, write = parts
     if (
-        total != inp + out
-        or inp > original["max_input_tokens"]
+        inp > original["max_input_tokens"]
         or out > original["max_output_tokens"]
-        or reasoning > out
-        or cache + write > inp
-    ):
-        return None
-    if usage.get("prompt_tokens") != inp or usage.get("completion_tokens") != out:
-        return None
-    # This adapter explicitly disables implicit caching and supplies no
-    # breakpoint. Nonzero cache use proves a contract mismatch, not a discount.
-    if cache or write:
-        return None
-    write_details = details.get("cache_write_tokens_details")
-    if write_details is not None and (
-        not isinstance(write_details, Mapping)
-        or any(integral(value) != 0 for value in write_details.values())
+        or _integral(usage.get("prompt_tokens")) != inp
+        or _integral(usage.get("completion_tokens")) != out
     ):
         return None
     price = original["price"]
-    numerator = inp * price["input"] * (4 if inp > 272_000 else 2) + out * price["output"] * (
+    input_cost = (
+        (inp - cache - write) * price["input"]
+        + cache * price["cached"]
+        + write * price["write_30m"]
+    )
+    # Full input, including ALL read/write partitions, selects the long price.
+    numerator = input_cost * (4 if inp > 272_000 else 2) + out * price["output"] * (
         3 if inp > 272_000 else 2
     )
     cost = (numerator + 1) // 2

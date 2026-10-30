@@ -6,6 +6,7 @@ import base64
 import gzip
 import hashlib
 import json
+import os
 import logging
 import re
 import time
@@ -885,6 +886,7 @@ _PROVIDER_CALL_IDENTITY_FIELDS = (
     "profile_sha256",
     "stage",
     "tier",
+    "cache_request",
     "call_id",
     "operation_id",
     "run_id",
@@ -1039,6 +1041,7 @@ def begin_provider_call_dispatch(
     record: Mapping[str, Any],
     phase_claim: Optional[Mapping[str, Any]] = None,
     table=None,
+    direct_request_context=None,
 ) -> bool:
     """Persist one owner-bound attempt fence before provider HTTP begins.
 
@@ -1089,7 +1092,33 @@ def begin_provider_call_dispatch(
         supplied = record.get("budget")
         if not isinstance(supplied, Mapping):
             raise ArtifactIntegrityError("Direct OpenAI dispatch requires a grant reservation")
-        budget = reservation(policy, model=record.get("billed_model"), max_output_tokens=supplied.get("max_output_tokens"))
+        from .direct_openai import CACHE_OFF, CACHE_RECONCILE, request_cache_receipt
+        from .provider_model_routing import parse_direct_openai_profile
+        cache_mode = CACHE_OFF
+        if direct_request_context is not None:
+            if not isinstance(direct_request_context, Mapping) or set(direct_request_context) != {"request", "scope"}:
+                raise ArtifactIntegrityError("Invalid ephemeral direct request proof")
+            profile = parse_direct_openai_profile(os.environ.get("DIRECT_OPENAI_PROFILE", ""))
+            proof = record.get("cache_request") or {}
+            receipt = request_cache_receipt(
+                direct_request_context["request"], profile=profile, phase=record.get("phase"),
+                round_index=proof.get("round"), tier=record.get("tier"),
+                scope=direct_request_context["scope"], policy=policy,
+            )
+            request = direct_request_context["request"]
+            if (receipt is None or receipt != proof or profile.sha256 != record.get("profile_sha256")
+                    or profile.version != record.get("profile_version") or record.get("stage") != "pfr_reconcile"
+                    or request.get("model") != record.get("billed_model")
+                    or request.get("reasoning") != {"effort": record.get("reasoning_effort")}
+                    or type(record.get("call_index")) is not int or record["call_index"] != proof.get("round")):
+                raise ArtifactIntegrityError("Direct cache proof differs from actual wire/profile")
+            if direct_request_context["request"].get("max_output_tokens") != supplied.get("max_output_tokens"):
+                raise ArtifactIntegrityError("Direct cache output cap differs from actual wire")
+            cache_mode = CACHE_RECONCILE
+        elif "cache_request" in record:
+            raise ArtifactIntegrityError("Direct cache requires actual wire proof")
+        budget = reservation(policy, model=record.get("billed_model"),
+                             max_output_tokens=supplied.get("max_output_tokens"), cache_mode=cache_mode)
         if dict(supplied) != budget:
             raise ArtifactIntegrityError("Direct OpenAI reservation differs from verified policy")
     elif "budget" in record:
@@ -1103,6 +1132,12 @@ def begin_provider_call_dispatch(
     )
     if not current or str(current.get("status") or "") != str(expected_status):
         return False
+    if direct_request_context is not None:
+        scope = direct_request_context["scope"]
+        if (scope.get("repo") != repo or scope.get("pr_number") != pr_number
+                or any(scope.get(key) != current.get(key) for key in ("installation_id", "head_sha", "run_id"))
+                or any(scope.get(key) != record.get(key) for key in ("head_sha", "run_id"))):
+            raise ArtifactIntegrityError("Direct cache scope differs from durable admission")
     pinned_provider = current.get("provider_profile_provider")
     pinned_profile = current.get("provider_profile_sha256")
     if pinned_provider and (record.get("provider") != pinned_provider or record.get("profile_sha256") != pinned_profile):

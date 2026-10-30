@@ -57,7 +57,7 @@ reconciled merely because it contains numbers.
 loop for all providers. The direct dialect uses `/v1/responses`, plain text only,
 explicit reasoning, bounded output, `store=false`, `stream=false`,
 `background=false`, `truncation=disabled`, `service_tier=default`, and
-`prompt_cache_options.mode=explicit` **without breakpoints**. The transport envelope caps plain text at 4MB UTF-8 (and 128 messages), so it
+`prompt_cache_options.mode=explicit` **without breakpoints by default**. The transport envelope caps plain text at 4MB UTF-8 (and 128 messages), so it
 does not accidentally narrow the existing 850k-character stage cap for Unicode.
 Existing stage character limits remain unchanged; this is not a promise that
 every bounded input fits the provider context window. No provider tools,
@@ -118,6 +118,48 @@ original can never be refunded automatically. Operators must not delete/reset a
 counter to clear these obligations. A later verified grant does not erase old
 ones or prove shared credits are unspent.
 
+## Opt-in same-run Reconcile prefix
+
+`reconcile_cache: "same_run_30m"` in the strict profile enables only the initial
+Reconcile calls in existing rounds 1 and 2. It does not select a model, add a
+round/call, change a prompt, or enable a deployment. Route, Plan, Deep, Final and
+representation corrections remain cache-off. The approved profile digest must
+change; old qualification approvals are not authority for this new wire.
+
+The trusted Reconcile builder keeps its own prefix through its generated
+`</VERIFICATION_PLAN>` boundary separate from the remaining evidence. The direct
+adapter sends exactly two `input_text` blocks in the same user message, with one
+explicit breakpoint after the prefix and a request-level `ttl: "30m"`. Concatenating
+them reproduces the original text exactly. Canonical messages remain strings, so
+repair cannot inherit the breakpoint. No delimiter is searched in PR text.
+
+An opaque `prompt_cache_key` binds the existing validated installation, repository
+owner/ID, repository/PR, exact head, run, model/effort/profile, text format, developer/prefix
+hash, and the verified budget organization/project. Repository IDs come only
+from the already-fetched native PR; no new GitHub lookup or credential is added.
+Missing or invalid scope keeps the old cache-off request. The durable fence owner
+independently checks the approved profile, round, actual wire and admission;
+only hashes and billing scalars persist, never raw cache scope or prompt text.
+
+Every attempt reserves the full maximum input at the **cold 30-minute write**
+rate, including when a hit is expected. At 12,000 output tokens the reserve is
+$2.715 for Terra / $0.2715 for Luna; at 64,000 it is $3.105 / $0.3105. Insufficient
+authorized headroom stops before HTTP rather than increasing the allocation.
+Settlement validates raw usage before lossy numeric normalization, then charges
+ordinary input, cache reads, and `ttl_30m_tokens` writes from the original fence's
+price. Both TTL fields must be present and sum to writes; `ttl_12h_tokens` must
+be zero. Missing, negative, boolean, fractional or contradictory partitions keep
+the full reservation. Reasoning remains a subset of output. The **whole** input,
+including all cache partitions, selects the >272,000 long-context price tier.
+
+There is no token estimator or count API here. A prefix below the provider's
+1,024-token minimum may simply not cache; character/byte counts do not prove that
+minimum. No padding, prewarming, 12-hour retention, cross-run reuse or additional
+request is permitted. Thirty minutes is a minimum retention, not a deletion
+promise. A missing second round or cache miss can cost more than cache-off;
+actual first-write plus second-read usage and quality/latency must be measured
+under separately approved qualification before claiming savings.
+
 ## Price evidence and qualification limits
 
 The frozen standard non-regional text rates (USD per million tokens) are:
@@ -128,7 +170,7 @@ The frozen standard non-regional text rates (USD per million tokens) are:
 | `gpt-6.1-terra` | 1.00 | 0.05 | 5.00 |
 
 Inputs over 272K use 2× input/cache and 1.5× output rates for the whole request.
-The adapter requests no caching; it does not assume future savings. See official
+The default adapter requests no caching; opt-in caching never assumes a hit or future savings. See official
 [Luna](https://developers.openai.com/api/docs/models/gpt-6-luna),
 [Terra](https://developers.openai.com/api/docs/models/gpt-6.1-terra),
 [Responses](https://developers.openai.com/api/reference/python/resources/responses/methods/create),

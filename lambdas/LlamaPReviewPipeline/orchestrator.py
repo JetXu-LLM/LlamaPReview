@@ -1204,6 +1204,16 @@ def run_context_phase(
             model=config.ANALYZER_MODEL,
             reasoning_effort=config.ANALYZER_EFFORT,
         )
+        cache_scope_setter = getattr(context_client, "set_reconcile_cache_scope", None)
+        cache_identity_getter = getattr(active_runtime, "reconcile_cache_identity", None)
+        if callable(cache_scope_setter):
+            identity = (cache_identity_getter(repo, pr_number, head_sha)
+                        if callable(cache_identity_getter) else {})
+            # Cache scope cannot use the legacy repo/PR fallback as a run ID.
+            cache_scope_setter(
+                {**identity, "installation_id": installation_id, "run_id": run_id}
+                if item_for_context.get("run_id") == run_id else {}
+            )
         bind_provider_call_accounting(
             context_client,
             repo=repo,

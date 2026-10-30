@@ -21,11 +21,19 @@ $150 monthly forecast. After separate authorization and actual comparisons,
 replace individual cells only where the evidence supports the model/effort;
 version and freeze that exact table with the selection report and release.
 
-The environment value is compact JSON with exactly these fields:
+The environment value is compact JSON with these required fields:
 
 - `version`: a nonempty, bounded identifier;
 - `route`: `[exact_model_id, effort]`, used before a tier is known;
 - `tiers`: exactly `low`, `normal`, and `high`, with the stage cells below.
+
+An optional `reconcile_cache` field accepts only `off` (the default when absent)
+or `same_run_30m`. Adding this opt-in binds a new canonical profile digest; it
+requires separate qualification and a matching approved budget policy. The
+shipped example remains unchanged and cache-off. Missing-field profiles retain
+their original digest and request bytes. Explicit `off` also uses the original
+cache-off wire, but, as with any explicit profile-field change, has its own digest.
+See [the bounded cache contract](DIRECT_OPENAI_BUDGET.md#opt-in-same-run-reconcile-prefix).
 
 The JSON parser rejects duplicate keys, omitted or extra cells, aliases,
 unknown models, invalid efforts, fallback fields and oversized configuration.

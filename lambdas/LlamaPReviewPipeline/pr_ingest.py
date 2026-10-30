@@ -313,7 +313,16 @@ class GitHubRuntime:
     def get_repository(self, repo_full_name: str):
         return self.pool.get_repository(repo_full_name, github_instance=self.github)
 
+    def reconcile_cache_identity(self, repo_full_name: str, pr_number: int, head_sha: str):
+        """Reuse only IDs from the already fetched native PR; never do a lookup."""
+        identity = getattr(self, "_reconcile_cache_identity", None)
+        if (isinstance(identity, dict) and identity.get("repo") == repo_full_name
+                and identity.get("pr_number") == pr_number and identity.get("head_sha") == head_sha):
+            return dict(identity)
+        return {}
+
     def get_pr_content(self, repo_full_name: str, pr_number: int, *, context_lines: int = 10, force_update: bool = True) -> Dict[str, Any]:
+        self._reconcile_cache_identity = {}
         repo = self.get_repository(repo_full_name)
         # Resolve the native PullRequest exactly once and pass it through to the
         # SDK. Repository.get_pr_content otherwise performs this same get_pull
@@ -357,6 +366,23 @@ class GitHubRuntime:
                 if isinstance(raw_base_sha, str)
                 else ""
             )
+            # CompletableGithubObject.raw_data may fetch on a lazy object.
+            # Read it only when already complete; missing scope stays off.
+            # Keep identity out of PR text, trace metadata and persisted content.
+            raw = getattr(pull, "raw_data", None) if getattr(pull, "completed", False) is True else None
+            base_repo = ((raw.get("base") or {}).get("repo")
+                         if isinstance(raw, dict) and isinstance(raw.get("base"), dict) else None)
+            owner = base_repo.get("owner") if isinstance(base_repo, dict) else None
+            if (isinstance(base_repo, dict) and isinstance(owner, dict)
+                    and base_repo.get("full_name") == repo_full_name
+                    and base_repo.get("private") is False
+                    and raw.get("number") == int(pr_number)
+                    and type(base_repo.get("id")) is int and base_repo["id"] > 0
+                    and type(owner.get("id")) is int and owner["id"] > 0):
+                self._reconcile_cache_identity = {
+                    "repo": repo_full_name, "pr_number": int(pr_number), "head_sha": head_sha,
+                    "repository_id": base_repo["id"], "account_id": owner["id"],
+                }
             if head_sha:
                 metadata["head_sha"] = head_sha
             if base_sha:

@@ -32,7 +32,8 @@
     "tests.unit.test_direct_openai_transport_budget.DirectOpenAITransportBudgetTests.test_late_settlement_after_takeover_and_expiry",
     "tests.unit.test_json_member_evidence.JsonMemberEvidenceTests.test_cached_read_preserves_peers_and_provenance_without_backend_purchase",
     "tests.unit.test_context_engine_pipeline.TestContextEnginePipeline.test_pfr_incomplete_terminal_followups_get_one_read_without_third_round",
-    "tests.unit.test_pr_ingest_literal_escapes.PRIngestLiteralEscapeTests.test_fetch_to_full_and_compacted_details_keeps_one_exact_source"
+    "tests.unit.test_pr_ingest_literal_escapes.PRIngestLiteralEscapeTests.test_fetch_to_full_and_compacted_details_keeps_one_exact_source",
+    "tests.unit.test_reconcile_prefix_cache.ReconcilePrefixCacheTests.test_real_builder_fake_tag_and_initial_cache_on_to_repair_off"
   ],
   "sealed": [
     "tests.unit.test_semantic_replays.SemanticReplayTests.test_causal_finding_survives_and_gets_one_inline",

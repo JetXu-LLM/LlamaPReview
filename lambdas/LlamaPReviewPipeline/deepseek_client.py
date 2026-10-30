@@ -21,8 +21,8 @@ from typing import Any, Callable, Dict, List, Optional
 from . import config
 from .deadline import Deadline, DeadlineExceeded
 from .provider_model_routing import resolve_provider_model, parse_direct_openai_profile
-from .direct_openai import build_request as build_direct_request, normalize_response as normalize_direct_response
-from .direct_openai_budget import load_policy as load_budget_policy, reservation as budget_reservation, actual_cost as direct_actual_cost
+from .direct_openai import build_request as build_direct_request, normalize_response as normalize_direct_response, apply_reconcile_cache, request_cache_receipt, CACHE_OFF, CACHE_RECONCILE, valid_cache_scope
+from .direct_openai_budget import load_policy as load_budget_policy, reservation as budget_reservation, actual_cost as direct_actual_cost, cache_usage_parts
 from .provider_usage import normalize_openrouter_usage, validate_complete_token_usage
 
 logger = logging.getLogger(__name__)
@@ -527,6 +527,16 @@ class DeepSeekClient:
         self._provider_call_sink: Optional[Callable[[Dict[str, Any]], None]] = None
         self._provider_call_ordinals: Dict[tuple[str, int, str], int] = {}
         self._provider_call_records: List[Dict[str, Any]] = []
+        self._reconcile_cache_scope = {}
+        self._direct_dispatch_context = None
+
+    def set_reconcile_cache_scope(self, scope):
+        # Explicit trusted admission/runtime input, never model/trace metadata.
+        self._reconcile_cache_scope = dict(scope) if valid_cache_scope(scope) else {}
+
+    def direct_dispatch_context(self):
+        """Ephemeral wire proof for the existing durable fence owner only."""
+        return deepcopy(self._direct_dispatch_context)
 
     def set_provider_call_sink(
         self,
@@ -640,14 +650,22 @@ class DeepSeekClient:
             except (AttributeError, IndexError, TypeError):
                 finish_reason = ""
         raw_usage = result.get("usage") if isinstance(result, dict) else None
+        # Check raw partitions first: generic projection deliberately drops
+        # bool/negative/invalid leaves and must not wash them into a refund.
+        raw_cache_invalid = self.provider == "direct_openai" and cache_usage_parts(
+            raw_usage, (payload.get("_llamapreview_budget") or {}).get("cache_mode")
+        ) is None
         numeric_usage, usage_errors = validate_complete_token_usage(
             raw_usage if isinstance(raw_usage, Mapping) else None
         )
+        if raw_cache_invalid:
+            usage_errors = [*usage_errors, "direct_openai_raw_usage_invalid"]
         usage_reported = not usage_errors
         record: Dict[str, Any] = {
             "schema_version": 2,
             **{key: operation[key] for key in ("profile_version", "profile_sha256", "stage", "tier") if key in operation},
             **({"budget": deepcopy(payload["_llamapreview_budget"])} if "_llamapreview_budget" in payload else {}),
+            **({"cache_request": deepcopy(operation["cache_request"])} if "cache_request" in operation else {}),
             "provider": self.provider,
             "call_id": call_id,
             "operation_id": operation_id,
@@ -748,6 +766,7 @@ class DeepSeekClient:
             "schema_version": 2,
             **{key: operation[key] for key in ("profile_version", "profile_sha256", "stage", "tier") if key in operation},
             **({"budget": deepcopy(payload["_llamapreview_budget"])} if "_llamapreview_budget" in payload else {}),
+            **({"cache_request": deepcopy(operation["cache_request"])} if "cache_request" in operation else {}),
             "provider": self.provider,
             "call_id": call_id,
             "operation_id": operation_id,
@@ -882,6 +901,7 @@ class DeepSeekClient:
         max_retries: int = 3,
         timeout_seconds: Optional[float] = None,
         deadline: Optional[Deadline] = None,
+        reconcile_prefix=None,
         trace_phase: Optional[str] = None,
         trace_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -901,6 +921,7 @@ class DeepSeekClient:
             max_retries=max_retries,
             timeout_seconds=timeout_seconds,
             deadline=deadline,
+            reconcile_prefix=reconcile_prefix,
             trace_phase=trace_phase,
             trace_metadata=trace_metadata,
         )
@@ -912,6 +933,7 @@ class DeepSeekClient:
         max_retries: int,
         timeout_seconds: Optional[float] = None,
         deadline: Optional[Deadline] = None,
+        reconcile_prefix=None,
         trace_phase: Optional[str] = None,
         trace_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -927,6 +949,9 @@ class DeepSeekClient:
             "Accept": "application/json",
         }
         budget_policy = None
+        cache_receipt = None
+        direct_context = None
+        self._direct_dispatch_context = None
         if self.provider == "direct_openai":
             if type(max_retries) is not int or not 1 <= max_retries <= 3:
                 raise ValueError("Direct OpenAI permits at most three explicit HTTP attempts")
@@ -948,6 +973,24 @@ class DeepSeekClient:
                     or _payload_effort(payload) != selected.reasoning_effort):
                 raise ValueError("Direct OpenAI dispatch differs from its exact stage/tier profile")
             budget_policy = load_budget_policy(profile_sha256=metadata["profile_sha256"])
+            scope = self._reconcile_cache_scope
+            if self.direct_profile.reconcile_cache == CACHE_RECONCILE and reconcile_prefix is not None:
+                if not all(metadata.get(key) for key in ("repo", "pr_number", "head_sha", "run_id")):
+                    scope = {}
+                elif valid_cache_scope(scope) and any(
+                        scope[key] != metadata[key] for key in ("repo", "pr_number", "head_sha", "run_id")):
+                    raise ValueError("Reconcile cache scope differs from active run")
+            payload = apply_reconcile_cache(
+                payload, reconcile_prefix, profile=self.direct_profile,
+                phase=canonical_provider_phase(trace_phase), round_index=metadata.get("round"),
+                scope=scope, policy=budget_policy,
+            )
+            cache_receipt = request_cache_receipt(
+                payload, profile=self.direct_profile, phase=canonical_provider_phase(trace_phase),
+                round_index=metadata.get("round"), tier=metadata["tier"], scope=scope, policy=budget_policy,
+            )
+            if cache_receipt is not None:
+                direct_context = {"request": deepcopy(payload), "scope": dict(scope)}
             headers["OpenAI-Organization"] = budget_policy["organization_id"]
             headers["OpenAI-Project"] = budget_policy["project_id"]
         if self.provider == "openrouter":
@@ -987,6 +1030,10 @@ class DeepSeekClient:
             trace_phase=trace_phase,
             trace_metadata=trace_metadata,
         )
+        if cache_receipt is not None:
+            if operation["call_index"] != cache_receipt["round"]:
+                raise ValueError("Cache round differs from canonical operation ordinal")
+            operation["cache_request"] = cache_receipt
         transport_attempt_count = 0
         for attempt in range(max_retries):
             dispatch_index = 0
@@ -1012,6 +1059,7 @@ class DeepSeekClient:
                     evidence_payload["_llamapreview_budget"] = budget_reservation(
                         budget_policy, model=model_selection.billed_model,
                         max_output_tokens=transport_payload["max_output_tokens"],
+                        cache_mode=CACHE_RECONCILE if cache_receipt is not None else CACHE_OFF,
                     )
                 transport_attempt_count += 1
                 dispatch_index = transport_attempt_count
@@ -1025,7 +1073,11 @@ class DeepSeekClient:
                 # after the exact attempt identity is durable.  Any ambiguous
                 # prior fence is terminal and therefore cannot buy a second
                 # dispatch on stream redelivery.
-                self._persist_provider_dispatch_fence(dispatch_fence)
+                self._direct_dispatch_context = direct_context
+                try:
+                    self._persist_provider_dispatch_fence(dispatch_fence)
+                finally:
+                    self._direct_dispatch_context = None
                 started = time.monotonic()
                 billing_rejection = False
                 with _absolute_request_timeout(

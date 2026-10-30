@@ -290,6 +290,8 @@ def bind_provider_call_accounting(
                 record=record,
                 phase_claim=phase_claim,
                 table=table,
+                **({"direct_request_context": client.direct_dispatch_context()}
+                   if callable(getattr(client, "direct_dispatch_context", None)) else {}),
             )
         except persistence.ProviderDispatchFenceUnresolved as exc:
             raise ProviderDispatchOutcomeUnknown(
