@@ -100,6 +100,11 @@ Projection treats evidence truth and public placement as separate contracts:
   reference may be removed only when another admitted required reference for
   that same item survives; losing the last required basis for a deciding item
   fails closed.
+- A bare complete repository path may recover only its missing `path:` prefix
+  when that exact identity already exists in the supplied catalog, names that
+  one path, and passes the existing available-evidence and exact-head checks.
+  No basename, case, slash, relative-path, or fuzzy resolution is performed;
+  missing observations and location-only hints remain inadmissible.
 - A `code_snippet` is a placement anchor, not substitute evidence. If the
   snippet cannot be matched to one exact changed region, Projection removes the
   snippet and inline request while retaining an otherwise evidenced finding in

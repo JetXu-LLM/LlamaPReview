@@ -11,6 +11,62 @@ from typing import Dict, List, Optional, Set, Tuple
 logger = logging.getLogger(__name__)
 
 _JSON_MEMBER = re.compile(r'^\s*("(?:[^"\\]|\\.)*")\s*:\s*')
+_JS_FUNCTION = re.compile(r"^\s*(?:export\s+(?:default\s+)?)?(?:async\s+)?function\b")
+_JS_LITERAL_OR_COMMENT = re.compile(
+    r"//[^\n]*|/\*[\s\S]*?\*/|'(?:\\.|[^'\\\r\n])*'|\"(?:\\.|[^\"\\\r\n])*\"|`(?:\\.|[^`\\])*`"
+)
+
+
+def _js_function_window(lines, start, selected, limit):
+    """Skip parameter type/default braces; ambiguous signatures keep the fallback.
+
+    This is a bounded selector, not a TypeScript parser. Inline object return
+    types and regex literals in signatures deliberately remain unexpanded.
+    """
+    window = "\n".join(lines[start:start + limit + 1])
+    masked = _JS_LITERAL_OR_COMMENT.sub(
+        lambda match: re.sub(r"[^\n]", " ", match.group()), window
+    )
+    opening = masked.find("(")
+    if opening < 0:
+        return None, -1, -1
+    depth = 0
+    closing = None
+    for index in range(opening, len(masked)):
+        char = masked[index]
+        depth += (char == "(") - (char == ")")
+        if depth == 0:
+            closing = index
+            break
+    if closing is None or "/" in masked[:closing + 1]:
+        return None, -1, -1
+    body = masked.find("{", closing + 1)
+    if body < 0:
+        return None, -1, -1
+    suffix = masked[closing + 1:body].strip()
+    if suffix and not re.fullmatch(r":\s*[\w.$](?:[\w.$<>,\[\]| &?\s]*[\w\]>])?", suffix):
+        return None, -1, -1
+    # Retain the existing raw-brace body boundary. The signature mask is not
+    # a JavaScript lexer: treating quotes inside regex literals as strings here
+    # could swallow a closing brace and absorb an unrelated later function.
+    body_line = window.count("\n", 0, body)
+    body_column = body - (window.rfind("\n", 0, body) + 1)
+    depth = 0
+    end_line = start + body_line
+    for offset, line in enumerate(window.splitlines()[body_line:], body_line):
+        if not line.strip().startswith(("//", "#")):
+            text = line[body_column:] if offset == body_line else line
+            for char in text:
+                if char == "{":
+                    depth += 1
+                elif char == "}":
+                    depth = max(0, depth - 1)
+        end_line = start + offset
+        if depth == 0:
+            break
+    if selected > end_line:
+        return None, -1, -1
+    return "\n".join(lines[start:end_line + 1]), start + 1, end_line + 1
 
 
 def _invalid_json_constant(value: str):
@@ -102,6 +158,8 @@ class CodeContextExtractor:
                 break
         if def_idx == -1:
             return None, -1, -1
+        if _JS_FUNCTION.match(lines[def_idx]):
+            return _js_function_window(lines, def_idx, line_index, max_block_lines)
         for idx in range(def_idx - 1, -1, -1):
             stripped = lines[idx].strip()
             if not stripped:

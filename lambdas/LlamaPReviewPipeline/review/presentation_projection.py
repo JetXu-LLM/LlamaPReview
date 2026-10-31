@@ -171,6 +171,29 @@ def _unique_catalog_ref_typo(
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _exact_bare_path_ref(value: str, state: "_CompileState") -> Optional[str]:
+    """Restore only a missing prefix on an existing usable exact path identity."""
+
+    identity = f"path:{value}"
+    entry = state.catalog.get(identity)
+    if not isinstance(entry, dict):
+        return None
+    # No basename, slash, case, relative-path, or fuzzy resolution. A location
+    # hint or an unavailable observation is not promoted into code evidence.
+    if (
+        entry.get("paths") != [value]
+        or value != normalize_repo_path(value)
+        or ".." in value.split("/")
+        or entry.get("outcome") not in {"hit", "success"}
+        or entry.get("coverage_type") not in {
+            "changed_region", "file_slice", "full_file", "search_snippet"
+        }
+        or not catalog_ref_admission(identity, state.context_meta).admissible_for_finding
+    ):
+        return None
+    return identity
+
+
 def _finding_fingerprint(item: Mapping[str, Any]) -> tuple[Any, ...]:
     suggestion = item.get("suggestion")
     return (
@@ -353,6 +376,12 @@ class _CompileState:
                 return None
             ref = raw_ref.strip()
             admission = catalog_ref_admission(ref, self.context_meta)
+            if not admission.known:
+                path_ref = _exact_bare_path_ref(ref, self)
+                if path_ref is not None:
+                    ref = path_ref
+                    admission = catalog_ref_admission(ref, self.context_meta)
+                    self.normalize(f"{location}:exact_bare_path_ref_restored")
             if not admission.known:
                 restored_ref = _unique_catalog_ref_typo(ref, self.catalog)
                 if restored_ref is not None:

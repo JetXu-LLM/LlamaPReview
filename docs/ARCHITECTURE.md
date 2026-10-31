@@ -188,6 +188,13 @@ exported function, constant, class, or other supported declaration that was
 requested, rather than inheriting the nearest earlier definition merely because
 the dependency's context patterns do not recognize that declaration form.
 
+For explicit JavaScript and TypeScript function declarations, bounded symbol
+extraction skips parameter types and defaults before locating the body. It does
+not mistake an inline parameter type for the implementation or return a block
+that excludes the requested body anchor. Ambiguous signatures retain the
+existing bounded line-window fallback; no parser-completeness claim or larger
+read/context budget is introduced.
+
 Diff-derived removed-symbol coverage includes language visibility modifiers,
 including Rust `pub` and scoped `pub(...)` declarations. Its first removed
 symbol retains the existing code-owned search floor ahead of model-selected
