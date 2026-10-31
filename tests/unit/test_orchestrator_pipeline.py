@@ -3946,7 +3946,7 @@ class TestOrchestratorPipeline(unittest.TestCase):
         self.assertEqual(prepared.comments, ())
         self.assertEqual(context.required_disposition, "merged_same_head")
 
-    def test_live_pr_closed_after_finalize_uses_cancellation_publication(self):
+    def test_live_pr_closed_after_finalize_cancels_privately(self):
         self._pending_item()
         persistence.store_context(
             "owner/repo",
@@ -4006,14 +4006,14 @@ class TestOrchestratorPipeline(unittest.TestCase):
                 runtime=runtime,
             )
 
-        commit_prepared.assert_called_once()
-        prepared = commit_prepared.call_args.args[0]
-        context = commit_prepared.call_args.kwargs["context"]
-        self.assertEqual(prepared.publication_kind, "lifecycle_cancellation")
-        self.assertEqual(prepared.required_disposition, "closed_same_head")
-        self.assertEqual(prepared.comments, ())
-        self.assertEqual(context.required_disposition, "closed_same_head")
+        commit_prepared.assert_not_called()
         self.assertEqual(runtime.pull.reviews, [])
+        stored = self.table.get_item(Key={"repo": "owner/repo", "pr_number": 7})["Item"]
+        self.assertEqual(stored["status"], "SUPERSEDED")
+        self.assertEqual(stored["review_generation_status"], "cancelled")
+        self.assertEqual(stored["publication_status"], "suppressed")
+        self.assertIs(stored["publication_post_started"], False)
+        self.assertNotIn("publication_receipt", stored)
 
     def test_retryable_review_error_rethrows_then_terminates_at_phase_cap(self):
         self._pending_item()

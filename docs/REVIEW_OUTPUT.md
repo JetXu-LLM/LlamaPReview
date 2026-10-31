@@ -138,34 +138,16 @@ Mermaid is optional. Eligibility and syntax are checked, unsafe content is sanit
 
 Terminal messages are code-owned and deliberately narrow. They do not claim a model judgment that was not completed. A provider error, unsafe projection, stale head, closed pull request, or policy skip cannot be transformed into a substantive “looks good” review.
 
-When paid model work has completed, normal retries are exhausted, and Final or
-Projection still cannot produce a reliable review, an open, unlocked pull
-request on the same exact head may receive one native `COMMENT` review:
+A failed review remains private, even after paid work and exhausted Final or
+Projection retries. The service stores its failed artifact, complete accounting,
+and quality exclusion; it does not send a `Review unavailable` comment or claim
+that the pull request passed. Successful review publication is unchanged.
 
-```markdown
-### LlamaPReview — Review unavailable
-
-LlamaPReview couldn't complete a reliable review of this pull request at this commit. No recommendation was made about whether it should be merged.
-```
-
-This message uses the ordinary exactly-once publication transaction but is not
-a normal review or quality sample. It has no footer, inline comment, Mermaid,
-error code, model identity, usage detail, owner action, or merge judgment, and
-it consumes no additional capacity. A new head, ended or locked pull request,
-quota/successor outcome, or unknown provider-dispatch outcome keeps its existing
-silent or dedicated terminal policy.
-
-Eligibility is checked only after the failed private artifact and complete
-provider accounting exist. The exact head and typed open/unlocked disposition
-are checked again before the immutable candidate is stored and before GitHub
-dispatch. Immediately before `create_review`, a fresh pull-request snapshot is
-checked again. A confirmed mismatch raises the typed
-`publication_pre_dispatch_abort` and records
-`publication_post_started=false`, proving zero GitHub writes even though the
-durable intent may already have transitioned to `dispatching`. A `dispatching`
-intent without that typed terminal proof or a receipt remains outcome-unknown
-and must be reconciled. DRY_RUN prepares the same candidate but keeps the GitHub
-write barrier in force.
+Legacy failed/cancelled publication intents that are still `prepared` are
+terminalized privately under the exact intent/owner condition, before any
+GitHub read or POST. A legacy `dispatching` intent may already have posted:
+recovery only reconciles the existing surface, never posts again and never
+deletes or edits historical comments. An unknown outcome stays unknown.
 
 A provider-call fence failure before HTTP is separately typed as
 `provider_dispatch_fence_unavailable`: it is retryable and proves that provider
@@ -175,26 +157,18 @@ withheld, accounting remains incomplete, and no `Review unavailable` notice is
 published. These states are never inferred from error-message text.
 
 A pull request already merged or closed when initial admission runs is silent.
-If the exact admitted head is merged or closed while review work is in
-progress, before a publishable Final exists, the Pipeline may publish one
-native `COMMENT` review and stop the remaining model work:
-
-```markdown
-### LlamaPReview — Review stopped
-
-This pull request was merged before the review finished, so LlamaPReview stopped the remaining model work. No code-review verdict was produced.
-```
+If the exact admitted head is merged or closed while work remains, the
+Pipeline stops the remaining model work and records the cancellation privately.
+No `Review stopped` comment is sent. A useful, already publishable Final for
+the exact merged head retains its existing post-merge-follow-up policy.
 
 A repository that has used its free daily capacity receives one skip notice for
 the first affected pull request in that UTC day. Later pull requests in the same
 day stop silently rather than repeating it, and a head successor never publishes
 a capacity notice because that pull request already had its review.
 
-The closed form changes only `merged` to `closed`. A cancellation contains no
-footer, inline comment, Mermaid diagram, finding, verdict, or model-authored
-text. It is not quality-scoreable and records the corresponding lifecycle
-exclusion reason. If the head also changed, the old run is superseded silently
-instead of publishing a stale cancellation.
+Cancellation remains quality-unscoreable and preserves its lifecycle reason
+and all incurred costs. Head changes continue to supersede the old run silently.
 
 GitHub may report the pull request review surface as locked. If that typed
 state is observed before dispatch, a cancellation or post-merge follow-up is
@@ -207,8 +181,9 @@ lock state does not get guessed from arbitrary API error text.
 
 Publication identity binds the exact head SHA, required lifecycle disposition,
 publication kind, and canonical request digests for the main body and inline
-list. Ordinary reviews require open/same-head, cancellations require their
-exact ended disposition, and post-merge follow-ups require merged/same-head.
+list. Ordinary reviews require open/same-head and post-merge follow-ups require
+merged/same-head. Legacy cancellation candidates retain their historical identity
+for read-only reconciliation, not a new publication opportunity.
 The intentional invitation footer changes substantive public Markdown and
 therefore the digest, but retries reuse the same prepared request and never add
 a second footer or publication surface.
