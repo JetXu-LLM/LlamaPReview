@@ -492,6 +492,61 @@ def recover_pending(
             ),
         )
 
+    def suppress_unsuccessful_notice(candidate, intent) -> Optional[bool]:
+        artifact = candidate.get("review_artifact") or {}
+        mode = artifact.get("review_mode")
+        if mode not in {"failed", "cancelled"}:
+            return None
+        # Only an exact, validated prepared intent reaches this callback.
+        # Outcome-unknown dispatching intents retain read-only reconciliation.
+        status = "ERROR" if mode == "failed" else "SUPERSEDED"
+        attrs = {
+            **deepcopy(dict(candidate.get("terminal_attributes") or {})),
+            "review_generation_status": "failed" if mode == "failed" else "cancelled",
+            "publication_status": "suppressed",
+            "publication_suppressed_reason": "unsuccessful_review",
+            "publication_post_started": False,
+            "publication_key": intent.get("publication_key"),
+            "quality_scoreable": False,
+        }
+        if mode == "failed":
+            attrs.update(
+                error_kind=artifact.get("review_failure_kind") or "review_generation_incomplete",
+                error_stage=artifact.get("review_failure_stage") or "review",
+                error_retryable=False,
+            )
+        else:
+            attrs["superseded_kind"] = "unsuccessful_review_notice_suppressed"
+        stored = persistence.update_status(
+            str(candidate.get("repo") or ""), int(candidate.get("pr_number") or 0),
+            expected_status=context.expected_status, next_status=status,
+            attributes=attrs, phase_claim=context.phase_claim,
+            expected_attributes={"publication_intent": intent},
+            expected_missing_attributes=("publication_receipt",), table=table,
+        )
+        if not stored:
+            latest = persistence.get_item(
+                str(candidate.get("repo") or ""), int(candidate.get("pr_number") or 0),
+                table=table, consistent_read=True,
+            ) or {}
+            if not (latest.get("status") == status
+                    and latest.get("publication_key") == intent.get("publication_key")
+                    and latest.get("publication_status") == "suppressed"
+                    and latest.get("publication_post_started") is False):
+                raise PublicationStateConflict(
+                    "Private failure completion lost its exact prepared intent.",
+                    stage="publication.unsuccessful_notice_suppression",
+                )
+        return True
+
+    def prepared_without_post(candidate, intent) -> Optional[bool]:
+        suppressed = suppress_unsuccessful_notice(candidate, intent)
+        if suppressed is not None:
+            return suppressed
+        if context.dry_run:
+            return commit_prepared_without_write(candidate, intent)
+        return None
+
     def commit_prepared_without_write(
         candidate: Mapping[str, Any],
         intent: Mapping[str, Any],
@@ -599,9 +654,7 @@ def recover_pending(
                 deadline=deadline,
             )
         ),
-        prepared_no_write_commit=(
-            commit_prepared_without_write if context.dry_run else None
-        ),
+        prepared_no_write_commit=prepared_without_post,
         prepared_pre_dispatch_failure_commit=(
             commit_known_zero_write_abort
             if not context.dry_run
@@ -845,52 +898,33 @@ def commit_lifecycle_cancellation(
     ] = None,
     table=None,
 ) -> bool:
-    """Publish the sole code-owned cancellation through the normal path."""
-
-    cancellation = {
-        "merged": (
-            MERGED_CANCELLATION_BODY,
-            "merged_same_head",
-            "pr_merged_before_review_complete",
-        ),
-        "closed": (
-            CLOSED_CANCELLATION_BODY,
-            "closed_same_head",
-            "pr_closed_before_review_complete",
-        ),
-    }.get(lifecycle)
-    if cancellation is None:
+    """Record cancellation privately; a stopped free review needs no PR comment."""
+    if lifecycle not in {"merged", "closed"}:
         raise ValueError("lifecycle cancellation requires merged or closed")
-    body, required_disposition, exclusion_reason = cancellation
-    if (
-        context.publication_kind != "lifecycle_cancellation"
-        or context.required_disposition != required_disposition
-    ):
+    required = f"{lifecycle}_same_head"
+    if (context.publication_kind != "lifecycle_cancellation"
+            or context.required_disposition != required):
         raise PublicationStateConflict(
             "Cancellation context does not match the ended PR lifecycle.",
             stage="publication.cancellation_binding",
         )
-    supplied = dict(extra_attributes or {})
-    supplied.update(
-        {
-            "publication_kind": "lifecycle_cancellation",
-            "required_disposition": required_disposition,
-            "review_lifecycle_outcome": lifecycle,
-        }
-    )
-    return commit_terminal_result(
-        context=context,
-        runtime=runtime,
-        review_mode="cancelled",
-        body=body,
-        deadline=deadline,
-        ci_snapshot=ci_snapshot,
-        extra_attributes=supplied,
-        generation_status="cancelled",
-        quality_scoreable=False,
-        quality_exclusion_reasons=[exclusion_reason],
-        lifecycle_unavailable_observer=lifecycle_unavailable_observer,
-        table=table,
+    _require_publication_disposition(context, runtime, stage="lifecycle.cancel_private")
+    attrs = {
+        **deepcopy(dict(extra_attributes or {})),
+        "review_generation_status": "cancelled",
+        "review_lifecycle_outcome": lifecycle,
+        "publication_status": "suppressed",
+        "publication_suppressed_reason": "unsuccessful_review",
+        "publication_post_started": False,
+        "quality_scoreable": False,
+        "quality_exclusion_reasons": [f"pr_{lifecycle}_before_review_complete"],
+    }
+    return persistence.mark_superseded(
+        context.repo, context.pr_number, context.expected_status,
+        expected_head_sha=context.head_sha, actual_head_sha=context.head_sha,
+        stage="lifecycle.cancel_private", superseded_kind=f"pr_{lifecycle}",
+        current_state="closed", merged=(lifecycle == "merged"),
+        extra_attrs=attrs, phase_claim=context.phase_claim, table=table,
     )
 
 

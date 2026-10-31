@@ -326,50 +326,26 @@ class LifecyclePublicationPrimitiveTests(unittest.TestCase):
                 if state["retrieval_outcome"] in {"partial", "error"}:
                     self.assertIn(state["retrieval_outcome"], visible)
 
-    def test_cancellation_is_exact_unscoreable_and_uses_same_commit_boundary(self):
-        captured = {}
-
-        def capture(prepared, terminal_attributes, **kwargs):
-            captured["prepared"] = prepared
-            captured["terminal"] = terminal_attributes
-            return True
-
-        context = _context(
-            kind="lifecycle_cancellation",
-            disposition="merged_same_head",
-        )
-        with patch.object(
-            pipeline_publication,
-            "_require_publication_disposition",
-        ), patch.object(
-            pipeline_publication,
-            "commit_prepared",
-            side_effect=capture,
-        ):
-            result = pipeline_publication.commit_lifecycle_cancellation(
-                context=context,
-                runtime=_Runtime(state="closed", merged=True),
-                lifecycle="merged",
-            )
-
-        self.assertTrue(result)
-        prepared = captured["prepared"]
-        self.assertEqual(
-            prepared.main_body,
-            pipeline_publication.MERGED_CANCELLATION_BODY,
-        )
-        self.assertEqual(prepared.comments, ())
-        self.assertFalse(any(variant in prepared.main_body for variant in PUBLIC_FOOTER_VARIANTS))
-        self.assertNotIn("mermaid", prepared.main_body.casefold())
-        self.assertEqual(
-            captured["terminal"]["review_generation_status"],
-            "cancelled",
-        )
-        self.assertFalse(captured["terminal"]["quality_scoreable"])
-        self.assertEqual(
-            captured["terminal"]["quality_exclusion_reasons"],
-            ["pr_merged_before_review_complete"],
-        )
+    def test_cancellation_is_private_unscoreable_and_keeps_accounting(self):
+        for lifecycle in ("merged", "closed"):
+            with self.subTest(lifecycle=lifecycle):
+                context = _context(kind="lifecycle_cancellation", disposition=f"{lifecycle}_same_head")
+                with patch.object(pipeline_publication, "_require_publication_disposition"), patch.object(
+                    pipeline_publication.persistence, "mark_superseded", return_value=True
+                ) as store, patch.object(pipeline_publication, "commit_prepared") as commit:
+                    result = pipeline_publication.commit_lifecycle_cancellation(
+                        context=context, runtime=_Runtime(state="closed", merged=lifecycle == "merged"),
+                        lifecycle=lifecycle, extra_attributes={"deepseek_usage_total": {"total_tokens": 100}},
+                    )
+                self.assertTrue(result)
+                commit.assert_not_called()
+                terminal = store.call_args.kwargs["extra_attrs"]
+                self.assertEqual(terminal["review_generation_status"], "cancelled")
+                self.assertFalse(terminal["quality_scoreable"])
+                self.assertIs(terminal["publication_post_started"], False)
+                self.assertEqual(terminal["publication_status"], "suppressed")
+                self.assertEqual(terminal["deepseek_usage_total"], {"total_tokens": 100})
+                self.assertEqual(terminal["quality_exclusion_reasons"], [f"pr_{lifecycle}_before_review_complete"])
 
     def test_pre_publish_requires_candidate_disposition_not_generic_ended(self):
         item = {

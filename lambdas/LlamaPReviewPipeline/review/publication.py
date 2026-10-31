@@ -584,7 +584,7 @@ def recover_publication_transaction(
         Callable[[Mapping[str, Any]], Mapping[str, Any]]
     ] = None,
     prepared_no_write_commit: Optional[
-        Callable[[Mapping[str, Any], Mapping[str, Any]], bool]
+        Callable[[Mapping[str, Any], Mapping[str, Any]], Optional[bool]]
     ] = None,
     prepared_pre_dispatch_failure_commit: Optional[
         Callable[
@@ -627,7 +627,9 @@ def recover_publication_transaction(
     state = str(intent.get("state") or "")
     if state == "prepared":
         if prepared_no_write_commit is not None:
-            return prepared_no_write_commit(candidate, intent)
+            handled = prepared_no_write_commit(candidate, intent)
+            if handled is not None:
+                return handled
         pre_publish_check = pre_publish_check_for(candidate)
         try:
             pre_publish_check()

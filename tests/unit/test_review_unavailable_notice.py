@@ -24,10 +24,6 @@ from lambdas.LlamaPReviewPipeline.errors import (
 from lambdas.LlamaPReviewPipeline.pipeline_publication import (
     PublicationContext,
 )
-from lambdas.LlamaPReviewPipeline.review.publish import PUBLIC_FOOTER_VARIANTS
-from lambdas.LlamaPReviewPipeline.review.terminal_messages import (
-    REVIEW_UNAVAILABLE_NOTICE,
-)
 
 
 HEAD = "a" * 40
@@ -155,68 +151,26 @@ def _call(
 
 
 class ReviewUnavailableNoticeTests(unittest.TestCase):
-    def test_paid_terminal_failure_uses_exact_notice_and_preserves_accounting(self):
-        captured = {}
-
-        def commit(prepared, terminal_attributes, **kwargs):
-            captured["prepared"] = prepared
-            captured["terminal"] = terminal_attributes
-            captured["context"] = kwargs["context"]
-            return True
-
-        with patch.object(
-            orchestrator.pipeline_publication,
-            "commit_prepared",
-            side_effect=commit,
-        ), patch.object(
-            orchestrator.persistence,
-            "store_review_failure",
-        ) as store_failure:
+    def test_paid_terminal_failure_is_private_and_preserves_accounting(self):
+        with patch.object(orchestrator.pipeline_admission, "assert_current_head", return_value=HEAD), patch.object(
+            orchestrator.persistence, "store_review_failure", return_value=True
+        ) as store, patch.object(orchestrator.pipeline_publication, "commit_prepared") as commit:
             self.assertTrue(_call())
+        commit.assert_not_called()
+        artifact = store.call_args.kwargs["artifact"]
+        self.assertEqual(artifact["review_generation_status"], _review_json()["review_generation_status"])
+        self.assertFalse(artifact["quality_scoreable"])
+        self.assertEqual(artifact["review_failure_kind"], "presentation_invalid")
+        self.assertEqual(artifact["deepseek_usage_total"]["total_tokens"], 100)
+        self.assertFalse(artifact.get("main_comment"))
 
-        store_failure.assert_not_called()
-        prepared = captured["prepared"]
-        terminal = captured["terminal"]
-        self.assertEqual(prepared.main_body, REVIEW_UNAVAILABLE_NOTICE)
-        self.assertEqual(prepared.comments, ())
-        self.assertEqual(prepared.request_payload()["event"], "COMMENT")
-        self.assertFalse(any(variant in prepared.main_body for variant in PUBLIC_FOOTER_VARIANTS))
-        self.assertNotIn("mermaid", prepared.main_body.casefold())
-        self.assertNotIn("deepseek", prepared.main_body.casefold())
-        self.assertEqual(prepared.artifact["review_mode"], "failed")
-        self.assertEqual(
-            prepared.artifact["review_generation_status"], "failed"
-        )
-        self.assertFalse(prepared.artifact["quality_scoreable"])
-        self.assertEqual(
-            prepared.artifact["review_failure_kind"],
-            "presentation_invalid",
-        )
-        self.assertEqual(
-            prepared.artifact["deepseek_usage_total"]["total_tokens"],
-            100,
-        )
-        self.assertEqual(terminal["review_mode"], "failed")
-        self.assertFalse(terminal["quality_scoreable"])
-        self.assertEqual(captured["context"].publication_kind, "ordinary_review")
-
-    def test_dry_run_keeps_the_same_candidate_but_no_alternate_write_path(self):
-        captured = {}
-
-        def commit(prepared, terminal_attributes, **kwargs):
-            captured["prepared"] = prepared
-            captured["context"] = kwargs["context"]
-            return True
-
-        with patch.object(
-            orchestrator.pipeline_publication,
-            "commit_prepared",
-            side_effect=commit,
-        ):
+    def test_dry_run_failed_result_is_private_too(self):
+        with patch.object(orchestrator.pipeline_admission, "assert_current_head", return_value=HEAD), patch.object(
+            orchestrator.persistence, "store_review_failure", return_value=True
+        ) as store, patch.object(orchestrator.pipeline_publication, "commit_prepared") as commit:
             self.assertTrue(_call(dry_run=True))
-
-        self.assertTrue(captured["context"].dry_run)
-        self.assertEqual(captured["prepared"].main_body, REVIEW_UNAVAILABLE_NOTICE)
+        store.assert_called_once()
+        commit.assert_not_called()
 
     def test_no_completed_paid_work_remains_private(self):
         with patch.object(

@@ -92,13 +92,11 @@ direct replacement, prove those optional surfaces are removed before any
 semantic-only finding survives. Do not accept guessed paths, anchor rewriting,
 evidence promotion, or silent truncation as recovery.
 
-Failure-notice changes require retry and crash-recovery coverage plus the full
-open/new-head/merged/closed/locked matrix. Tests must prove one exact body-only
-`COMMENT`, zero footer/inline/Mermaid, complete accounting, no extra capacity
-charge, and no publication for a pre-Final failure or an unknown
-provider-dispatch outcome. Cover the failed notice's pre-persist lifecycle
-reread, DRY_RUN barrier, immutable candidate/intent recovery, and quality-score
-exclusion.
+Failure/cancellation policy tests require zero new GitHub writes, retained
+private failed/cancelled status and accounting, and unchanged successful reviews.
+Cover legacy prepared intents (private suppression with exact owner/intent CAS)
+and dispatching intents (read-only reconciliation, no repeat POST or historical
+comment edits), including outcome-unknown and lost-claim cases.
 
 Provider-dispatch control changes must prove the typed boundary on both sides
 of HTTP: a pre-dispatch fence failure is retryable, makes zero HTTP calls, and
@@ -141,8 +139,8 @@ zero-write proof still uses duplicate/outcome reconciliation because its write
 may have crossed the external boundary.
 
 Replay fixtures should exercise lifecycle transitions with synthetic public
-facts and make both cancellation and post-merge Markdown available for manual
-inspection. A release candidate must also pass Python 3.11 and 3.12 unit and
+facts, prove cancellation remains private, and make post-merge Markdown
+available for manual inspection. A release candidate must also pass Python 3.11 and 3.12 unit and
 replay tests, focused lint/static checks, compile/import checks,
 `git diff --check`, deterministic double builds, Linux x86_64/Python 3.12 Layer
 imports, and the source/history/artifact, dependency, license, SBOM, checksum,

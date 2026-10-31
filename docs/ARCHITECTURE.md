@@ -89,13 +89,13 @@ supersession and can never publish the old review.
 | --- | --- | --- |
 | Open, same head | Continue | Continue |
 | Open, newer head | Requeue one successor at most | Supersede silently |
-| Merged/closed, same head after admission | Stop remaining model work and prepare a code-owned cancellation when the native review surface is available | Cancel, unless a publishable Final already exists for the exact merged head; a locked review surface supersedes silently |
+| Merged/closed, same head after admission | Stop remaining model work and record cancellation privately | Cancel, unless a publishable Final already exists for the exact merged head; a locked review surface supersedes silently |
 | Merged/closed, newer head | Supersede silently | Supersede silently |
 | Unverified | Retry or fail closed without publication | Retry or fail closed without publication |
 
 A publishable Final that finishes after the exact reviewed head was merged may
 be projected as a post-merge follow-up. A closed-unmerged pull request receives
-only the cancellation. Pull requests already ended at initial admission receive
+a private cancellation. Pull requests already ended at initial admission receive
 no public message. GitHub can lock a pull request before or during merge and
 then reject native reviews. A structurally verified locked surface is recorded
 as `publication_unavailable_locked` and superseded silently; it is not retried,
@@ -197,16 +197,13 @@ exploration; this is retrieval evidence, not a deterministic compile verdict.
 
 Before a GitHub write, the Pipeline stores an immutable publication candidate and an owner-bound intent. The candidate binds an explicit publication kind—ordinary review, lifecycle cancellation, or post-merge follow-up—to the exact head and required lifecycle disposition. After the intent becomes `dispatching` but immediately before `create_review`, the Pipeline fetches a fresh pull-request snapshot and revalidates head, state, merged disposition, and the failed-notice lock requirement. A confirmed mismatch raises `publication_pre_dispatch_abort` and stores `publication_post_started=false`; this typed path proves zero GitHub writes even though the intent had reached `dispatching`. Any `dispatching` intent without that typed terminal proof or an exact receipt remains `publication_outcome_unknown` and must be reconciled because the POST may already exist. After dispatch the Pipeline reconciles the payload digest, bot identity, exact commit, and returned GitHub identifiers. Retries reuse the durable candidate or receipt; they do not regenerate and blindly post a second review or fall back to an issue comment.
 
-The code-owned `Review unavailable` body is also an `ordinary_review`
-candidate. It enters this same transaction only after paid work completed and
-bounded Final/Projection retries were exhausted, while the PR is proven open,
-unlocked, and on the same head. Lifecycle is revalidated before candidate
-persistence and dispatch. New-head, ended, locked, quota/successor, pre-Final,
-and provider-outcome-unknown states remain private or retain their existing
-typed terminal outcome. Its private artifact preserves the generation failure
-and accounting evidence, marks quality unscoreable, and consumes no additional
-capacity. No alternate publication kind, second Final call, or fallback write
-path exists.
+Failed generation and lifecycle cancellation are private terminal outcomes;
+they never create new GitHub failure/cancellation notifications. Existing
+`prepared` failure/cancellation candidates are suppressed under their exact
+owner/intent condition; `dispatching` candidates remain read-only reconciliation
+because a historical POST may exist. No old comment is removed or modified.
+Accounting and truthful failed/cancelled status survive, and successful reviews
+keep the existing publication transaction.
 
 ### Accounting truth
 
