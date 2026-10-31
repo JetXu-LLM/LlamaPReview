@@ -74,8 +74,13 @@ owners and cannot create a synthetic clear result.
 
 Allowed exact IDs/efforts are:
 
-- `gpt-6-luna`: `medium`, `max`;
+- `gpt-6-luna`: `medium`, `high`, `xhigh`, `max`;
 - `gpt-6.1-terra`: `low`, `medium`, `high`, `xhigh`, `max`.
+
+Luna high/xhigh are explicit supported alternatives, not automatic upgrades or
+fallbacks. Their availability follows the [official Luna model reference](https://developers.openai.com/api/docs/models/gpt-6-luna); each still needs stage-specific
+qualification at its proposed output cap and deadline. No profile example or
+production selection changes merely because the parser accepts the effort.
 
 Being syntactically allowed is **not** evidence that a cell is qualified. Terra
 medium/high are the initial comparison candidates; other efforts require the
@@ -118,3 +123,4 @@ paired evidence and a forecast using **actual current admitted traffic**;
 daily capacity limits or historical token arithmetic are not monthly usage.
 The desired approximately $150 allocation is an optimization goal with margin,
 not a spending target or proof of a $200 usable grant.
+

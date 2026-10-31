@@ -621,6 +621,22 @@ class DirectOpenAITransportBudgetTests(unittest.TestCase):
             )
         self.assertEqual(before, self.counter())
 
+    def test_luna_intermediate_efforts_preserve_the_bounded_wire(self):
+        for effort in ("high", "xhigh"):
+            with self.subTest(effort=effort):
+                payload = build_request(
+                    [{"role": "user", "content": "synthetic fixture"}],
+                    model="gpt-6-luna", effort=effort, max_tokens=12000,
+                )
+                self.assertEqual(payload["model"], "gpt-6-luna")
+                self.assertEqual(payload["reasoning"], {"effort": effort})
+                self.assertEqual(payload["max_output_tokens"], 12000)
+                self.assertFalse(payload["store"])
+                self.assertFalse(payload["stream"])
+                self.assertFalse(payload["background"])
+                self.assertEqual(payload["service_tier"], "default")
+                self.assertNotIn("tools", payload)
+
     def test_explicit_binding_required_and_payload_restrictions(self):
         with patch.object(transport.requests, "post") as post, self.assertRaises(ValueError):
             self.chat(self.client(bound=False))
@@ -629,7 +645,9 @@ class DirectOpenAITransportBudgetTests(unittest.TestCase):
         for change in (
             {"model": "gpt-6.1-luna"},
             {"model": "gpt-6.1-sol"},
-            {"effort": "high"},
+            {"effort": "ultra"},
+            {"effort": "low"},
+            {"effort": "none"},
             {"max_tokens": None},
             {"max_tokens": True},
             {"tools": [{"type": "web_search"}]},
@@ -718,3 +736,4 @@ class DirectOpenAITransportBudgetTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertEqual(self.counter()["charged_nanousd"], bound)
         self.assertNotIn("call_ids", self.counter())
+

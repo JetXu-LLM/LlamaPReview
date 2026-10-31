@@ -57,10 +57,16 @@ Deployed `DRY_RUN` is only a GitHub write barrier, not a zero-AWS-write sandbox.
 ## Candidate policy
 
 Use exact, explicitly checked model IDs. The present planning allowlist is
-`gpt-6-luna` with `medium` or `max`, and `gpt-6.1-terra` with `low`, `medium`,
+`gpt-6-luna` with `medium`, `high`, `xhigh`, or `max`, and `gpt-6.1-terra` with `low`, `medium`,
 `high`, `xhigh`, or `max`. It excludes Sol, gateways, speculative model names,
 and automatic model substitutions. This is an evaluation scope, not a claim
 that every listed setting has been qualified on the target account.
+
+For Luna, compare the cheapest plausible effort against the material unresolved
+case rather than assuming max is best. High/xhigh are available for bounded
+comparisons; they are not a mandate to run every effort at every stage. Carry
+forward existing failures and successful captures, and qualify the exact
+effort/output-cap/deadline combination before selection.
 
 Start Terra screening at medium/high. Add xhigh/max only when an unresolved
 hard case could change the selection; compare low only as a follow-on for a
@@ -149,3 +155,4 @@ A future model name or external benchmark improvement is only a reason to
 reevaluate. Verify official availability, parameters, pricing and the target
 account first; then compare frozen capsules and the full selected profile.
 Neither this manifest nor the validator automatically switches production.
+

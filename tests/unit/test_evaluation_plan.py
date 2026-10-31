@@ -63,11 +63,23 @@ class EvaluationPlanTests(unittest.TestCase):
         self.plan["status"] = "approved"
         self.assert_invalid(self.plan, "unapproved")
 
+    def test_luna_intermediate_efforts_are_plannable_not_authorized(self):
+        for effort in ("high", "xhigh"):
+            with self.subTest(effort=effort):
+                plan = copy.deepcopy(self.plan)
+                plan["candidates"][0].update(model="gpt-6-luna", effort=effort)
+                receipt = validator.validate_plan(plan)
+                self.assertTrue(receipt["structurally_valid"])
+                self.assertFalse(receipt["execution_permitted"])
+                self.assertFalse(receipt["quality_evaluated"])
+                self.assertEqual(receipt["provider_calls_made"], 0)
+
     def test_models_and_efforts_are_explicitly_allowed(self):
         for model, effort in (
             ("gpt-6.1-sol", "high"),
             ("gpt-6.1-luna", "max"),
-            ("gpt-6-luna", "high"),
+            ("gpt-6-luna", "ultra"),
+            ("gpt-6-luna", "none"),
             ("gpt-6-luna", "low"),
             ("gpt-6.1-terra", "none"),
             ("openai/gpt-6-luna", "max"),
@@ -213,3 +225,4 @@ class EvaluationPlanTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

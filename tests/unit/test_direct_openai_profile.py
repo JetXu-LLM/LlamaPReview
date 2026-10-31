@@ -80,8 +80,23 @@ class DirectOpenAIProfileTests(unittest.TestCase):
         self.assertEqual(orchestrator._review_model_for_mode("low"), {"model": "gpt-6-luna", "reasoning_effort": "medium"})
         self.assertEqual(_plan_model_selection({"complexity": "normal", "risk_domains": ["security"]}), ("gpt-6.1-terra", "high"))
 
+    def test_luna_intermediate_efforts_are_explicit_and_profile_bound(self):
+        digests = set()
+        for effort in ("medium", "high", "xhigh", "max"):
+            with self.subTest(effort=effort):
+                value = profile_value()
+                value["tiers"]["normal"]["pfr_plan"] = ["gpt-6-luna", effort]
+                value["tiers"]["normal"]["pfr_reconcile"] = ["gpt-6-luna", effort]
+                selected = parse_direct_openai_profile(json.dumps(value))
+                for stage in ("pfr_plan", "pfr_reconcile"):
+                    cell = selected.select(stage, "normal")
+                    self.assertEqual((cell.model, cell.reasoning_effort), ("gpt-6-luna", effort))
+                    self.assertEqual(cell.metadata()["profile_sha256"], selected.sha256)
+                digests.add(selected.sha256)
+        self.assertEqual(len(digests), 4)
+
     def test_profile_rejects_unknown_models_efforts_cells_and_duplicates(self):
-        for pair in (["gpt-6.1-sol", "high"], ["gpt-6.1-luna", "max"], ["gpt-6-luna", "high"], ["gpt-6-luna", "none"], ["gpt-6.1-terra", "none"], ["gpt-6-luna ", "max"]):
+        for pair in (["gpt-6.1-sol", "high"], ["gpt-6.1-luna", "max"], ["gpt-6-luna", "ultra"], ["gpt-6-luna", "low"], ["gpt-6-luna", "none"], ["gpt-6.1-terra", "none"], ["gpt-6-luna ", "max"]):
             value = profile_value(); value["route"] = pair
             with self.subTest(pair=pair), self.assertRaises(ValueError):
                 parse_direct_openai_profile(json.dumps(value))
@@ -183,3 +198,4 @@ class DirectOpenAIProfileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

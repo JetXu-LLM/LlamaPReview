@@ -22,7 +22,7 @@ KNOWN_DEEPSEEK_MODELS = frozenset(
 )
 OPENROUTER_LUNA_MODEL = "openai/gpt-6-luna"
 DIRECT_OPENAI_EFFORTS = {
-    "gpt-6-luna": frozenset({"medium", "max"}),
+    "gpt-6-luna": frozenset({"medium", "high", "xhigh", "max"}),
     "gpt-6.1-terra": frozenset({"low", "medium", "high", "xhigh", "max"}),
 }
 
@@ -185,3 +185,4 @@ def resolve_provider_model(
             field="transport_model_override",
         )
     return ProviderModelSelection(logical_model=logical, billed_model=billed)
+

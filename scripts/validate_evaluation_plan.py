@@ -19,7 +19,7 @@ DEFAULT_PLAN = Path(__file__).resolve().parents[1] / "config/evaluation_plan.exa
 SCHEMA = "llamapreview.evaluation-plan/v1"
 MAX_PLAN_BYTES = 1_048_576
 MODEL_EFFORTS = {
-    "gpt-6-luna": {"medium", "max"},
+    "gpt-6-luna": {"medium", "high", "xhigh", "max"},
     "gpt-6.1-terra": {"low", "medium", "high", "xhigh", "max"},
 }
 PHASE_CALL_CAPS = {
@@ -333,3 +333,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
