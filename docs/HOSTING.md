@@ -8,13 +8,15 @@ The official GitHub App reviews supported pull request events from public reposi
 - Product site: [jetxu-llm.github.io/LlamaPReview-site](https://jetxu-llm.github.io/LlamaPReview-site/)
 - Source and releases: [JetXu-LLM/LlamaPReview](https://github.com/JetXu-LLM/LlamaPReview)
 
+The official hosted service uses the OpenAI API directly. It admits up to 3 review attempts per repository per UTC day, subject to shared daily capacity and available model budget; an admitted attempt does not guarantee a delivered review. Hosted limits and provider selection are deployment settings, not the source defaults.
+
 Private-repository events are acknowledged and discarded at the signed Webhook boundary. They do not enter the review Pipeline. See [privacy and retention](PRIVACY.md).
 
 ## Self-hosted AWS deployment
 
 The reference Terraform deploys the same two active Lambdas and one dependency Layer. It is intentionally public-repository-only as shipped; there is no hidden private-repository mode, legacy handler, shadow router, or repository allowlist. Its `pipeline_capacity_policy` defaults to the whole-policy literal `off`, so a self-hoster paying for its own provider account does not inherit the personally funded hosted-service bounds. That literal disables quota counters only and leaves one-time head succession enabled; only an explicit `successor=off` key disables succession. See [configuration](CONFIGURATION.md#free-review-capacity).
 
-Self-hosters provide and pay for their own AWS, GitHub App, and OpenRouter accounts. A retained DeepSeek key enables the documented provider switch back. They also become responsible for:
+Self-hosters provide their own AWS and GitHub App configuration and pay their own AWS and model-provider costs. The source defaults to OpenRouter; direct OpenAI and DeepSeek are explicit alternatives. Direct OpenAI requires the documented stage profile and verified budget policy. A retained DeepSeek key enables the documented provider switch back. They also become responsible for:
 
 - GitHub App installation scope and permissions;
 - AWS access, cost controls, alarms, log retention, and incident response;

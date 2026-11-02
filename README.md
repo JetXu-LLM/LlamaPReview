@@ -39,7 +39,7 @@ The app does not review every push. Reviews use GitHub's `COMMENT` state, not `A
 
 ## Hosted capacity and limits
 
-Free hosted capacity: up to **3 admitted review attempts per repository per UTC day**, within a **shared 100-attempt daily limit**. An attempt does not guarantee a completed review. Over-capacity requests are skipped, not queued.
+Free hosted capacity: up to **3 admitted review attempts per repository per UTC day**, subject to **shared daily capacity and available model budget**. These are admission limits, not a guaranteed allocation or a promise of a completed review. Over-capacity requests are skipped, not queued.
 
 [Capacity policy](docs/CONFIGURATION.md#free-review-capacity) · [Failure and skip messages](docs/REVIEW_OUTPUT.md#failure-and-skip-messages).
 
@@ -61,9 +61,9 @@ Run the public-repository review pipeline in your own AWS account. Supply your o
 
 1. Download a semantic release and [verify its checksums and GitHub provenance](docs/RELEASE_VERIFICATION.md).
 2. Follow the [AWS deployment guide](docs/AWS_DEPLOYMENT.md) and [self-hosting boundary](docs/HOSTING.md).
-3. Choose a provider using the [configuration guide](docs/CONFIGURATION.md#review-routing). New source installations default to an OpenRouter GPT-6 Luna max trial with [documented qualification limits](docs/QUALITY_UPGRADE.md#validation-boundaries). `MODEL_PROVIDER=deepseek` selects the existing DeepSeek profile; retaining both provider keys enables a one-setting return to DeepSeek.
+3. Choose a provider using the [configuration guide](docs/CONFIGURATION.md#review-routing). New source installations default to an OpenRouter GPT-6 Luna max trial with [documented qualification limits](docs/QUALITY_UPGRADE.md#validation-boundaries). Direct OpenAI is a separate explicit option requiring a [stage profile](docs/DIRECT_OPENAI_PROFILE.md) and [verified budget policy](docs/DIRECT_OPENAI_BUDGET.md). `MODEL_PROVIDER=deepseek` selects the existing DeepSeek profile; retaining both provider keys enables a one-setting return to DeepSeek.
 
-The source default is separate from the hosted deployment's provider setting. The hosted service uses DeepSeek, as disclosed in its [Privacy Policy](https://jetxu-llm.github.io/LlamaPReview-site/privacy.html).
+The source default is separate from the hosted deployment's provider setting. The hosted service uses the OpenAI API directly, as disclosed in its [Privacy Policy](https://jetxu-llm.github.io/LlamaPReview-site/privacy.html).
 
 The reference Terraform stack disables hosted quota counters by default (`pipeline_capacity_policy=off`) and leaves one-time head succession enabled. It still supports public repositories only. Public CI publishes release artifacts; it does not deploy the official AWS service.
 
