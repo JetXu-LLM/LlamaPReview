@@ -1,6 +1,6 @@
 # Privacy and data retention
 
-This document distinguishes source defaults from the official hosted deployment. The retention observations below were recorded on **August 12, 2026**. The source now defaults to OpenRouter; this change alone does not establish that an operator has deployed the new provider configuration.
+**Provider disclosure updated November 2, 2026.** The official hosted service uses the OpenAI API directly. Self-hosted deployments may select a different provider; the source default is OpenRouter. The AWS retention and storage observations below were last verified on **August 12, 2026**, not revalidated as part of this provider-disclosure update.
 
 ## Hosted repository boundary
 
@@ -25,7 +25,7 @@ General sensitive-path rules prevent the retrieval tools from reading common sec
 
 ## Observed official retention
 
-| Surface | Current hosted behavior |
+| Surface | Last verified hosted configuration (August 12, 2026) |
 | --- | --- |
 | DynamoDB lifecycle records | `ttl_epoch` is set to 30 days; DynamoDB TTL deletion is asynchronous |
 | S3 context, review, and recovery artifacts | lifecycle expiry after 30 days |
@@ -34,11 +34,25 @@ General sensitive-path rules prevent the retrieval tools from reading common sec
 | Pipeline CloudWatch logs | 90 days |
 | GitHub review comments | retained by GitHub and the repository until removed there |
 
-The hosted S3 bucket is private, uses S3-managed encryption at rest, blocks public access, and uses bucket-owner-enforced object ownership. Versioning is currently disabled. The active DynamoDB table uses encryption at rest, point-in-time recovery, and TTL.
+At that verification, the hosted S3 bucket was private, used S3-managed encryption at rest, blocked public access, and used bucket-owner-enforced object ownership. Versioning was disabled. The active DynamoDB table had encryption at rest, point-in-time recovery, and TTL.
 
 Default provider traces are summaries: identities, model routing, usage, timing, and tool counts, without prompts or model output. Recovery artifacts can contain public repository code, model-derived review content, and GitHub payload material.
 
 ## Model provider processing
+
+### Official hosted service: direct OpenAI
+
+For eligible public pull requests, selected public repository evidence and prompts are sent directly to OpenAI for engineering judgment. Generated responses can be included in subsequent review-stage requests. This processing leaves LlamaPReview's AWS environment; its AWS region does not establish OpenAI processing location.
+
+The direct adapter uses the Responses API with `store=false` and `background=false`. These request settings are not a zero-retention guarantee. OpenAI's published API policy says API data is not used to train models by default, unless the account explicitly opts in to sharing. Default abuse-monitoring logs may retain prompts, responses and related metadata for up to 30 days, with longer retention possible for legal or safety reasons. Account-level controls and exceptions also apply; this policy does not assert that the hosted account has Zero Data Retention.
+
+The hosted review path uses prompt caching. A configured 30-minute cache lifetime is a minimum reuse lifetime, not a deletion deadline. OpenAI documents a maximum 24-hour retention period for encrypted prompt-cache state. This is separate from abuse-monitoring logs and LlamaPReview's AWS retention.
+
+See OpenAI's current [API data controls](https://developers.openai.com/api/docs/guides/your-data) and [prompt-caching documentation](https://developers.openai.com/api/docs/guides/prompt-caching). A provider change does not retroactively delete data previously processed by another provider.
+
+### Self-hosted provider choices
+
+The following options describe source configuration, not the current official hosted provider.
 
 The default `MODEL_PROVIDER=openrouter` sends bounded public-repository evidence to OpenRouter for `openai/gpt-6-luna`. OpenRouter routes the request to a serving provider. Gateway logging, account settings, and the serving provider's policies are separate from LlamaPReview's AWS retention. This repository does not promise categorical zero retention or no training for a deployment; consult [OpenRouter's privacy policy](https://openrouter.ai/privacy) and [provider routing and data-policy controls](https://openrouter.ai/docs/guides/routing/provider-selection).
 

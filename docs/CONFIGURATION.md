@@ -100,6 +100,8 @@ callers retain only the socket timeout and phase checks.
 
 ## Free review capacity
 
+The official hosted service admits up to 3 review attempts per repository per UTC day, subject to shared daily capacity and available model budget. Its effective global limit can differ from the source default below. These limits count admitted attempts, not completed reviews or guaranteed availability.
+
 The hosted service is free for public repositories and funded personally, so a
 daily bound keeps one high-velocity repository from consuming the shared budget.
 Capacity is charged after the deterministic skip gates and before Route, so an
