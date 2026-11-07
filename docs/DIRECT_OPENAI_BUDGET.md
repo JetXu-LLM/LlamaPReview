@@ -1,19 +1,58 @@
-# Direct OpenAI: bounded adapter and grant-window budget
+# Direct OpenAI: production authority and cost accounting
 
-**Implementation and offline verification only.** No model-quality winner,
-account access, active credit grant, current hosted runtime, traffic volume,
-monthly forecast, or production activation is established by this change.
-Ordinary tests make no real model calls or GitHub/AWS product writes. The
-existing provider default is unchanged; there is no automatic paid fallback.
+Direct OpenAI uses one transport and one durable per-call ledger. Choose an
+explicit authorization policy for the work: continuous production, or a finite
+grant allocation for a bounded evaluation. Neither policy changes the provider's
+payment settings, buys credits, or authorizes automatic top-ups.
 
-## Explicit activation contract (not deployment instructions)
+## Continuous production
+
+The [continuous policy example](../config/direct_openai_continuous.example.json)
+is inactive until an operator supplies the approved account, qualified profile
+and authorization. It contains exactly:
+
+- `authorization`: `approved` only after the operator authorizes ongoing use;
+- `mode`: `continuous`;
+- `organization_id` and `project_id`: the account scope sent to OpenAI;
+- `profile_sha256`: the exact qualified stage-profile digest;
+- `pricing_version`: the code-bound tariff used for cost accounting.
+
+There is no local grant-expiry date, pricing-renewal timer, monthly reset or
+application dollar cutoff in this policy. A subscription-credit renewal does
+not require redeploying the application. Provider prices remain an explicit,
+versioned accounting input, not a claim that an old price is guaranteed forever.
+
+Each HTTP attempt still needs the existing durable, exact-owner/head/run fence
+before dispatch. Its record retains the actual model, token classes, original
+tariff and settled cost. An unknown outcome keeps its conservative per-attempt
+cost bound and cannot be retried as a new purchase on redelivery. No new aggregate
+counter is created, and historical grant counters are not changed or erased.
+
+Existing daily admission limits, stage token/time bounds, bounded transport
+retries and publication checks remain in force. Provider credit/billing refusal
+stops the attempt without a retry or a paid fallback. Failed reviews remain
+private; existing terminal-error telemetry reports the operational failure.
+
+Operators must verify their provider billing and credit settings before
+activation. Continuous mode is not a credit-balance check or a guarantee against
+cash charges. A monthly cost target belongs in usage monitoring and model/capacity
+planning; it is not silently converted into an expiring trial. Review actual
+provider bills as well as the application's token-priced estimates.
+
+## Finite grant allocation
+
+The existing finite policy remains available for explicitly bounded evaluations
+or deployments whose authority really ends with a grant. It is not required for
+continuous production.
+
+### Explicit finite-allocation contract
 
 The opt-in provider is `MODEL_PROVIDER=direct_openai`. It additionally requires:
 
 - `OPENAI_API_KEY` for the explicitly verified organization/project;
 - `DIRECT_OPENAI_PROFILE`: the compact exact stage table described in
   [profile configuration](DIRECT_OPENAI_PROFILE.md);
-- `DIRECT_OPENAI_BUDGET`: an operator-approved grant-window allocation below.
+- `DIRECT_OPENAI_BUDGET`: an operator-approved finite grant-window allocation below.
 
 The shipped [budget example](../config/direct_openai_budget.example.json) is
 intentionally invalid for dispatch: authorization is `unapproved` and unknown
@@ -80,7 +119,7 @@ PFR/Final cannot convert them into a repair or additional paid stage.
 
 ## Atomic reservation and exact-once settlement
 
-Before each actual HTTP attempt, one DynamoDB transaction writes:
+For a finite grant policy, before each actual HTTP attempt one DynamoDB transaction writes:
 
 1. the existing owner/head/run-bound per-call dispatch fence;
 2. a small aggregate counter for that exact allocation window in the same table.
@@ -215,7 +254,7 @@ not proof of the account invoice, grant debit, future price or real task quality
 Unknown future model IDs, including any future Luna version, remain rejected
 until explicitly configured, priced, qualified and authorized in a later change.
 
-Production credentials plus profile and grant JSON must fit the Lambda 4KB
+Production credentials plus profile and authorization JSON must fit the Lambda 4KB
 environment limit. Public examples can be size-checked offline; the actual secret-
 bearing environment must be checked privately before any separately approved
 deployment. No real environment values or deployment claims belong here.

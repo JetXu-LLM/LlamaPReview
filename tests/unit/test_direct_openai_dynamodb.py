@@ -13,6 +13,12 @@ import unittest
 
 class DirectOpenAIDynamoDBTests(unittest.TestCase):
     def test_real_sdk_atomic_admission_and_decimal_settlement(self):
+        self.assert_sdk_contract(continuous=False)
+
+    def test_continuous_real_sdk_fence_and_decimal_settlement(self):
+        self.assert_sdk_contract(continuous=True)
+
+    def assert_sdk_contract(self, *, continuous):
         code = r"""
 import json, os, socket, time
 from pathlib import Path
@@ -25,6 +31,7 @@ from lambdas.LlamaPReviewPipeline.direct_openai_budget import PRICING_VERSION, r
 from lambdas.LlamaPReviewPipeline.provider_model_routing import parse_direct_openai_profile
 from lambdas.LlamaPReviewPipeline.deepseek_client import DeepSeekClient
 
+continuous = os.environ["TEST_CONTINUOUS"] == "1"
 profile_raw = Path("config/direct_openai_profile.example.json").read_text()
 profile = parse_direct_openai_profile(profile_raw)
 now = int(time.time())
@@ -33,7 +40,11 @@ policy = {"cycle_id": "synthetic", "valid_from": now-10, "expires_at": now+86400
  "organization_id": "org-synthetic", "project_id": "proj-synthetic", "profile_sha256": profile.sha256,
  "pricing_version": PRICING_VERSION, "pricing_verified_until": now+86400, "authorization": "approved"}
 amount = reservation(policy, model="gpt-6-luna", max_output_tokens=100)["reserved_nanousd"]
-policy["allocation_nanousd"] = amount
+if continuous:
+    policy = {key: policy[key] for key in ("authorization", "organization_id", "project_id", "profile_sha256", "pricing_version")}
+    policy["mode"] = "continuous"
+else:
+    policy["allocation_nanousd"] = amount
 os.environ.update(DIRECT_OPENAI_PROFILE=profile_raw, DIRECT_OPENAI_BUDGET=json.dumps(policy))
 
 with patch.object(socket.socket, "connect", side_effect=AssertionError("network forbidden")), mock_aws():
@@ -51,11 +62,16 @@ with patch.object(socket.socket, "connect", side_effect=AssertionError("network 
     for n in (1,2):
         table.put_item(Item={"repo":"owner/public","pr_number":n,"status":"CONTEXT_RUNNING","run_id":"r","head_sha":"b"*40,"context_attempt":1,"context_claim":claim,"ttl_epoch":now+86400})
     assert persistence.begin_provider_call_dispatch("owner/public",1,expected_status="CONTEXT_RUNNING",record=fence,phase_claim=claim,table=table)
-    assert not persistence.begin_provider_call_dispatch("owner/public",2,expected_status="CONTEXT_RUNNING",record=fence,phase_claim=claim,table=table)
-    assert persistence.provider_call_records(persistence.get_item("owner/public",2,table=table)) == []
-    counter_key={"repo":fence["budget"]["counter_repo"],"pr_number":0}
-    counter=table.get_item(Key=counter_key,ConsistentRead=True)["Item"]
-    assert counter["charged_nanousd"] == amount and counter["reserved_nanousd"] == amount
+    admitted = persistence.begin_provider_call_dispatch("owner/public",2,expected_status="CONTEXT_RUNNING",record=fence,phase_claim=claim,table=table)
+    assert admitted is continuous
+    if continuous:
+        assert "counter_repo" not in fence["budget"]
+        assert table.scan(Select="COUNT")["Count"] == 2
+    else:
+        assert persistence.provider_call_records(persistence.get_item("owner/public",2,table=table)) == []
+        counter_key={"repo":fence["budget"]["counter_repo"],"pr_number":0}
+        counter=table.get_item(Key=counter_key,ConsistentRead=True)["Item"]
+        assert counter["charged_nanousd"] == amount and counter["reserved_nanousd"] == amount
     # Real DynamoDB reads use Decimal. Original fence tariff/coordinates are
     # authoritative even if the terminal callback injects another budget.
     terminal={**fence,"status":"completed","usage_state":"reported","response_model":"gpt-6-luna","service_tier":"default",
@@ -68,9 +84,13 @@ with patch.object(socket.socket, "connect", side_effect=AssertionError("network 
     durable=persistence.provider_call_records(persistence.get_item("owner/public",1,table=table))[0]
     assert durable["budget"]["actual_nanousd"] == 20000
     assert persistence.record_provider_call("owner/public",1,expected_status="ignored",record=durable,table=table)
-    counter=table.get_item(Key=counter_key,ConsistentRead=True)["Item"]
-    assert counter["charged_nanousd"] == counter["settled_nanousd"] == 20000
-    assert counter["reserved_nanousd"] == 0 and "ttl_epoch" not in counter
+    if continuous:
+        assert durable["budget"]["mode"] == "continuous"
+        assert table.scan(Select="COUNT")["Count"] == 2
+    else:
+        counter=table.get_item(Key=counter_key,ConsistentRead=True)["Item"]
+        assert counter["charged_nanousd"] == counter["settled_nanousd"] == 20000
+        assert counter["reserved_nanousd"] == 0 and "ttl_epoch" not in counter
     assert "ttl_epoch" in persistence.get_item("owner/public",1,table=table)
 print("offline real-SDK transaction contract passed")
 """
@@ -81,6 +101,7 @@ print("offline real-SDK transaction contract passed")
             "AWS_ACCESS_KEY_ID": "synthetic",
             "AWS_SECRET_ACCESS_KEY": "synthetic",
             "AWS_EC2_METADATA_DISABLED": "true",
+            "TEST_CONTINUOUS": "1" if continuous else "0",
         }
         result = subprocess.run(
             [sys.executable, "-c", code],

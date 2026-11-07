@@ -1,0 +1,8 @@
+{
+  "authorization": "unapproved",
+  "mode": "continuous",
+  "organization_id": null,
+  "project_id": null,
+  "profile_sha256": null,
+  "pricing_version": "openai-standard-text-2026-10-29"
+}
