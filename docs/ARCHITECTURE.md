@@ -51,11 +51,11 @@ The hosted service allocates a finite personally funded budget, so admission
 charges a per-repository daily bound and a global circuit breaker before Route,
 which is the first paid call. Deterministic skips are charged nothing, so a
 repository whose traffic is mostly skipped keeps its capacity for the reviews
-that would actually run. One UTC-day sentinel in the existing table owns both
+that would actually run. One China Standard Time (UTC+08:00) daily sentinel in the existing table owns both
 counters and the admitted run identities. A single conditional update checks
 both limits, increments both counters, and records the exact repository, pull
 request, run, head, and successor-derived admission identity. Retrying that run
-within the same UTC day reuses its daily admission; a retry after rollover is
+within the same China Standard Time day reuses its daily admission; a retry after rollover is
 charged against the new day's quota. Code-owned repository and global maxima of
 512 reject unsafe numeric configurations, while the global bound keeps the
 single item's admission IDs, repository counters, and notice owners below the

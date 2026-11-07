@@ -168,7 +168,7 @@ No `Review stopped` comment is sent. A useful, already publishable Final for
 the exact merged head retains its existing post-merge-follow-up policy.
 
 A repository that has used its free daily capacity receives one skip notice for
-the first affected pull request in that UTC day. Later pull requests in the same
+the first affected pull request in that China Standard Time day. Later pull requests in the same
 day stop silently rather than repeating it, and a head successor never publishes
 a capacity notice because that pull request already had its review.
 

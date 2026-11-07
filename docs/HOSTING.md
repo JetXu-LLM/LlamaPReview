@@ -8,7 +8,7 @@ The official GitHub App reviews supported pull request events from public reposi
 - Product site: [jetxu-llm.github.io/LlamaPReview-site](https://jetxu-llm.github.io/LlamaPReview-site/)
 - Source and releases: [JetXu-LLM/LlamaPReview](https://github.com/JetXu-LLM/LlamaPReview)
 
-The official hosted service uses the OpenAI API directly. It admits up to 3 review attempts per repository per UTC day, subject to shared daily capacity and available model budget; an admitted attempt does not guarantee a delivered review. Hosted limits and provider selection are deployment settings, not the source defaults.
+The official hosted service uses the OpenAI API directly. It admits up to 3 review attempts per repository per calendar day in China Standard Time (UTC+08:00), subject to shared daily capacity and available model budget; an admitted attempt does not guarantee a delivered review. Hosted limits and provider selection are deployment settings, not the source defaults.
 
 Private-repository events are acknowledged and discarded at the signed Webhook boundary. They do not enter the review Pipeline. See [privacy and retention](PRIVACY.md).
 

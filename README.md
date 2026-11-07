@@ -39,7 +39,7 @@ The app does not review every push. Reviews use GitHub's `COMMENT` state, not `A
 
 ## Hosted capacity and limits
 
-Free hosted capacity: up to **3 admitted review attempts per repository per UTC day**, subject to **shared daily capacity and available model budget**. These are admission limits, not a guaranteed allocation or a promise of a completed review. Over-capacity requests are skipped, not queued.
+Free hosted capacity: up to **3 admitted review attempts per repository per calendar day in China Standard Time (UTC+08:00)**, subject to **shared daily capacity and available model budget**. These are admission limits, not a guaranteed allocation or a promise of a completed review. Over-capacity requests are skipped, not queued.
 
 [Capacity policy](docs/CONFIGURATION.md#free-review-capacity) · [Failure and skip messages](docs/REVIEW_OUTPUT.md#failure-and-skip-messages).
 
