@@ -18,6 +18,7 @@ CAPACITY_SENTINEL_PREFIX = "!llamapreview-capacity:"
 DEFAULT_REPO_DAILY = 3
 DEFAULT_GLOBAL_DAILY = 100
 MAX_GLOBAL_DAILY = 512
+CAPACITY_TIMEZONE = datetime.timezone(datetime.timedelta(hours=8), "Asia/Shanghai")
 
 BLOCK_REPO_DAILY = "repo_daily_capacity"
 BLOCK_GLOBAL_DAILY = "global_daily_capacity"
@@ -140,15 +141,15 @@ def successor_enabled() -> bool:
 
 
 def _window_for(now: datetime.datetime) -> str:
-    return now.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d")
+    return now.astimezone(CAPACITY_TIMEZONE).strftime("%Y-%m-%d")
 
 
 def _next_window_start(now: datetime.datetime) -> str:
-    utc = now.astimezone(datetime.timezone.utc)
-    tomorrow = (utc + datetime.timedelta(days=1)).date()
+    local = now.astimezone(CAPACITY_TIMEZONE)
+    tomorrow = (local + datetime.timedelta(days=1)).date()
     return datetime.datetime.combine(
-        tomorrow, datetime.time.min, tzinfo=datetime.timezone.utc
-    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        tomorrow, datetime.time.min, tzinfo=CAPACITY_TIMEZONE
+    ).astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def capacity_admission_id(
@@ -401,7 +402,7 @@ def capacity_notice_reason(decision: CapacityDecision) -> str:
 
     return (
         f"This repository has used its free review capacity for today "
-        f"({decision.limit} reviews per UTC day). Capacity resets at "
+        f"({decision.limit} reviews per calendar day in China Standard Time, UTC+08:00). Capacity resets at "
         f"{decision.resets_at}.\n\n"
         "LlamaPReview is free for public repositories and funded personally, so a "
         "daily bound keeps one high-volume repository from consuming the shared "

@@ -100,7 +100,7 @@ callers retain only the socket timeout and phase checks.
 
 ## Free review capacity
 
-The official hosted service admits up to 3 review attempts per repository per UTC day, subject to shared daily capacity and available model budget. Its effective global limit can differ from the source default below. These limits count admitted attempts, not completed reviews or guaranteed availability.
+The official hosted service admits up to 3 review attempts per repository per calendar day in China Standard Time (UTC+08:00), subject to shared daily capacity and available model budget. Its effective global limit can differ from the source default below. These limits count admitted attempts, not completed reviews or guaranteed availability.
 
 The hosted service is free for public repositories and funded personally, so a
 daily bound keeps one high-velocity repository from consuming the shared budget.
@@ -114,8 +114,8 @@ already nearly consumed:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `repo_daily` | `3` | Admitted paid runs per repository per UTC day. It must be `0`–`512`; `0` removes only the repository bound while the global bound remains active. |
-| `global_daily` | `100` | Circuit breaker across all repositories per UTC day. It must be `1`–`512` for an enabled policy. |
+| `repo_daily` | `3` | Admitted paid runs per repository per calendar day in China Standard Time (UTC+08:00). It must be `0`–`512`; `0` removes only the repository bound while the global bound remains active. |
+| `global_daily` | `100` | Circuit breaker across all repositories per calendar day in China Standard Time (UTC+08:00). It must be `1`–`512` for an enabled policy. |
 | `successor` | `on` | `off` disables one-time head succession for this public runtime configuration. Accepted on-values are `on`, `true`, `1`, and `yes`; accepted off-values are `off`, `false`, `0`, and `no`. |
 
 Successor control is independent from quota enablement:
@@ -156,13 +156,15 @@ Retained terminal predecessor-call ledgers remain on that item. A publication
 intent or unresolved provider dispatch continues through its existing
 fail-closed recovery path instead of being discarded by the operator switch.
 
-Each UTC day uses one reserved sentinel in the existing table at
+Both daily bounds use China Standard Time (UTC+08:00), from local 00:00 to the
+next local 00:00. Reset timestamps remain explicit UTC timestamps for clients.
+Each China Standard Time day uses one reserved sentinel in the existing table at
 `pr_number = -1`, so it cannot collide with a pull request or with the repository
 fact sheet at `pr_number = 0`. One atomic conditional update records the exact
 run admission and charges both active counters. A retry of the same repository,
 pull request, run ID, head, and successor disposition reuses that day's
-admission rather than consuming capacity again within the same UTC day. A retry
-after the UTC boundary is admitted against the new day's quota. Capacity sentinel stream records are
+admission rather than consuming capacity again within the same China Standard Time day. A retry
+after the China midnight boundary is admitted against the new day's quota. Capacity sentinel stream records are
 filtered before Lambda invocation and also rejected by the handler boundary.
 
 ## Tracing

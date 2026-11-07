@@ -6,7 +6,7 @@ from tests.unit.fakes import FakeTable
 
 
 WINDOW_START = datetime.datetime(2026, 8, 20, 9, 0, tzinfo=datetime.timezone.utc)
-NEXT_WINDOW = datetime.datetime(2026, 8, 21, 0, 30, tzinfo=datetime.timezone.utc)
+NEXT_WINDOW = datetime.datetime(2026, 8, 20, 16, 0, tzinfo=datetime.timezone.utc)
 HEAD = "a" * 40
 
 
@@ -105,6 +105,20 @@ class CapacityAdmissionIdentityTests(unittest.TestCase):
         self.assertNotIn(base, variants)
 
 
+class CapacityWindowTests(unittest.TestCase):
+    def test_china_midnight_not_utc_midnight_owns_the_window_and_reset(self):
+        for instant, window, reset in (
+            ("2026-11-07T15:59:59+00:00", "2026-11-07", "2026-11-07T16:00:00Z"),
+            ("2026-11-07T16:00:00+00:00", "2026-11-08", "2026-11-08T16:00:00Z"),
+            ("2026-11-08T00:00:00+00:00", "2026-11-08", "2026-11-08T16:00:00Z"),
+            ("2026-12-31T16:00:00+00:00", "2027-01-01", "2027-01-01T16:00:00Z"),
+        ):
+            with self.subTest(instant=instant):
+                now = datetime.datetime.fromisoformat(instant)
+                self.assertEqual(pipeline_capacity._window_for(now), window)
+                self.assertEqual(pipeline_capacity._next_window_start(now), reset)
+
+
 class CapacityConsumptionTests(unittest.TestCase):
     def setUp(self):
         self.table = FakeTable("pipeline")
@@ -132,7 +146,7 @@ class CapacityConsumptionTests(unittest.TestCase):
         )
 
     def sentinel(self, now=WINDOW_START):
-        window = now.strftime("%Y-%m-%d")
+        window = pipeline_capacity._window_for(now)
         key = tuple(sorted(pipeline_capacity._sentinel_key(window).items()))
         return self.table.items[key]
 
@@ -194,7 +208,7 @@ class CapacityConsumptionTests(unittest.TestCase):
             f"{pipeline_capacity.CAPACITY_SENTINEL_PREFIX}2026-08-20",
         )
 
-    def test_a_new_utc_day_uses_a_new_sentinel(self):
+    def test_a_new_shanghai_day_uses_a_new_sentinel(self):
         for index in (1, 2, 3):
             self.consume(pr_number=index, run_id=f"run-{index}")
 
@@ -208,7 +222,25 @@ class CapacityConsumptionTests(unittest.TestCase):
         self.assertEqual(decision.used, 1)
         self.assertEqual(len(self.table.items), 2)
 
-    def test_same_exact_run_is_charged_once_in_each_utc_day(self):
+    def test_repo_and_global_reset_together_at_china_midnight_and_keep_retry_identity(self):
+        limits = policy(repo_daily=1, global_daily=1)
+        before = datetime.datetime(2026, 11, 7, 15, 59, 59, tzinfo=datetime.timezone.utc)
+        midnight = before + datetime.timedelta(seconds=1)
+        utc_midnight = datetime.datetime(2026, 11, 8, 0, 0, tzinfo=datetime.timezone.utc)
+        self.assertTrue(self.consume(run_id="old-day", now=before, active_policy=limits).allowed)
+        first = self.consume(run_id="new-day", now=midnight, active_policy=limits)
+        retry = self.consume(run_id="new-day", now=utc_midnight, active_policy=limits)
+        self.assertTrue(first.allowed)
+        self.assertTrue(retry.allowed)
+        self.assertEqual(first.admission_id, retry.admission_id)
+        self.assertEqual(self.sentinel(midnight)["capacity_global_count"], 1)
+        repo_block = self.consume(run_id="another", now=utc_midnight, active_policy=limits)
+        global_block = self.consume("other/repo", run_id="other", now=utc_midnight, active_policy=limits)
+        self.assertEqual(repo_block.block_reason, pipeline_capacity.BLOCK_REPO_DAILY)
+        self.assertEqual(global_block.block_reason, pipeline_capacity.BLOCK_GLOBAL_DAILY)
+        self.assertEqual(len(self.table.items), 2)
+
+    def test_same_exact_run_is_charged_once_in_each_shanghai_day(self):
         first_day = self.consume()
         second_day = self.consume(now=NEXT_WINDOW)
 
@@ -334,14 +366,14 @@ class CapacityNoticeTests(unittest.TestCase):
             used=3,
             limit=3,
             window="2026-08-20",
-            resets_at="2026-08-21T00:00:00Z",
+            resets_at="2026-08-20T16:00:00Z",
             admission_id="a" * 64,
         )
 
         reason = pipeline_capacity.capacity_notice_reason(decision)
 
-        self.assertIn("3 reviews per UTC day", reason)
-        self.assertIn("2026-08-21T00:00:00Z", reason)
+        self.assertIn("3 reviews per calendar day in China Standard Time, UTC+08:00", reason)
+        self.assertIn("2026-08-20T16:00:00Z", reason)
         self.assertIn("Self-hosting", reason)
         self.assertIn("Nothing about this pull request was judged", reason)
 
