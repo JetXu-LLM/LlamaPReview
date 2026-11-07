@@ -1,7 +1,8 @@
-"""Grant-window reservation arithmetic; persistence owns the atomic effect.
+"""Explicit provider authority and per-attempt cost accounting.
 
-Amounts are integer nano-USD. There is no wall-calendar reset, balance poll,
-spend-limit assumption, fallback, counter TTL, or per-month call-ID map.
+Continuous production uses the existing call ledger, without a local grant
+expiry or spending cap. Finite grant allocations retain atomic reservations.
+Amounts are integer nano-USD; neither policy changes provider billing settings.
 """
 
 from __future__ import annotations
@@ -46,6 +47,17 @@ POLICY_FIELDS = frozenset(
     }
 )
 
+CONTINUOUS_POLICY_FIELDS = frozenset(
+    {
+        "authorization",
+        "mode",
+        "organization_id",
+        "project_id",
+        "profile_sha256",
+        "pricing_version",
+    }
+)
+
 
 class BudgetUnavailable(ValueError):
     """Missing, exhausted, expired or unverified authority: zero new dispatch."""
@@ -83,19 +95,14 @@ def load_policy(raw=None, *, now=None, request_seconds=0, profile_sha256=None) -
         policy = json.loads(raw, object_pairs_hook=_unique) if isinstance(raw, str) else dict(raw)
     except (TypeError, ValueError) as exc:
         raise BudgetUnavailable("Explicit verified DIRECT_OPENAI_BUDGET is required") from exc
-    if set(policy) != POLICY_FIELDS:
+    continuous = policy.get("mode") == "continuous"
+    expected_fields = CONTINUOUS_POLICY_FIELDS if continuous else POLICY_FIELDS
+    if set(policy) != expected_fields:
         raise BudgetUnavailable("Budget policy fields are missing or unsupported")
     if policy["authorization"] != "approved" or policy["pricing_version"] != PRICING_VERSION:
         raise BudgetUnavailable("Budget authorization or pricing snapshot is unqualified")
-    for key in (
-        "valid_from",
-        "expires_at",
-        "allocation_nanousd",
-        "verified_available_nanousd",
-        "pricing_verified_until",
-    ):
-        _int(policy[key], key, zero=False)
-    for key in ("cycle_id", "organization_id", "project_id"):
+    for key in (("organization_id", "project_id") if continuous else
+                ("cycle_id", "organization_id", "project_id")):
         if not isinstance(policy[key], str) or not re.fullmatch(
             r"[A-Za-z0-9_-]{1,96}", policy[key]
         ):
@@ -106,6 +113,19 @@ def load_policy(raw=None, *, now=None, request_seconds=0, profile_sha256=None) -
         raise BudgetUnavailable("An exact qualified profile digest is required")
     if profile_sha256 is not None and policy["profile_sha256"] != profile_sha256:
         raise BudgetUnavailable("Selected profile has not been qualified for this allocation")
+    if continuous:
+        # Production authorization does not expire because a local pricing
+        # snapshot or trial grant date passed. Account billing remains the
+        # provider's responsibility, not an invented wall-calendar renewal.
+        return policy
+    for key in (
+        "valid_from",
+        "expires_at",
+        "allocation_nanousd",
+        "verified_available_nanousd",
+        "pricing_verified_until",
+    ):
+        _int(policy[key], key, zero=False)
     if (
         not 0
         < policy["allocation_nanousd"]
@@ -139,17 +159,10 @@ def reservation(
     # token-count call or an unproven tokenizer-overhead assumption.
     input_price = price["write_30m"] if cache_mode in CACHE_WRITE_MODES else price["input"]
     amount = MAX_INPUT_TOKENS * input_price * 2 + max_output_tokens * price["output"] * 3 // 2
-    key = "_OPENAI_GRANT_" + digest(
-        {key: policy[key] for key in ("cycle_id", "organization_id", "project_id")}
-    )
-    return {
+    result = {
         "schema_version": 1,
         "state": "reserved",
-        "counter_repo": key,
         "policy_sha256": digest(dict(policy)),
-        "cycle_id": policy["cycle_id"],
-        "allocation_nanousd": policy["allocation_nanousd"],
-        "expires_at": policy["expires_at"],
         "pricing_version": policy["pricing_version"],
         "price": dict(price),
         "max_input_tokens": MAX_INPUT_TOKENS,
@@ -158,6 +171,20 @@ def reservation(
         "cache_mode": cache_mode,
         **({"cache_ttl": "30m"} if cache_mode in CACHE_WRITE_MODES else {}),
     }
+    if policy.get("mode") == "continuous":
+        # The bound is retained for honest unknown-cost reporting, not deducted
+        # from an application allowance. No second aggregate ledger is needed.
+        result["mode"] = "continuous"
+    else:
+        result.update(
+            counter_repo="_OPENAI_GRANT_" + digest(
+                {key: policy[key] for key in ("cycle_id", "organization_id", "project_id")}
+            ),
+            cycle_id=policy["cycle_id"],
+            allocation_nanousd=policy["allocation_nanousd"],
+            expires_at=policy["expires_at"],
+        )
+    return result
 
 
 def _integral(value):

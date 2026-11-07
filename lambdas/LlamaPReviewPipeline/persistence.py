@@ -1003,8 +1003,8 @@ def _provider_transact_write(table, updates: list[Dict[str, Any]]) -> None:
 
 
 def _write_provider_record(table, update: Dict[str, Any], *, budget=None, cost=None, settle=False) -> None:
-    """Extend the existing per-call fence with one small cycle amount counter."""
-    if budget is None:
+    """Persist the call; finite allocations also update their atomic counter."""
+    if budget is None or budget.get("mode") == "continuous":
         table.update_item(**update)
         return
     reserve = int(budget["reserved_nanousd"])
@@ -1092,7 +1092,7 @@ def begin_provider_call_dispatch(
         policy = load_policy(profile_sha256=record.get("profile_sha256"))
         supplied = record.get("budget")
         if not isinstance(supplied, Mapping):
-            raise ArtifactIntegrityError("Direct OpenAI dispatch requires a grant reservation")
+            raise ArtifactIntegrityError("Direct OpenAI dispatch requires per-attempt cost accounting")
         from .direct_openai import CACHE_OFF, CACHE_RECONCILE, request_cache_receipt
         from .provider_model_routing import parse_direct_openai_profile
         cache_mode = CACHE_OFF

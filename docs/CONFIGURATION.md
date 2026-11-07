@@ -54,7 +54,7 @@ configured. The following controls apply only to that rollback profile:
 
 `MODEL_PROVIDER=direct_openai` is a separate explicit opt-in, with
 `OPENAI_API_KEY`, `DIRECT_OPENAI_PROFILE` and `DIRECT_OPENAI_BUDGET` required.
-See the [bounded direct adapter and grant-window contract](DIRECT_OPENAI_BUDGET.md)
+See the [direct adapter, continuous production and finite-grant policies](DIRECT_OPENAI_BUDGET.md)
 and [stage profile](DIRECT_OPENAI_PROFILE.md). Examples are unqualified and do
 not activate a provider, approve API spending, or establish current grants.
 The generic Terraform input is the sensitive `direct_openai` object with

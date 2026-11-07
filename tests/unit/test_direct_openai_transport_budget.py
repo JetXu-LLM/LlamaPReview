@@ -248,6 +248,120 @@ class DirectOpenAITransportBudgetTests(unittest.TestCase):
             if str(value.get("repo", "")).startswith("_OPENAI_GRANT_")
         )
 
+    def enable_continuous(self):
+        self.policy = {
+            key: self.policy[key]
+            for key in ("authorization", "organization_id", "project_id",
+                        "profile_sha256", "pricing_version")
+        }
+        self.policy["mode"] = "continuous"
+        os.environ["DIRECT_OPENAI_BUDGET"] = json.dumps(self.policy)
+
+    def test_continuous_policy_has_no_trial_or_month_expiry(self):
+        self.enable_continuous()
+        for now in (1, 1_793_836_800, 1_893_456_000):
+            self.assertEqual(
+                load_policy(self.policy, now=now, request_seconds=540, profile_sha256=PROFILE),
+                self.policy,
+            )
+        for change in ({"authorization": "unapproved"}, {"profile_sha256": "c" * 64},
+                       {"pricing_version": "unknown"}, {"mode": "unknown"},
+                       {"expires_at": 1}, {"allocation_nanousd": 1}):
+            with self.subTest(change=change), self.assertRaises(BudgetUnavailable):
+                load_policy({**self.policy, **change}, profile_sha256=PROFILE)
+
+    def test_continuous_calls_keep_costs_without_touching_old_grant(self):
+        self.enable_continuous()
+        old = {"repo": "_OPENAI_GRANT_old", "pr_number": 0,
+               "charged_nanousd": 150_000_000_000, "reserved_nanousd": 100}
+        self.table.put_item(Item=deepcopy(old))
+        client = self.client()
+        with patch.object(transport.requests, "post", return_value=Response()) as post:
+            self.chat(client)
+            self.chat(client)
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(len(self.records()), 2)
+        for record in self.records():
+            self.assertEqual(record["budget"]["mode"], "continuous")
+            self.assertEqual(record["budget"]["state"], "settled")
+            self.assertEqual(record["budget"]["actual_nanousd"], 20_000)
+            self.assertNotIn("counter_repo", record["budget"])
+        self.assertEqual(self.counter(), old)
+        self.assertEqual(self.atomic.calls, [])
+
+    def test_continuous_unknown_dispatch_cannot_be_repeated(self):
+        self.enable_continuous()
+        with (patch.object(transport.requests, "post", side_effect=KeyboardInterrupt()),
+              self.assertRaises(KeyboardInterrupt)):
+            self.chat()
+        original = deepcopy(self.records()[0])
+        with (patch.object(transport.requests, "post") as post,
+              self.assertRaises(transport.ProviderDispatchOutcomeUnknown)):
+            self.chat()
+        post.assert_not_called()
+        self.assertEqual(self.records()[0], original)
+        self.assertGreater(original["budget"]["reserved_nanousd"], 0)
+
+    def test_continuous_late_result_uses_original_price_and_authority(self):
+        self.enable_continuous()
+        def post(*args, **kwargs):
+            item = persistence.get_item("owner/public", 1, table=self.table)
+            item["status"] = "SUPERSEDED"
+            item["context_claim"] = {**self.claim, "owner_id": "new-worker"}
+            os.environ["DIRECT_OPENAI_BUDGET"] = "invalid-after-dispatch"
+            return Response()
+        with patch.object(transport.requests, "post", side_effect=post):
+            self.chat()
+        record = self.records()[0]
+        self.assertEqual(record["budget"]["actual_nanousd"], 20_000)
+        self.assertEqual(record["budget"]["mode"], "continuous")
+        self.assertEqual(self.atomic.calls, [])
+        self.assertEqual(persistence.get_item("owner/public", 1, table=self.table)["status"],
+                         "SUPERSEDED")
+
+    def test_inflight_grant_settles_original_counter_after_continuous_cutover(self):
+        client = self.client()
+        def cutover(*args, **kwargs):
+            self.enable_continuous()
+            return Response()
+        with patch.object(transport.requests, "post", side_effect=cutover):
+            self.chat(client)
+        before = deepcopy(self.counter())
+        self.assertEqual(before["settled_nanousd"], 20_000)
+        self.assertEqual(before["reserved_nanousd"], 0)
+        self.assertNotIn("mode", self.records()[0]["budget"])
+        with patch.object(transport.requests, "post", return_value=Response()):
+            self.chat(client)
+        self.assertEqual(self.counter(), before)
+        self.assertEqual(self.records()[1]["budget"]["mode"], "continuous")
+
+    def test_continuous_fence_failure_still_prevents_http(self):
+        self.enable_continuous()
+        with (patch.object(self.table, "update_item", side_effect=RuntimeError("store down")),
+              patch.object(transport.requests, "post") as post,
+              self.assertRaises(transport.ProviderCallFenceError)):
+            self.chat()
+        post.assert_not_called()
+        self.assertEqual(self.records(), [])
+
+    def test_continuous_provider_credit_rejection_stops_without_retry(self):
+        self.enable_continuous()
+        body = {"error": {"code": "insufficient_quota", "type": "insufficient_quota"}}
+        with (patch.object(transport.requests, "post", return_value=Response(429, body)) as post,
+              patch.object(transport.time, "sleep") as sleep,
+              self.assertRaises(transport.ProviderBillingError)):
+            self.chat(max_retries=3)
+        post.assert_called_once()
+        sleep.assert_not_called()
+        self.assertEqual(self.records()[0]["budget"]["state"], "reserved")
+        self.assertNotIn("actual_nanousd", self.records()[0]["budget"])
+
+    def test_continuous_real_adapter_preserves_rendered_review(self):
+        self.enable_continuous()
+        self.test_real_adapter_deep_final_render_and_serialized_github_surface()
+        self.assertEqual(self.atomic.calls, [])
+        self.assertTrue(all(record["budget"]["state"] == "settled" for record in self.records()))
+
     def test_real_adapter_deep_final_render_and_serialized_github_surface(self):
         from lambdas.LlamaPReviewPipeline import config
         from lambdas.LlamaPReviewPipeline.review.generate import generate_review
@@ -300,7 +414,8 @@ class DirectOpenAITransportBudgetTests(unittest.TestCase):
         self.assertTrue(result["review_publishable"])
         self.assertEqual(post.call_count, 2)
         self.assertEqual([record["stage"] for record in self.records()], ["deep", "final"])
-        self.assertEqual(self.counter()["reserved_nanousd"], 0)
+        if self.policy.get("mode") != "continuous":
+            self.assertEqual(self.counter()["reserved_nanousd"], 0)
         surface = prepare_github_review_request(
             result["pr_review_comment"], [], head_sha=self.metadata["head_sha"]
         ).request_payload()

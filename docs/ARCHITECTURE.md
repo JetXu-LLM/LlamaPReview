@@ -216,6 +216,13 @@ keep the existing publication transaction.
 
 Each provider HTTP attempt has a durable dispatch fence and a stable operation identity. The ledger retains logical routing identity, billed transport identity, status, token classes, and usage. A successful review cannot make a discarded or retried provider call disappear from accounting.
 
+Direct OpenAI continuous production binds the approved account and exact model
+profile without a trial-expiry timer or application dollar cutoff. It uses this
+same per-call ledger for token-priced cost and unknown-outcome reporting. Finite
+grant policies additionally reserve and settle against their original aggregate
+counter. Switching to continuous production never resets or erases old grant
+obligations. Provider billing controls remain separate from application telemetry.
+
 Creating a dispatch fence requires the active phase owner. Settling an existing
 fence compares the complete original call identity instead: a response arriving
 after cancellation or lease takeover still completes that call's ledger entry.
