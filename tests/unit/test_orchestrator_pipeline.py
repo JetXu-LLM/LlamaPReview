@@ -1429,7 +1429,17 @@ class TestOrchestratorPipeline(unittest.TestCase):
             "inventory unavailable before Route",
             stage="context.inventory",
         )
+        original_consume = pipeline_capacity.consume
+
+        def consume_at_fixed_time(*args, **kwargs):
+            kwargs["now"] = datetime(2026, 11, 7, 16, 0, 1, tzinfo=timezone.utc)
+            return original_consume(*args, **kwargs)
+
         with patch.object(
+            pipeline_capacity,
+            "consume",
+            side_effect=consume_at_fixed_time,
+        ), patch.object(
             orchestrator.config,
             "DRY_RUN",
             True,
@@ -1476,7 +1486,7 @@ class TestOrchestratorPipeline(unittest.TestCase):
 
         self.assertEqual(fetch_inventory.call_count, 3)
         route.assert_called_once()
-        window = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        window = "2026-11-08"  # 00:00:01 China time, still November 7 in UTC.
         sentinel = self.table.get_item(
             Key=pipeline_capacity._sentinel_key(window)
         )["Item"]
